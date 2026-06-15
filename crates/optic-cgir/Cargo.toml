@@ -1,0 +1,10 @@
+[package]
+name = "optic-cgir"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+optic-hir = { path = "../optic-hir" }
+optic-diagnostics = { path = "../optic-diagnostics" }
+optic-syntax = { path = "../optic-syntax" }
+optic-typeck = { path = "../optic-typeck" }

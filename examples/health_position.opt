@@ -1,0 +1,24 @@
+-- Product composition + map (the canonical fused case in the book)
+-- entities.query(HealthView *** PositionView).map(...)
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<1> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PositionView: GradedOptic<Entities, Vec2, CacheGrade<1> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+let combined = HealthView *** PositionView;
+
+fn main() {
+    -- The query that should fuse into one loop touching both columns
+    entities.query(combined).map(|(h, p)| (h - 1.0, (p.0 + 0.1, p.1)));
+}

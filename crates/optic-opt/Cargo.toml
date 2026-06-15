@@ -1,0 +1,8 @@
+[package]
+name = "optic-opt"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+optic-cgir = { path = "../optic-cgir" }
+optic-syntax = { path = "../optic-syntax" }

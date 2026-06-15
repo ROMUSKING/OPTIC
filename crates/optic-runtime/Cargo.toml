@@ -1,0 +1,10 @@
+[package]
+name = "optic-runtime"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Intentionally zero-deps. The runtime must be tiny and understandable (ch. 11).

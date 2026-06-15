@@ -1,0 +1,22 @@
+[package]
+name = "optic-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "opticc"
+path = "src/main.rs"
+
+[dependencies]
+optic-syntax = { path = "../optic-syntax" }
+optic-runtime = { path = "../optic-runtime" }
+optic-hir = { path = "../optic-hir" }
+optic-typeck = { path = "../optic-typeck" }
+optic-cgir = { path = "../optic-cgir" }
+optic-opt = { path = "../optic-opt" }
+optic-codegen-rust = { path = "../optic-codegen-rust" }
+optic-diagnostics = { path = "../optic-diagnostics" }
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

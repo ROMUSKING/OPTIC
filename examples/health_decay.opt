@@ -1,0 +1,19 @@
+-- Simple health decay (single optic + query + map)
+-- From the book examples (ch. 7, 11, etc.)
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<1> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+let decay = HealthView;
+
+fn main() {
+    -- usage example (the query form the compiler lowers)
+    entities.query(decay).map(|h| h - 10.0);
+}

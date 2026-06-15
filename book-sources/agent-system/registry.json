@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "canonicalInstructionHub": "AGENTS.md",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "primary coordinator",
+      "memory": "agent-system/memory/agents/orchestrator.md",
+      "claude": ".claude/agents/orchestrator.md",
+      "kilo": ".kilo/agents/orchestrator.md",
+      "writes": ["part-*/*.md", "appendices/*.md", "agent-system/**/*.md", "manifest.json", "assembled.md"],
+      "delegatesTo": ["research-librarian", "book-architect", "chapter-editor", "coherence-auditor", "tooling-compatibility", "release-assembler"]
+    },
+    {
+      "name": "research-librarian",
+      "role": "external research and source harvesting",
+      "memory": "agent-system/memory/agents/research-librarian.md",
+      "claude": ".claude/agents/research-librarian.md",
+      "kilo": ".kilo/agents/research-librarian.md",
+      "writes": ["agent-system/tasks/**/*.md", "appendices/appendix-g_*.md"],
+      "delegatesTo": []
+    },
+    {
+      "name": "book-architect",
+      "role": "chapter ordering, structure, cross-linking",
+      "memory": "agent-system/memory/agents/book-architect.md",
+      "claude": ".claude/agents/book-architect.md",
+      "kilo": ".kilo/agents/book-architect.md",
+      "writes": ["00_frontmatter.md", "part-*/*.md", "appendices/*.md", "manifest.json"],
+      "delegatesTo": ["chapter-editor", "coherence-auditor"]
+    },
+    {
+      "name": "chapter-editor",
+      "role": "local prose and section edits",
+      "memory": "agent-system/memory/agents/chapter-editor.md",
+      "claude": ".claude/agents/chapter-editor.md",
+      "kilo": ".kilo/agents/chapter-editor.md",
+      "writes": ["part-*/*.md", "appendices/*.md"],
+      "delegatesTo": ["coherence-auditor"]
+    },
+    {
+      "name": "coherence-auditor",
+      "role": "numbering, duplication, contradiction, reference audit",
+      "memory": "agent-system/memory/agents/coherence-auditor.md",
+      "claude": ".claude/agents/coherence-auditor.md",
+      "kilo": ".kilo/agents/coherence-auditor.md",
+      "writes": ["agent-system/tasks/**/*.md", "agent-system/memory/agents/coherence-auditor.md"],
+      "delegatesTo": []
+    },
+    {
+      "name": "tooling-compatibility",
+      "role": "tool-specific compatibility files and protocol drift control",
+      "memory": "agent-system/memory/agents/tooling-compatibility.md",
+      "claude": ".claude/agents/tooling-compatibility.md",
+      "kilo": ".kilo/agents/tooling-compatibility.md",
+      "writes": ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONTEXT.md", ".github/**/*.md", ".claude/**/*.md", ".kilo/**/*.md", "agent-system/**/*.md"],
+      "delegatesTo": ["release-assembler"]
+    },
+    {
+      "name": "release-assembler",
+      "role": "generated index refresh, validation, final assembly",
+      "memory": "agent-system/memory/agents/release-assembler.md",
+      "claude": ".claude/agents/release-assembler.md",
+      "kilo": ".kilo/agents/release-assembler.md",
+      "writes": ["agent-system/generated/*.md", "assembled.md"],
+      "delegatesTo": []
+    }
+  ]
+}

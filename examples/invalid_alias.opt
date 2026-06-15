@@ -1,0 +1,22 @@
+-- Must be rejected by the alias checker (M2 gate, ch. 9)
+-- overlapping put_writes with effective reads via put_reads hazard
+
+data App {
+    healths: SoA<f32>,
+}
+
+optic WriteHealth: GradedOptic<App, f32, LinearGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic AlsoWriteHealth: GradedOptic<App, f32, LinearGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v + 1.0 }
+}
+
+let bad = WriteHealth *** AlsoWriteHealth;
+
+fn main() {
+    app.query(bad).map(|(a, b)| a + b);  -- should produce alias conflict (put_writes overlap)
+}
