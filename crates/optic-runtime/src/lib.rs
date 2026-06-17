@@ -37,7 +37,10 @@ impl<'a, S> Cursor<'a, S> {
 #[inline]
 pub fn debug_bounds_check(len: usize, id: usize, field: &str) {
     if id >= len {
-        panic!("optic runtime bounds error on field {}: id={} >= len={}", field, id, len);
+        panic!(
+            "optic runtime bounds error on field {}: id={} >= len={}",
+            field, id, len
+        );
     }
 }
 

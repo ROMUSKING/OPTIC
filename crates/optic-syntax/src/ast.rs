@@ -40,7 +40,11 @@ pub enum TypeExpr {
     Soa(Box<TypeExpr>, Span),
     BitSet(Span),
     Tuple(Vec<TypeExpr>, Span),
-    Named { name: String, args: Vec<TypeExpr>, span: Span },
+    Named {
+        name: String,
+        args: Vec<TypeExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -77,9 +81,9 @@ pub struct GradeExpr {
 
 #[derive(Debug, Clone)]
 pub enum GradeDim {
-    Cache { n: Option<u32>, span: Span }, // None = _
+    Cache { n: Option<u32>, span: Span },        // None = _
     Ownership { r: Option<String>, span: Span }, // rational or _
-    Named { name: String, span: Span }, // LinearGrade etc or _
+    Named { name: String, span: Span },          // LinearGrade etc or _
     Infer(Span),
 }
 
@@ -127,14 +131,34 @@ pub enum Expr {
     QueryChain(QueryChain),
     Field(FieldExpr),
     Atom(AtomExpr),
-    Binary { left: Box<Expr>, op: BinOp, right: Box<Expr>, span: Span },
-    Assign { target: Box<Expr>, value: Box<Expr>, span: Span },
-    Block { stmts: Vec<Stmt>, result: Option<Box<Expr>>, span: Span },
+    Binary {
+        left: Box<Expr>,
+        op: BinOp,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Assign {
+        target: Box<Expr>,
+        value: Box<Expr>,
+        span: Span,
+    },
+    Block {
+        stmts: Vec<Stmt>,
+        result: Option<Box<Expr>>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Lt, Gt, Le, Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 #[derive(Debug, Clone)]
@@ -162,8 +186,16 @@ pub struct Closure {
 #[derive(Debug, Clone)]
 pub enum OpticExpr {
     Atom(OpticAtom),
-    Seq { left: Box<OpticExpr>, right: Box<OpticExpr>, span: Span },
-    Par { left: Box<OpticExpr>, right: Box<OpticExpr>, span: Span },
+    Seq {
+        left: Box<OpticExpr>,
+        right: Box<OpticExpr>,
+        span: Span,
+    },
+    Par {
+        left: Box<OpticExpr>,
+        right: Box<OpticExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -175,8 +207,16 @@ pub enum OpticAtom {
 #[derive(Debug, Clone)]
 pub enum FieldExpr {
     Base(AtomExpr, Span),
-    FieldAccess { base: Box<FieldExpr>, field: Ident, span: Span },
-    Index { base: Box<FieldExpr>, index: Box<Expr>, span: Span },
+    FieldAccess {
+        base: Box<FieldExpr>,
+        field: Ident,
+        span: Span,
+    },
+    Index {
+        base: Box<FieldExpr>,
+        index: Box<Expr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -190,4 +230,4 @@ pub enum AtomExpr {
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldAccess { /* used in lowering */ }
+pub struct FieldAccess {/* used in lowering */}

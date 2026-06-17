@@ -1,0 +1,16 @@
+-- Must be rejected by grade checker (M2 gate, ch.9)
+-- Annotated CacheGrade<1> but body reads+writes two distinct regions -> inferred cache > 1
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic BadCache: GradedOptic<Entities, f32, CacheGrade<1> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v; s.positions[s.id] = (0.0, 0.0) }
+}
+
+fn main() {
+    entities.query(BadCache).map(|h| h);
+}

@@ -6,18 +6,20 @@
 //! - Nestable block comments {- -}.
 //! - Deterministic recovery to sync points.
 //! - Spans on every significant node.
-//!
-//! The goal is boring, stable, auditable parsing so that every later artifact
-//! (HIR, summaries, CGIR, emitted Rust) is reproducible.
 
+pub mod ast;
+pub mod lexer;
+pub mod parser;
 pub mod span;
 pub mod token;
-pub mod lexer;
-pub mod ast;
-pub mod parser;
 
+pub use ast::*;
+pub use lexer::Lexer;
+pub use parser::{parse, ParseError};
 pub use span::{SourceId, Span, Spanned};
 pub use token::{Token, TokenKind};
-pub use lexer::Lexer;
-pub use ast::*;
-pub use parser::{parse, ParseError};
+
+/// Pretty-print AST for `dump-ast` (appendix B, M0 goldens).
+pub fn dump_ast(prog: &Program) -> String {
+    format!("{:#?}", prog)
+}

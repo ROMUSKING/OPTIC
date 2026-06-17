@@ -1,0 +1,7 @@
+HIR items: 6
+  other
+  Optic HealthView costate=Entities reads=["healths"] writes=["healths"]
+  Optic PositionView costate=Entities reads=["positions"] writes=["positions"]
+  Let combined reads=["healths", "positions"]
+  Query cursor=cur_0 kind=Discriminant(2)
+  other

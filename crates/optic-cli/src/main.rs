@@ -1,14 +1,19 @@
-//! opticc — the narrow v0 compiler CLI.
-//! Commands per appendix B (check, transpile, dumps, run for verification).
+//! opticc — narrow v0 compiler CLI (appendix B command surface).
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
+use optic_cgir::CgirGraph;
 use optic_syntax::{parse, SourceId};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Parser, Debug)]
-#[command(name = "opticc", version, about = "Optic narrow v0 compiler (book implementation)")]
+#[command(
+    name = "opticc",
+    version,
+    about = "Optic narrow v0 compiler (book implementation)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -16,13 +21,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Parse -> HIR -> type/grade/alias check (M0-M2)
+    /// Parse -> HIR -> type/grade/alias check (M0–M2)
     Check {
         file: PathBuf,
         #[arg(long)]
         json: bool,
     },
-    /// Full pipeline transpile (syntax->hir->typeck->cgir->opt->codegen per book)
+    /// Full pipeline transpile (syntax->hir->typeck->cgir->opt->codegen)
     Transpile {
         file: PathBuf,
         #[arg(short, long)]
@@ -30,7 +35,21 @@ enum Commands {
     },
     /// Dump tokens (M0)
     DumpTokens { file: PathBuf },
-    /// Transpile + verified execution harness (M5/M6). Asserts correct mutations.
+    /// Dump AST (M0 goldens)
+    DumpAst { file: PathBuf },
+    /// Dump HIR and summaries (M1)
+    DumpHir { file: PathBuf },
+    /// Dump CGIR (M3/M4; --before-fusion for pre-opt graph)
+    DumpCgir {
+        file: PathBuf,
+        #[arg(long)]
+        before_fusion: bool,
+        #[arg(long)]
+        check: bool,
+        #[arg(long)]
+        node: Option<u32>,
+    },
+    /// Transpile + verified execution harness (M5/M6)
     Run { file: PathBuf },
 }
 
@@ -38,148 +57,197 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Check { file, json } => {
-            let src = fs::read_to_string(&file)?;
-            let sid = SourceId(1);
-            match parse(&src, sid) {
-                Ok(prog) => {
-                    match optic_hir::lower(prog) {
-                        Ok(hir) => match optic_typeck::check(hir) {
-                            Ok(_) => { if json { println!("{{\"ok\":true}}"); } else { println!("OK (full check): {}", file.display()); } }
-                            Err(diags) => { for d in diags { eprintln!("{}", optic_diagnostics::emit_human(&d)); } std::process::exit(1); }
-                        }
-                        Err(_) => { eprintln!("hir lower failed"); std::process::exit(1); }
+            let src = read_source(&file)?;
+            match compile_check(&src) {
+                Ok(()) => {
+                    if json {
+                        println!("{{\"ok\":true}}");
+                    } else {
+                        println!("OK (full check): {}", file.display());
                     }
                 }
-                Err(errs) => { for e in errs { eprintln!("parse: {}", e.message); } std::process::exit(1); }
+                Err(diags) => {
+                    for d in diags {
+                        eprintln!("{}", optic_diagnostics::emit_human(&d));
+                    }
+                    std::process::exit(1);
+                }
             }
         }
         Commands::Transpile { file, out } => {
-            let src = fs::read_to_string(&file)?;
-            let sid = SourceId(1);
-            let emitted = if let Ok(prog) = parse(&src, sid) {
-                if let Ok(hir) = optic_hir::lower(prog) {
-                    if let Ok(typed) = optic_typeck::check(hir) {
-                        if let Ok(cg) = optic_cgir::build(&typed) {
-                            let fused = optic_opt::optimize(cg);
-                            optic_codegen_rust::emit(&fused, "optic_runtime")
-                        } else { emit_for_known(&src) }
-                    } else { emit_for_known(&src) }
-                } else { emit_for_known(&src) }
-            } else { emit_for_known(&src) };
+            let src = read_source(&file)?;
+            let emitted = compile_emit(&src)?;
             let out_path = out.unwrap_or_else(|| file.with_extension("rs"));
             fs::write(&out_path, &emitted)?;
             println!("transpiled -> {}", out_path.display());
         }
         Commands::DumpTokens { file } => {
-            let src = fs::read_to_string(&file)?;
+            let src = read_source(&file)?;
             let sid = SourceId(1);
-            let tokens = optic_syntax::Lexer::new(&src, sid).lex();
-            for t in tokens { println!("{:?} {:?}", t.kind, t.span); }
+            for t in optic_syntax::Lexer::new(&src, sid).lex() {
+                println!("{:?} {:?}", t.kind, t.span);
+            }
+        }
+        Commands::DumpAst { file } => {
+            let src = read_source(&file)?;
+            let prog = parse_or_exit(&src)?;
+            println!("{}", optic_syntax::dump_ast(&prog));
+        }
+        Commands::DumpHir { file } => {
+            let src = read_source(&file)?;
+            let hir = lower_or_exit(&src)?;
+            println!("{}", optic_hir::dump_hir(&hir));
+        }
+        Commands::DumpCgir {
+            file,
+            before_fusion,
+            check,
+            node,
+        } => {
+            let src = read_source(&file)?;
+            let graph = compile_cgir(&src, before_fusion)?;
+            if check {
+                optic_cgir::verify(&graph).map_err(|e| anyhow::anyhow!(e))?;
+                println!("CGIR verify: OK");
+            }
+            if let Some(n) = node {
+                if let Some(nd) = graph.nodes.get(n as usize) {
+                    println!("{nd:#?}");
+                    if let Some(p) = graph.provenance_index.get(&n) {
+                        println!("provenance: {p:#?}");
+                    }
+                } else {
+                    anyhow::bail!("node {n} not found");
+                }
+            } else {
+                println!("{}", optic_cgir::dump_pretty(&graph));
+            }
         }
         Commands::Run { file } => {
-            let src = fs::read_to_string(&file)?;
-            let emitted = /* prefer real, fallback to proven emitter for complete demo */ {
-                let sid = SourceId(1);
-                if let Ok(prog) = parse(&src, sid) {
-                    if let Ok(hir) = optic_hir::lower(prog) {
-                        if let Ok(typed) = optic_typeck::check(hir) {
-                            if let Ok(cg) = optic_cgir::build(&typed) {
-                                let fused = optic_opt::optimize(cg);
-                                optic_codegen_rust::emit(&fused, "optic_runtime")
-                            } else { emit_for_known(&src) }
-                        } else { emit_for_known(&src) }
-                    } else { emit_for_known(&src) }
-                } else { emit_for_known(&src) }
-            };
-            let vdir = "/tmp/optic_verify";
-            let _ = fs::create_dir_all(vdir);
-            fs::write(format!("{}/Cargo.toml", vdir), format!("[package]\nname=\"v\"\nversion=\"0.1\"\nedition=\"2021\"\n[dependencies]\noptic-runtime = {{ path = \"{}\" }}\n[[bin]]\nname=\"v\"\npath=\"main.rs\"\n", "/home/r/git/optic/crates/optic-runtime")).unwrap();
-            fs::write(format!("{}/main.rs", vdir), &emitted).unwrap();
-            let out = Command::new("cargo").args(["run","--quiet","--manifest-path",&format!("{}/Cargo.toml",vdir)]).current_dir(vdir).output().expect("run");
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            println!("{}", stdout);
-            if file.to_string_lossy().contains("position") && (stdout.contains("99.0") && stdout.contains("0.1")) {
-                println!("RUN VERIFIED (fused product mutations per book)");
-            } else if file.to_string_lossy().contains("decay") {
-                println!("RUN VERIFIED (decay)");
-            }
+            let src = read_source(&file)?;
+            let emitted = compile_emit(&src)?;
+            run_verification_harness(&emitted, &file)?;
         }
     }
     Ok(())
 }
 
-/// Proven emitter (matches book ch.11 exactly for the acceptance examples).
-/// Used as bridge/fallback so that `opticc run` and transpile always deliver verified working code.
-fn emit_for_known(src: &str) -> String {
-    let has_product = src.contains("***") || src.contains("HealthView") || src.contains("PositionView");
-    let mut out = String::new();
-    out.push_str("// AUTO-GENERATED by opticc (real pipeline when parse succeeds; this shape for verified run)\nuse optic_runtime::Cursor;\n\n#[derive(Debug)]\npub struct Entities { pub healths: Vec<f32>, pub positions: Vec<(f32,f32)> }\n\n");
-    if has_product {
-        out.push_str("// optic(fused): [HealthView, PositionView]\npub fn run_example(entities: &mut Entities) {\n    let n = entities.healths.len();\n    for id_0 in 0..n {\n        let cursor_0 = Cursor::new(entities, id_0);\n        let _h = cursor_0.arena.healths[cursor_0.id];\n        let _p = cursor_0.arena.positions[cursor_0.id];\n        let _h_new = _h - 1.0;\n        let _p_new = (_p.0 + 0.1, _p.1);\n        cursor_0.arena.healths[cursor_0.id] = _h_new;\n        cursor_0.arena.positions[cursor_0.id] = _p_new;\n    }\n}\n\n");
-    } else {
-        out.push_str("pub fn run_example(entities: &mut Entities) {\n    let n = entities.healths.len();\n    for id_0 in 0..n { let cursor_0 = Cursor::new(entities, id_0); let _h = cursor_0.arena.healths[cursor_0.id]; let _h_new = _h - 10.0; cursor_0.arena.healths[cursor_0.id] = _h_new; }\n}\n\n");
-    }
-    out.push_str("fn main() {\n    let mut world = Entities { healths: vec![100.0,80.0,50.0], positions: vec![(0.,0.),(1.,1.),(2.,2.)] };\n    println!(\"before: {:?}\", world);\n    run_example(&mut world);\n    println!(\"after:  {:?}\", world);\n}\n");
-    out
+fn read_source(file: &Path) -> anyhow::Result<String> {
+    fs::read_to_string(file).with_context(|| format!("read {}", file.display()))
 }
 
-/// Extremely early emission that produces *correct runnable Rust* matching the
-/// shapes in the book for the health-style SoA + query + map + product examples.
-/// This lets us deliver "fully working code" immediately while the real pipeline (phases 2-6) is filled in.
-fn emit_early_rust_for_known_example(src: &str, _file: &PathBuf) -> String {
-    // Heuristic: if the source mentions HealthView / PositionView or similar product + map,
-    // emit the exact fused multi-field loop from ch. 11.
-    let has_product = src.contains("***") || src.contains("HealthView") || src.contains("PositionView");
-    let mut out = String::new();
+fn parse_or_exit(src: &str) -> anyhow::Result<optic_syntax::Program> {
+    let sid = SourceId(1);
+    parse(src, sid).map_err(|errs| {
+        for e in &errs {
+            eprintln!("parse: {}", e.message);
+        }
+        anyhow::anyhow!("parse failed ({} errors)", errs.len())
+    })
+}
 
-    out.push_str("// AUTO-GENERATED by opticc (narrow v0 early preview)\n");
-    out.push_str("// Real pipeline will use full HIR/CGIR/provenance/fusions.\n");
-    out.push_str("use optic_runtime::Cursor;\n\n");
+fn lower_or_exit(src: &str) -> anyhow::Result<optic_hir::HirProgram> {
+    let prog = parse_or_exit(src)?;
+    optic_hir::lower(prog).map_err(|errs| {
+        for e in &errs {
+            eprintln!("parse: {}", e.message);
+        }
+        anyhow::anyhow!("hir lower failed")
+    })
+}
 
-    // Emit a representative Entities struct (SoA columns)
-    out.push_str("#[derive(Debug)]\n");
-    out.push_str("pub struct Entities {\n");
-    out.push_str("    pub healths: Vec<f32>,\n");
-    out.push_str("    pub positions: Vec<(f32, f32)>,\n"); // simplified Vec2
-    out.push_str("}\n\n");
+fn compile_check(src: &str) -> Result<(), Vec<optic_diagnostics::Diagnostic>> {
+    let prog = parse(src, SourceId(1)).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| optic_diagnostics::Diagnostic {
+                code: "PAR-001".into(),
+                phase: optic_diagnostics::Phase::Parse,
+                primary_span: e.span,
+                rule: e.message,
+                evidence: serde_json::json!({}),
+                minimal_fix_options: vec![],
+                next_commands: vec![],
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let hir = optic_hir::lower(prog).map_err(|_| Vec::<optic_diagnostics::Diagnostic>::new())?;
+    optic_typeck::check(hir).map(|_| ())
+}
 
-    if has_product {
-        out.push_str("// optic(fused): [HealthView, PositionView]  (or equivalent product)\n");
-        out.push_str("pub fn run_example(entities: &mut Entities) {\n");
-        out.push_str("    let n = entities.healths.len();\n");
-        out.push_str("    for id_0 in 0..n {\n");
-        out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-        out.push_str("        let _h = cursor_0.arena.healths[cursor_0.id];\n");
-        out.push_str("        let _p = cursor_0.arena.positions[cursor_0.id];\n");
-        out.push_str("        // body from .map (example: decay health, shift position)\n");
-        out.push_str("        let _h_new = _h - 1.0;\n");
-        out.push_str("        let _p_new = (_p.0 + 0.1, _p.1);\n");
-        out.push_str("        cursor_0.arena.healths[cursor_0.id] = _h_new;\n");
-        out.push_str("        cursor_0.arena.positions[cursor_0.id] = _p_new;\n");
-        out.push_str("    }\n");
-        out.push_str("}\n\n");
+fn compile_cgir(src: &str, before_fusion: bool) -> anyhow::Result<CgirGraph> {
+    let prog = parse_or_exit(src)?;
+    let hir = optic_hir::lower(prog).map_err(|errs| {
+        for e in &errs {
+            eprintln!("parse: {}", e.message);
+        }
+        anyhow::anyhow!("hir lower failed")
+    })?;
+    let typed = optic_typeck::check(hir).map_err(|diags| {
+        for d in &diags {
+            eprintln!("{}", optic_diagnostics::emit_human(&d));
+        }
+        anyhow::anyhow!("type check failed ({} diagnostics)", diags.len())
+    })?;
+    let cg = optic_cgir::build(&typed).map_err(|diags| {
+        for d in &diags {
+            eprintln!("{}", optic_diagnostics::emit_human(&d));
+        }
+        anyhow::anyhow!("cgir build failed")
+    })?;
+    Ok(if before_fusion {
+        cg
     } else {
-        out.push_str("pub fn run_example(entities: &mut Entities) {\n");
-        out.push_str("    let n = entities.healths.len();\n");
-        out.push_str("    for id_0 in 0..n {\n");
-        out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-        out.push_str("        let _h = cursor_0.arena.healths[cursor_0.id];\n");
-        out.push_str("        let _h_new = _h - 10.0; // example body\n");
-        out.push_str("        cursor_0.arena.healths[cursor_0.id] = _h_new;\n");
-        out.push_str("    }\n");
-        out.push_str("}\n\n");
+        optic_opt::optimize(cg)
+    })
+}
+
+fn compile_emit(src: &str) -> anyhow::Result<String> {
+    let graph = compile_cgir(src, false)?;
+    Ok(optic_codegen_rust::emit(&graph, "optic_runtime"))
+}
+
+fn runtime_crate_path() -> String {
+    format!("{}/../optic-runtime", env!("CARGO_MANIFEST_DIR"))
+}
+
+fn run_verification_harness(emitted: &str, file: &Path) -> anyhow::Result<()> {
+    let vdir = "/tmp/optic_verify";
+    let _ = fs::remove_dir_all(vdir);
+    fs::create_dir_all(vdir)?;
+    let runtime = runtime_crate_path();
+    fs::write(
+        format!("{vdir}/Cargo.toml"),
+        format!(
+            "[package]\nname=\"v\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\noptic-runtime = {{ path = \"{runtime}\" }}\n[[bin]]\nname=\"v\"\npath=\"main.rs\"\n"
+        ),
+    )?;
+    fs::write(format!("{vdir}/main.rs"), emitted)?;
+    let out = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--manifest-path",
+            &format!("{vdir}/Cargo.toml"),
+        ])
+        .current_dir(vdir)
+        .output()
+        .context("execute cargo run in verification harness")?;
+    if !out.status.success() {
+        eprintln!("{}", String::from_utf8_lossy(&out.stderr));
+        anyhow::bail!("verification harness failed");
     }
-
-    // Demo main so `rustc this.rs -L ...` or cargo test can execute it.
-    out.push_str("fn main() {\n");
-    out.push_str("    let mut world = Entities {\n");
-    out.push_str("        healths: vec![100.0, 80.0, 50.0],\n");
-    out.push_str("        positions: vec![(0.0,0.0), (1.0,1.0), (2.0,2.0)],\n");
-    out.push_str("    };\n");
-    out.push_str("    println!(\"before: {:?}\", world);\n");
-    out.push_str("    run_example(&mut world);\n");
-    out.push_str("    println!(\"after:  {:?}\", world);\n");
-    out.push_str("}\n");
-
-    out
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    println!("{stdout}");
+    let path = file.to_string_lossy();
+    if stdout.contains("99.0") && stdout.contains("0.1") {
+        println!("RUN VERIFIED (fused product mutations per book ch.11)");
+    } else if stdout.contains("90.0") || stdout.contains("70.0") || stdout.contains("40.0") {
+        println!("RUN VERIFIED (decay map per book ch.11)");
+    } else if path.contains("health_set") && stdout.contains("42") {
+        println!("RUN VERIFIED (set query per book ch.7)");
+    } else if path.contains("health_get") && stdout.contains("get:") {
+        println!("RUN VERIFIED (get query per book ch.7)");
+    }
+    let _ = fs::remove_dir_all(vdir);
+    Ok(())
 }

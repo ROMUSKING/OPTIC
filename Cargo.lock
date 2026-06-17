@@ -167,8 +167,10 @@ name = "optic-codegen-rust"
 version = "0.1.0"
 dependencies = [
  "optic-cgir",
+ "optic-hir",
  "optic-opt",
  "optic-runtime",
+ "optic-syntax",
 ]
 
 [[package]]
@@ -216,6 +218,7 @@ dependencies = [
  "optic-diagnostics",
  "optic-hir",
  "optic-syntax",
+ "serde_json",
 ]
 
 [[package]]

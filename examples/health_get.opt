@@ -1,0 +1,16 @@
+-- Simple health get (single optic + query + get)
+-- Appendix B acceptance example (ch.7 query chains)
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<1> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(HealthView).get();
+}

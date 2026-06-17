@@ -7,3 +7,7 @@ edition.workspace = true
 optic-cgir = { path = "../optic-cgir" }
 optic-opt = { path = "../optic-opt" }
 optic-runtime = { path = "../optic-runtime" }
+
+[dev-dependencies]
+optic-hir = { path = "../optic-hir" }
+optic-syntax = { path = "../optic-syntax" }

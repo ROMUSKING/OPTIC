@@ -23,6 +23,11 @@ impl<'src> Lexer<'src> {
 
     pub fn lex(mut self) -> Vec<Token> {
         while self.pos < self.src.len() {
+            // whitespace is ignored (per app D D.1 and ch7.9 disambiguation)
+            if self.current_char().is_whitespace() {
+                self.advance();
+                continue;
+            }
             let start = self.pos;
             let ch = self.current_char();
 
@@ -144,10 +149,15 @@ impl<'src> Lexer<'src> {
             } else if ch == '.' && !saw_dot {
                 // peek next to decide float vs range etc. For v0 simple.
                 let next_pos = self.pos + 1;
-                if next_pos < self.src.len() && self.src[next_pos..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if next_pos < self.src.len()
+                    && self.src[next_pos..]
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_digit())
+                {
                     saw_dot = true;
                     self.advance(); // consume .
-                    // continue to consume digits
+                                    // continue to consume digits
                 } else {
                     break;
                 }
@@ -156,7 +166,11 @@ impl<'src> Lexer<'src> {
             }
         }
         let end = self.pos;
-        let kind = if saw_dot { TokenKind::FloatLit } else { TokenKind::IntLit };
+        let kind = if saw_dot {
+            TokenKind::FloatLit
+        } else {
+            TokenKind::IntLit
+        };
         self.emit(kind, start, end);
     }
 
@@ -178,6 +192,9 @@ impl<'src> Lexer<'src> {
             '>' => TokenKind::Gt,
             '*' => TokenKind::Star, // lone * is invalid per book; we emit and let parser error
             '=' => TokenKind::Equals,
+            '|' => TokenKind::Pipe,
+            '-' => TokenKind::Minus,
+            '/' => TokenKind::Slash,
             _ => TokenKind::Error,
         };
         self.advance();

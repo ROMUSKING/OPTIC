@@ -15,25 +15,36 @@ pub struct ParseError {
 
 pub fn parse(src: &str, source_id: SourceId) -> Result<Program, Vec<ParseError>> {
     let tokens = Lexer::new(src, source_id).lex();
-    let mut p = Parser { src, tokens, pos: 0, errors: vec![] };
+    let mut p = Parser {
+        src,
+        tokens,
+        pos: 0,
+        errors: vec![],
+    };
     let items = p.parse_items();
     let span = if items.is_empty() {
         Span::dummy()
     } else {
-        let first = items.first().map(|i| match i {
-            Item::Data(d) => d.span,
-            Item::Optic(o) => o.span,
-            Item::Let(l) => l.span,
-            Item::Fn(f) => f.span,
-            Item::Expr(e) => body_span(e),
-        }).unwrap_or(Span::dummy());
-        let last = items.last().map(|i| match i {
-            Item::Data(d) => d.span,
-            Item::Optic(o) => o.span,
-            Item::Let(l) => l.span,
-            Item::Fn(f) => f.span,
-            Item::Expr(e) => body_span(e),
-        }).unwrap_or(first);
+        let first = items
+            .first()
+            .map(|i| match i {
+                Item::Data(d) => d.span,
+                Item::Optic(o) => o.span,
+                Item::Let(l) => l.span,
+                Item::Fn(f) => f.span,
+                Item::Expr(e) => body_span(e),
+            })
+            .unwrap_or(Span::dummy());
+        let last = items
+            .last()
+            .map(|i| match i {
+                Item::Data(d) => d.span,
+                Item::Optic(o) => o.span,
+                Item::Let(l) => l.span,
+                Item::Fn(f) => f.span,
+                Item::Expr(e) => body_span(e),
+            })
+            .unwrap_or(first);
         first.merge(last)
     };
     let program = Program { items, span };
@@ -53,11 +64,17 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn current(&self) -> TokenKind {
-        self.tokens.get(self.pos).map(|t| t.kind).unwrap_or(TokenKind::Eof)
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.kind)
+            .unwrap_or(TokenKind::Eof)
     }
 
     fn current_span(&self) -> Span {
-        self.tokens.get(self.pos).map(|t| t.span).unwrap_or(Span::dummy())
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.span)
+            .unwrap_or(Span::dummy())
     }
 
     fn advance(&mut self) -> Token {
@@ -77,7 +94,12 @@ impl<'a> Parser<'a> {
         } else {
             let sp = self.current_span();
             self.errors.push(ParseError {
-                message: format!("expected {:?} in {} , got {:?}", expected, ctx, self.current()),
+                message: format!(
+                    "expected {:?} in {} , got {:?}",
+                    expected,
+                    ctx,
+                    self.current()
+                ),
                 span: sp,
             });
             None
@@ -92,34 +114,58 @@ impl<'a> Parser<'a> {
 
     fn parse_items(&mut self) -> Vec<Item> {
         let mut items = vec![];
-        let sync = [TokenKind::KwData, TokenKind::KwOptic, TokenKind::KwLet, TokenKind::KwFn, TokenKind::Eof];
+        // A.8: sync from ch7.6 table (top-level item + context); expanded for recovery so bad inner (field/expr) doesn't cascade "expected RBrace in block"
+        let sync = [
+            TokenKind::KwData,
+            TokenKind::KwOptic,
+            TokenKind::KwLet,
+            TokenKind::KwFn,
+            TokenKind::RBrace,
+            TokenKind::Eof,
+        ];
         while self.current() != TokenKind::Eof {
             match self.current() {
                 TokenKind::KwData => {
-                    if let Some(d) = self.parse_data_decl() { items.push(Item::Data(d)); }
+                    if let Some(d) = self.parse_data_decl() {
+                        items.push(Item::Data(d));
+                    }
                 }
                 TokenKind::KwOptic => {
-                    if let Some(o) = self.parse_optic_decl() { items.push(Item::Optic(o)); }
+                    if let Some(o) = self.parse_optic_decl() {
+                        items.push(Item::Optic(o));
+                    }
                 }
                 TokenKind::KwLet => {
-                    if let Some(l) = self.parse_let_binding() { items.push(Item::Let(l)); }
+                    if let Some(l) = self.parse_let_binding() {
+                        items.push(Item::Let(l));
+                    }
                 }
                 TokenKind::KwFn => {
-                    if let Some(f) = self.parse_fn_decl() { items.push(Item::Fn(f)); }
+                    if let Some(f) = self.parse_fn_decl() {
+                        items.push(Item::Fn(f));
+                    }
                 }
                 _ => {
                     // Support bare top-level expr (query chains etc) for demo/example style
                     // (EBNF items are decls, but this allows the provided .opt examples without heavy rewrite)
-                    if self.current() == TokenKind::Ident || self.current() == TokenKind::LParen || self.current() == TokenKind::LBrace {
+                    if self.current() == TokenKind::Ident
+                        || self.current() == TokenKind::LParen
+                        || self.current() == TokenKind::LBrace
+                    {
                         if let Some(e) = self.parse_expr() {
                             // consume optional ;
-                            if self.current() == TokenKind::Semi { self.advance(); }
+                            if self.current() == TokenKind::Semi {
+                                self.advance();
+                            }
                             items.push(Item::Expr(e));
                             continue;
                         }
                     }
                     let sp = self.current_span();
-                    self.errors.push(ParseError { message: "expected top-level item (data, optic, let, fn) or expr".into(), span: sp });
+                    self.errors.push(ParseError {
+                        message: "expected top-level item (data, optic, let, fn) or expr".into(),
+                        span: sp,
+                    });
                     self.skip_until_sync(&sync);
                 }
             }
@@ -128,10 +174,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_data_decl(&mut self) -> Option<DataDecl> {
+        // A.1: field_list and type_expr per app D: "field_list ::= field_decl (',' field_decl)* ','?"
+        // "type_expr ::= 'SoA' '<' type_expr '>' | IDENT ('<' type_args '>')?" + ch7.7 concrete ex (handles Vec2 as Named no-args, f32, trailing , )
         let start = self.advance().span; // data
         let name_tok = self.advance();
         if name_tok.kind != TokenKind::Ident {
-            self.errors.push(ParseError { message: "expected ident after data".into(), span: name_tok.span });
+            self.errors.push(ParseError {
+                message: "expected ident after data".into(),
+                span: name_tok.span,
+            });
             self.skip_until_sync(&[TokenKind::LBrace, TokenKind::KwData, TokenKind::Eof]);
             return None;
         }
@@ -144,9 +195,13 @@ impl<'a> Parser<'a> {
             if let Some(f) = self.parse_field_decl() {
                 fields.push(f);
             }
-            if self.current() == TokenKind::Comma { self.advance(); }
+            if self.current() == TokenKind::Comma {
+                self.advance();
+            }
         }
-        let rbrace = self.expect(TokenKind::RBrace, "data decl").unwrap_or(Span::dummy());
+        let rbrace = self
+            .expect(TokenKind::RBrace, "data decl")
+            .unwrap_or(Span::dummy());
         let span = start.merge(rbrace);
         Some(DataDecl { name, fields, span })
     }
@@ -154,7 +209,11 @@ impl<'a> Parser<'a> {
     fn parse_field_decl(&mut self) -> Option<FieldDecl> {
         let name_tok = self.advance();
         if name_tok.kind != TokenKind::Ident {
-            self.errors.push(ParseError { message: "expected field name".into(), span: name_tok.span });
+            self.errors.push(ParseError {
+                message: "expected field name".into(),
+                span: name_tok.span,
+            });
+            self.skip_until_sync(&[TokenKind::Comma, TokenKind::RBrace, TokenKind::Eof]); // A.8 recovery per ch7.6 type/field sync
             return None;
         }
         let name = Spanned::new(self.text_of(&name_tok), name_tok.span);
@@ -185,11 +244,17 @@ impl<'a> Parser<'a> {
                             if let Some(a) = self.parse_type_expr() {
                                 args.push(a);
                             }
-                            if self.current() == TokenKind::Comma { self.advance(); }
+                            if self.current() == TokenKind::Comma {
+                                self.advance();
+                            }
                         }
                         self.expect(TokenKind::Gt, "type args")?;
                     }
-                    let span = if args.is_empty() { span0 } else { span0.merge(args.last().map(ty_span).unwrap_or(span0)) };
+                    let span = if args.is_empty() {
+                        span0
+                    } else {
+                        span0.merge(args.last().map(ty_span).unwrap_or(span0))
+                    };
                     Some(TypeExpr::Named { name, args, span })
                 }
             }
@@ -197,15 +262,24 @@ impl<'a> Parser<'a> {
                 let start = self.advance().span;
                 let mut ts = vec![];
                 while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
-                    if let Some(t) = self.parse_type_expr() { ts.push(t); }
-                    if self.current() == TokenKind::Comma { self.advance(); }
+                    if let Some(t) = self.parse_type_expr() {
+                        ts.push(t);
+                    }
+                    if self.current() == TokenKind::Comma {
+                        self.advance();
+                    }
                 }
-                let end = self.expect(TokenKind::RParen, "tuple type").unwrap_or(start);
+                let end = self
+                    .expect(TokenKind::RParen, "tuple type")
+                    .unwrap_or(start);
                 Some(TypeExpr::Tuple(ts, start.merge(end)))
             }
             _ => {
                 let sp = self.current_span();
-                self.errors.push(ParseError { message: "expected type".into(), span: sp });
+                self.errors.push(ParseError {
+                    message: "expected type".into(),
+                    span: sp,
+                });
                 None
             }
         }
@@ -219,7 +293,7 @@ impl<'a> Parser<'a> {
 
         // GradedOptic < S , A , G >
         self.expect(TokenKind::Ident, "GradedOptic")?; // accept any ident for now; could check name
-        // We are lenient on the exact "GradedOptic" token for simplicity in v0.
+                                                       // We are lenient on the exact "GradedOptic" token for simplicity in v0.
         self.expect(TokenKind::Lt, "<")?;
         let costate = self.parse_type_expr()?;
         self.expect(TokenKind::Comma, ",")?;
@@ -233,12 +307,24 @@ impl<'a> Parser<'a> {
         let get = self.parse_get_clause()?;
         let put = if self.current() == TokenKind::KwPut {
             Some(self.parse_put_clause()?)
-        } else { None };
+        } else {
+            None
+        };
 
-        let rbrace = self.expect(TokenKind::RBrace, "optic }").unwrap_or(Span::dummy());
+        let rbrace = self
+            .expect(TokenKind::RBrace, "optic }")
+            .unwrap_or(Span::dummy());
         let span = start.merge(rbrace);
 
-        Some(OpticDecl { name, costate, focus, grade, get, put, span })
+        Some(OpticDecl {
+            name,
+            costate,
+            focus,
+            grade,
+            get,
+            put,
+            span,
+        })
     }
 
     fn parse_grade_expr(&mut self) -> Option<GradeExpr> {
@@ -274,7 +360,10 @@ impl<'a> Parser<'a> {
                             let n_tok = self.advance();
                             let n: u32 = self.text_of(&n_tok).parse().unwrap_or(0);
                             self.expect(TokenKind::Gt, ">")?;
-                            return Some(GradeDim::Cache { n: Some(n), span: sp });
+                            return Some(GradeDim::Cache {
+                                n: Some(n),
+                                span: sp,
+                            });
                         }
                     }
                     Some(GradeDim::Cache { n: None, span: sp })
@@ -293,11 +382,17 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::Gt, ">")?;
                     Some(GradeDim::Ownership { r, span: sp })
                 } else if matches!(txt.as_str(), "LinearGrade" | "AffineGrade" | "SharedGrade") {
-                    Some(GradeDim::Named { name: txt, span: sp })
+                    Some(GradeDim::Named {
+                        name: txt,
+                        span: sp,
+                    })
                 } else if txt == "_" {
                     Some(GradeDim::Infer(sp))
                 } else {
-                    Some(GradeDim::Named { name: txt, span: sp })
+                    Some(GradeDim::Named {
+                        name: txt,
+                        span: sp,
+                    })
                 }
             }
             TokenKind::Lt | _ => {
@@ -306,7 +401,10 @@ impl<'a> Parser<'a> {
                     let _ = self.advance();
                     return Some(GradeDim::Infer(sp));
                 }
-                self.errors.push(ParseError { message: "expected grade dim".into(), span: sp });
+                self.errors.push(ParseError {
+                    message: "expected grade dim".into(),
+                    span: sp,
+                });
                 Some(GradeDim::Infer(sp))
             }
         }
@@ -334,7 +432,12 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::FatArrow, "=>")?;
         let body = self.parse_expr_or_block()?;
         let span = start.merge(body_span(&body));
-        Some(PutClause { state_param, value_param, body, span })
+        Some(PutClause {
+            state_param,
+            value_param,
+            body,
+            span,
+        })
     }
 
     fn parse_let_binding(&mut self) -> Option<LetBinding> {
@@ -351,14 +454,26 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Comma, ",")?;
             let grade = self.parse_grade_expr()?;
             self.expect(TokenKind::Gt, ">")?; // rough
-            Some(GradeOpticType { costate, focus, grade, span: start })
-        } else { None };
+            Some(GradeOpticType {
+                costate,
+                focus,
+                grade,
+                span: start,
+            })
+        } else {
+            None
+        };
 
         self.expect(TokenKind::Equals, "=")?;
         let value = self.parse_optic_expr()?;
         self.expect(TokenKind::Semi, ";")?;
         let span = start.merge(value_span(&value));
-        Some(LetBinding { name, ty, value, span })
+        Some(LetBinding {
+            name,
+            ty,
+            value,
+            span,
+        })
     }
 
     fn parse_fn_decl(&mut self) -> Option<FnDecl> {
@@ -373,22 +488,46 @@ impl<'a> Parser<'a> {
             let p = Spanned::new(self.text_of(&p_name), p_name.span);
             self.expect(TokenKind::Colon, ":")?;
             let ty = self.parse_type_expr()?;
-            params.push(Param { name: p, ty, span: p_name.span });
-            if self.current() == TokenKind::Comma { self.advance(); }
+            params.push(Param {
+                name: p,
+                ty,
+                span: p_name.span,
+            });
+            if self.current() == TokenKind::Comma {
+                self.advance();
+            }
         }
         self.expect(TokenKind::RParen, ")")?;
-        let ret = if self.current() == TokenKind::FatArrow || self.current() == TokenKind::Gt {
-            // support -> or => for fn ret (EBNF uses -> ; lenient for demo)
-            if self.current() == TokenKind::FatArrow || self.current() == TokenKind::Gt { self.advance(); }
+        let ret = if self.current() == TokenKind::FatArrow
+            || self.current() == TokenKind::Gt
+            || self.current() == TokenKind::Minus
+        {
+            // A.7: support '->' (EBNF fn_decl uses '->' type ) ; consume Minus then Gt (lexer: - > not single token); keep lenient for Fat/Gt
+            if self.current() == TokenKind::Minus {
+                self.advance(); // -
+                if self.current() == TokenKind::Gt {
+                    self.advance();
+                } // >
+            } else if self.current() == TokenKind::FatArrow || self.current() == TokenKind::Gt {
+                self.advance();
+            }
             Some(self.parse_type_expr()?)
-        } else { None };
+        } else {
+            None
+        };
         self.expect(TokenKind::LBrace, "{")?;
         let mut body = vec![];
         while self.current() != TokenKind::RBrace && self.current() != TokenKind::Eof {
             body.push(self.parse_stmt()?);
         }
         self.expect(TokenKind::RBrace, "}")?;
-        Some(FnDecl { name, params, ret, body, span: start })
+        Some(FnDecl {
+            name,
+            params,
+            ret,
+            body,
+            span: start,
+        })
     }
 
     fn parse_stmt(&mut self) -> Option<Stmt> {
@@ -424,46 +563,176 @@ impl<'a> Parser<'a> {
             self.advance();
             let right = self.parse_assign_expr()?;
             let span = start.merge(body_span(&right));
-            return Some(Expr::Assign { target: Box::new(left), value: Box::new(right), span });
+            return Some(Expr::Assign {
+                target: Box::new(left),
+                value: Box::new(right),
+                span,
+            });
+        }
+        // A.6: binop after field (per "add ... after field", EBNF binary in atom_expr, examples in map bodies)
+        // supports all 8; right uses field for minimal (no full chains yet); * via Star, -/ new tokens.
+        match self.current() {
+            TokenKind::Plus => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Add,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Minus => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Sub,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Star => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Mul,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Slash => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Div,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Lt => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Lt,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Gt => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Gt,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Le => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Le,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            TokenKind::Ge => {
+                self.advance();
+                let right = self.parse_field_expr()?;
+                return Some(Expr::Binary {
+                    left: Box::new(left),
+                    op: BinOp::Ge,
+                    right: Box::new(right),
+                    span: Span::dummy(),
+                });
+            }
+            _ => {}
         }
         Some(left)
     }
 
     fn parse_field_expr(&mut self) -> Option<Expr> {
-        let mut base = self.parse_atom_expr()?;
+        // Support query_chain at expr level per EBNF "expr ::= query_chain | assign_expr" and app D.
+        // This ensures Item::Expr in parse_items (bare or via fn body stmts) and Program span calc get real QueryChain.
+        if self.looks_like_query_chain() {
+            let qc = self.parse_query_chain()?;
+            return Some(Expr::QueryChain(qc));
+        }
+        // A.3: build recursive FieldExpr per app D "field_expr ::= atom_expr ('.' IDENT | '[' expr ']')*"
+        // + ch7 field examples (s.healths[s.id]). Use existing FieldExpr {Base, FieldAccess, Index} + spans;
+        // no more _temp placeholders. For bare atom (no dot/[) unwrap to Atom to minimize; chains use Expr::Field.
+        let base = self.parse_atom_expr()?;
         let mut span = match &base {
             AtomExpr::Ident(s) => s.span,
-            AtomExpr::Int(_, sp) | AtomExpr::Float(_, sp) | AtomExpr::Tuple(_, sp) | AtomExpr::Paren(_, sp) => *sp,
+            AtomExpr::Int(_, sp)
+            | AtomExpr::Float(_, sp)
+            | AtomExpr::Tuple(_, sp)
+            | AtomExpr::Paren(_, sp) => *sp,
         };
+        let mut field_expr = FieldExpr::Base(base, span);
+        let mut is_chain = false;
         loop {
             match self.current() {
                 TokenKind::Dot => {
                     self.advance();
                     let id_tok = self.advance();
-                    if id_tok.kind != TokenKind::Ident {
-                        self.errors.push(ParseError { message: "expected field ident after .".into(), span: id_tok.span });
+                    if id_tok.kind != TokenKind::Ident && id_tok.kind != TokenKind::IntLit {
+                        self.errors.push(ParseError {
+                            message: "expected field ident after .".into(),
+                            span: id_tok.span,
+                        });
+                        self.skip_until_sync(&[
+                            TokenKind::Comma,
+                            TokenKind::RBrace,
+                            TokenKind::RParen,
+                            TokenKind::Semi,
+                            TokenKind::Eof,
+                        ]); // A.8: more sync from ch7.6 to avoid RBrace cascade
                         break;
                     }
                     let field = Spanned::new(self.text_of(&id_tok), id_tok.span);
                     let new_span = span.merge(field.span);
-                    base = AtomExpr::Ident(Spanned::new("_field_temp".into(), new_span)); // placeholder for FieldExpr lowering; real FieldExpr built in HIR
-                    // For AST fidelity we keep simple Atom for now; HIR will do proper FieldExpr chain from source text.
+                    field_expr = FieldExpr::FieldAccess {
+                        base: Box::new(field_expr),
+                        field,
+                        span: new_span,
+                    };
                     span = new_span;
-                    // (To keep simple for full pipeline, we will parse the structure but represent field chains via the original source spans in HIR lowering.)
+                    is_chain = true;
                 }
                 TokenKind::LBracket => {
                     self.advance();
                     let idx = self.parse_expr()?;
                     let r = self.expect(TokenKind::RBracket, "]")?;
-                    span = span.merge(r);
-                    // similar, represented in HIR
-                    base = AtomExpr::Ident(Spanned::new("_index_temp".into(), span));
+                    let new_span = span.merge(r);
+                    field_expr = FieldExpr::Index {
+                        base: Box::new(field_expr),
+                        index: Box::new(idx),
+                        span: new_span,
+                    };
+                    span = new_span;
+                    is_chain = true;
                 }
+                // A.8 recovery note: added skips in dot error + field_decl; top sync uses ch7.6; more in expr contexts prevent cascade to block RBrace (per "one bad field" issue)
                 _ => break,
             }
         }
-        // Return as Atom for current AST simplicity (field info carried in spans + source for HIR); upgrade to FieldExpr variant in future if needed.
-        Some(Expr::Atom(base))
+        if is_chain {
+            Some(Expr::Field(field_expr))
+        } else {
+            // extract atom back for bare idents/lits etc (keeps prior Atom shape for non-field cases)
+            if let FieldExpr::Base(a, _) = field_expr {
+                Some(Expr::Atom(a))
+            } else {
+                Some(Expr::Field(field_expr))
+            }
+        }
     }
 
     fn parse_atom_expr(&mut self) -> Option<AtomExpr> {
@@ -494,7 +763,10 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.expect(TokenKind::RParen, "tuple/paren )")?;
                 if exprs.len() == 1 {
-                    Some(AtomExpr::Paren(Box::new(exprs.into_iter().next().unwrap()), start.merge(end)))
+                    Some(AtomExpr::Paren(
+                        Box::new(exprs.into_iter().next().unwrap()),
+                        start.merge(end),
+                    ))
                 } else {
                     Some(AtomExpr::Tuple(exprs, start.merge(end)))
                 }
@@ -502,7 +774,10 @@ impl<'a> Parser<'a> {
             TokenKind::LBrace => {
                 // block as atom
                 let block = self.parse_block_expr()?;
-                Some(AtomExpr::Paren(Box::new(block), /*approx*/ Span::dummy()))
+                Some(AtomExpr::Paren(
+                    Box::new(block),
+                    /*approx*/ Span::dummy(),
+                ))
             }
             _ => {
                 if self.looks_like_query_chain() {
@@ -511,26 +786,41 @@ impl<'a> Parser<'a> {
                     return Some(AtomExpr::Ident(Spanned::new("query_chain".into(), qc.span)));
                 }
                 let sp = self.current_span();
-                self.errors.push(ParseError { message: "expected atom (ident/lit/( / { / query )".into(), span: sp });
+                self.errors.push(ParseError {
+                    message: "expected atom (ident/lit/( / { / query )".into(),
+                    span: sp,
+                });
                 Some(AtomExpr::Ident(Spanned::new("_err_atom".into(), sp)))
             }
         }
     }
 
     fn looks_like_query_chain(&self) -> bool {
-        // ident . query (
-        if self.current() != TokenKind::Ident { return false; }
-        // peek ahead without advancing permanently (simple for now)
-        // In practice after atom/field we check .query in higher or here for top level.
-        true
+        // ident . query (   -- peek without advance, per ch7.9 strategy + EBNF query_chain
+        if self.current() != TokenKind::Ident {
+            return false;
+        }
+        if let (Some(d), Some(q)) = (self.tokens.get(self.pos + 1), self.tokens.get(self.pos + 2)) {
+            if d.kind == TokenKind::Dot {
+                if q.kind == TokenKind::KwQuery
+                    || (q.kind == TokenKind::Ident && self.text_of(q) == "query")
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn parse_query_chain(&mut self) -> Option<QueryChain> {
         let base_tok = self.advance();
-        let base = Box::new(Expr::Atom(AtomExpr::Ident(Spanned::new(self.text_of(&base_tok), base_tok.span))));
+        let base = Box::new(Expr::Atom(AtomExpr::Ident(Spanned::new(
+            self.text_of(&base_tok),
+            base_tok.span,
+        ))));
         self.expect(TokenKind::Dot, ".")?;
         // query or KwQuery
-        let qtok = self.advance();
+        let _qtok = self.advance();
         // ignore exact name
         self.expect(TokenKind::LParen, "(")?;
         let optic = self.parse_optic_expr()?;
@@ -556,39 +846,56 @@ impl<'a> Parser<'a> {
                 TokenKind::Ident if self.text_of_current() == "map" => {
                     let sp = self.advance().span;
                     self.expect(TokenKind::LParen, "map(")?;
-                    // closure: | IDENT | expr   or | ( id, .. ) | expr
-                    // consume the | ... | forgiving but better now
+                    // closure: | IDENT | expr   or | ( id, .. ) | expr   (A.5, per app D)
                     let mut params = vec![];
-                    // accept | or just start (no BinOpPlaceholder token)
-                    if self.current() == TokenKind::Ident && self.text_of_current() == "|" {
+                    if self.current() == TokenKind::Pipe {
                         self.advance();
                     }
                     if self.current() == TokenKind::LParen {
                         self.advance();
-                        while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
+                        while self.current() != TokenKind::RParen
+                            && self.current() != TokenKind::Eof
+                        {
                             if self.current() == TokenKind::Ident {
                                 let p = self.advance();
                                 params.push(Spanned::new(self.text_of(&p), p.span));
                             }
-                            if self.current() == TokenKind::Comma { self.advance(); }
+                            if self.current() == TokenKind::Comma {
+                                self.advance();
+                            }
                         }
                         self.expect(TokenKind::RParen, "closure )")?;
                     } else if self.current() == TokenKind::Ident {
                         let p = self.advance();
                         params.push(Spanned::new(self.text_of(&p), p.span));
                     }
-                    if self.current() == TokenKind::Ident && self.text_of_current() == "|" {
+                    if self.current() == TokenKind::Pipe {
                         self.advance();
                     }
                     let body = self.parse_expr()?;
-                    methods.push(QueryMethod::Map(Closure { params, body: Box::new(body), span: sp }, sp));
+                    methods.push(QueryMethod::Map(
+                        Closure {
+                            params,
+                            body: Box::new(body),
+                            span: sp,
+                        },
+                        sp,
+                    ));
                     self.expect(TokenKind::RParen, "map )")?;
                 }
-                _ => { /* stop */ break; }
+                _ => {
+                    /* stop */
+                    break;
+                }
             }
         }
         let span = base_tok.span; // approx
-        Some(QueryChain { base, optic, methods, span })
+        Some(QueryChain {
+            base,
+            optic,
+            methods,
+            span,
+        })
     }
 
     fn parse_block_expr(&mut self) -> Option<Expr> {
@@ -597,20 +904,31 @@ impl<'a> Parser<'a> {
         let mut result = None;
         while self.current() != TokenKind::RBrace && self.current() != TokenKind::Eof {
             // allow trailing expr without ; as result in blocks
-            if self.current() == TokenKind::RBrace { break; }
+            if self.current() == TokenKind::RBrace {
+                break;
+            }
             let e = self.parse_expr()?;
             if self.current() == TokenKind::Semi {
                 self.advance();
-                stmts.push(Stmt { target: None, expr: e, span: start });
+                stmts.push(Stmt {
+                    target: None,
+                    expr: e,
+                    span: start,
+                });
             } else {
                 result = Some(Box::new(e));
                 break;
             }
         }
         let end = self.expect(TokenKind::RBrace, "block }")?;
-        Some(Expr::Block { stmts, result, span: start.merge(end) })
+        Some(Expr::Block {
+            stmts,
+            result,
+            span: start.merge(end),
+        })
     }
 
+    #[allow(dead_code)]
     fn parse_binary_expr(&mut self) -> Option<Expr> {
         let left = self.parse_field_expr()?;
         // minimal binop support for map bodies etc ( + - etc )
@@ -630,6 +948,8 @@ impl<'a> Parser<'a> {
     }
 
     // Optic expressions with precedence (>>> tighter than *** ) per ch7 + EBNF
+    // A.4: parse_optic_expr starts with par per "optic_expr ::= optic_par", par does ('***' seq)* per EBNF;
+    // seq does ('>>>' atom)* first (tighter) per ch7.9.3 table + 7.9.5.1 pratt sketch. Already wired; adding spec ref.
     fn parse_optic_expr(&mut self) -> Option<OpticExpr> {
         self.parse_optic_par()
     }
@@ -640,7 +960,11 @@ impl<'a> Parser<'a> {
             let op_span = self.advance().span;
             let rhs = self.parse_optic_seq()?;
             let span = op_span; // approx
-            lhs = OpticExpr::Par { left: Box::new(lhs), right: Box::new(rhs), span };
+            lhs = OpticExpr::Par {
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+            };
         }
         Some(lhs)
     }
@@ -651,7 +975,11 @@ impl<'a> Parser<'a> {
             let op_span = self.advance().span;
             let rhs = self.parse_optic_atom()?;
             let span = /* merge */ op_span;
-            lhs = OpticExpr::Seq { left: Box::new(lhs), right: Box::new(rhs), span };
+            lhs = OpticExpr::Seq {
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+            };
         }
         Some(lhs)
     }
@@ -660,22 +988,32 @@ impl<'a> Parser<'a> {
         match self.current() {
             TokenKind::Ident => {
                 let id = self.advance();
-                Some(OpticExpr::Atom(OpticAtom::Named(Spanned::new(self.text_of(&id), id.span))))
+                Some(OpticExpr::Atom(OpticAtom::Named(Spanned::new(
+                    self.text_of(&id),
+                    id.span,
+                ))))
             }
             TokenKind::LParen => {
                 let start = self.advance().span;
                 let inner = self.parse_optic_expr()?;
                 let end = self.expect(TokenKind::RParen, ")")?;
-                Some(OpticExpr::Atom(OpticAtom::Paren(Box::new(inner), start.merge(end))))
+                Some(OpticExpr::Atom(OpticAtom::Paren(
+                    Box::new(inner),
+                    start.merge(end),
+                )))
             }
             _ => {
                 let sp = self.current_span();
-                self.errors.push(ParseError { message: "expected optic atom (ident or ( ))".into(), span: sp });
+                self.errors.push(ParseError {
+                    message: "expected optic atom (ident or ( ))".into(),
+                    span: sp,
+                });
                 None
             }
         }
     }
 
+    #[allow(dead_code)]
     fn atom_span(a: &AtomExpr) -> Span {
         match a {
             AtomExpr::Ident(s) => s.span,
@@ -693,14 +1031,22 @@ impl<'a> Parser<'a> {
                 let e = self.parse_expr()?;
                 if self.current() == TokenKind::Semi {
                     self.advance();
-                    stmts.push(Stmt { target: None, expr: e, span: start });
+                    stmts.push(Stmt {
+                        target: None,
+                        expr: e,
+                        span: start,
+                    });
                 } else {
                     result = Some(Box::new(e));
                     break;
                 }
             }
             let end = self.expect(TokenKind::RBrace, " }")?;
-            Some(Expr::Block { stmts, result, span: start.merge(end) })
+            Some(Expr::Block {
+                stmts,
+                result,
+                span: start.merge(end),
+            })
         } else {
             self.parse_expr()
         }
@@ -714,7 +1060,9 @@ impl<'a> Parser<'a> {
     fn text_of_current(&self) -> String {
         if let Some(tok) = self.tokens.get(self.pos) {
             self.text_of(tok)
-        } else { String::new() }
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -728,12 +1076,18 @@ fn ty_span(t: &TypeExpr) -> Span {
 
 fn grade_dim_span(d: &GradeDim) -> Span {
     match d {
-        GradeDim::Cache { span, .. } | GradeDim::Ownership { span, .. } | GradeDim::Named { span, .. } | GradeDim::Infer(span) => *span,
+        GradeDim::Cache { span, .. }
+        | GradeDim::Ownership { span, .. }
+        | GradeDim::Named { span, .. }
+        | GradeDim::Infer(span) => *span,
     }
 }
 
 fn body_span(e: &Expr) -> Span {
+    // Updated for A.2: handle QueryChain (and keep Atom) so Program span calc (in parse()) for Item::Expr produces real span not always dummy.
+    // (parse_items already pushes Item::Expr for bare top-level or fn-body stmts that are queries.)
     match e {
+        Expr::QueryChain(q) => q.span,
         Expr::Atom(AtomExpr::Ident(s)) => s.span,
         Expr::Atom(AtomExpr::Int(_, sp)) | Expr::Atom(AtomExpr::Float(_, sp)) => *sp,
         _ => Span::dummy(),
@@ -749,4 +1103,81 @@ fn value_span(o: &OpticExpr) -> Span {
 }
 
 // Small placeholder for missing token in closure parsing (parser is lenient for first cut)
-const _ : () = ();
+const _: () = ();
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_field_index_for_s_healths_s_id() {
+        // A.3 golden: directly exercises EBNF field_expr with . and [ , and nested field in index.
+        // s.healths[s.id] must parse to Expr::Field( Index { base: FieldAccess{base:Base(s), field:healths}, index: Field(Access s.id) } )
+        let src = "s.healths[s.id]";
+        let sid = SourceId(0);
+        let res = parse(src, sid);
+        assert!(
+            res.is_ok(),
+            "expected parse ok for field[index] expr, got {:?}",
+            res.err()
+        );
+        let prog = res.unwrap();
+        // At least one Item::Expr that is a Field containing Index
+        let has_field_index = prog.items.iter().any(|item| {
+            if let Item::Expr(Expr::Field(FieldExpr::Index { base, .. })) = item {
+                matches!(&**base, FieldExpr::FieldAccess { .. })
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_field_index,
+            "parsed expr should contain Field Index over field access for healths[s.id]"
+        );
+    }
+
+    // A.9 golden tests for M0 (small EBNF fragments per app D)
+    #[test]
+    fn parses_data_decl_soa_vec2() {
+        let src = "data Entities { healths: SoA<f32>, positions: SoA<Vec2> }";
+        let sid = SourceId(0);
+        assert!(
+            parse(src, sid).is_ok(),
+            "data field_list + type SoA<Named no arg> per app D"
+        );
+    }
+
+    #[test]
+    fn parses_optic_get_put_with_field_index() {
+        let src = "optic V: GradedOptic<E, f32, CacheGrade<1>> { get s => s.h[s.id] put (s, v) => { s.h[s.id] = v } }";
+        let sid = SourceId(0);
+        assert!(
+            parse(src, sid).is_ok(),
+            "optic with get/put field[index] + block assign"
+        );
+    }
+
+    #[test]
+    fn parses_let_with_par() {
+        let src = "let c = A *** B;";
+        let sid = SourceId(0);
+        assert!(parse(src, sid).is_ok(), "let optic_par *** per EBNF");
+    }
+
+    #[test]
+    fn parses_query_map_closure() {
+        let src = "e.query(o).map(|(h, p)| h + 1.0);";
+        let sid = SourceId(0);
+        assert!(
+            parse(src, sid).is_ok(),
+            "query_chain + map closure (tuple params + body) per app D"
+        );
+    }
+
+    #[test]
+    fn parses_fn_with_arrow_ret() {
+        let src = "fn f(x: i32) -> i32 { x }";
+        let sid = SourceId(0);
+        assert!(parse(src, sid).is_ok(), "fn_decl with -> ret type per EBNF");
+    }
+}

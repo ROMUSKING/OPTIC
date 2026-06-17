@@ -7,3 +7,4 @@ edition.workspace = true
 optic-hir = { path = "../optic-hir" }
 optic-syntax = { path = "../optic-syntax" }
 optic-diagnostics = { path = "../optic-diagnostics" }
+serde_json.workspace = true

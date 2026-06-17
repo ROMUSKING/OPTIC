@@ -22,7 +22,8 @@ pub enum TokenKind {
     Seq,      // >>>
     Par,      // ***
     FatArrow, // =>
-    Le, Ge,   // <= >=  (for future exprs; book has < > etc in bin_op)
+    Le,
+    Ge, // <= >=  (for future exprs; book has < > etc in bin_op)
 
     // Punctuation
     Colon,
@@ -35,11 +36,14 @@ pub enum TokenKind {
     LBracket,
     RBracket,
     Dot,
-    Plus,     // grade +
+    Plus, // grade +
     Lt,
     Gt,
-    Star,     // only appears inside *** ; lone * is error per book
+    Star, // only appears inside *** ; lone * is error per book
     Equals,
+    Pipe,  // | for closures per app D "closure ::= '|' ..."
+    Minus, // - for binop per app D
+    Slash, // / for binop per app D
 
     // Comments are never emitted as tokens (lexed away)
     // Eof is implicit

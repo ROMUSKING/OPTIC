@@ -215,6 +215,19 @@
 - For Z3 later (if chosen): `cargo add z3 --features=static-link-z3` or system (libs present).
 - Verification commands will be added to the plan execution (e.g. `cargo test -p optic-syntax --test parser_golden`).
 
+## Hardware limits (constrained environments)
+
+Minimum **2 GB RAM** recommended for `rustc` and the `opticc run` verification harness.
+
+**Verification discipline:**
+- Single-crate checks: `cargo check -p <crate> --quiet`
+- Sequential tests: `cargo test -p <crate> -- --quiet` (one crate at a time; avoid full-workspace parallel builds)
+- Keep synthetic N caps modest in tests (N≤12 in hir, N≤8 in cgir integration)
+- Optional low-mem probe: `ulimit -v 2000000 cargo test -p optic-hir -- --ignored`
+- Run harness uses `/tmp/optic_verify` (cleaned after each run); relative path to `optic-runtime`
+
+**Implementation notes (ch8–ch11):** `Arc<OpticSummary>` for cheap sharing; `dedup_regions` O(n) on small region sets; compose produces new summary data per ch8.9.5.1 (unavoidable clone once per composition).
+
 ## 6. Execution Order & Verification
 
 We will implement bottom-up with continuous verification:
@@ -240,7 +253,31 @@ After full M5/M6: the workspace contains a self-contained, runnable, tested real
 
 This plan is derived directly from the book (specific chapter/appendix references above). Implementation will cross-reference the book in code comments and the final `docs/`.
 
-Next step after approval of this PLAN: begin Phase 0/1 scaffolding + first parser that accepts the EBNF examples. All code will be verified by compilation + execution of examples.
+## 8. Current progress (updated 2026-06-16)
+
+| Milestone | Status | Evidence |
+|---|---|---|
+| M0 lexer/parser | **mostly done** | Hand-written lexer/parser; `dump-tokens`, `dump-ast`; examples parse |
+| M1 HIR + summaries | **mostly done** | `dump-hir`; region extraction; compose/par summaries; golden `fixtures/hir/` |
+| M2 types/grades/alias | **mostly done** | `invalid_alias.opt` → ALI-101; `invalid_grade.opt` → GRA-104; alias checker per ch9 |
+| M3 CGIR + verifier | **in progress** | `dump-cgir [--before-fusion] [--check] [--node N]`; basic `verify()`; provenance on nodes |
+| M4 fusions | **partial** | Product → `FusedLoop` in `optic-opt`; map/compose fusion not yet sound-complete |
+| M5 Rust backend + run | **partial** | `transpile`, `run` harness; decay/position/get/set examples; codegen still uses demo map bodies for `.map` |
+| M6 release polish | **not started** | Fixtures sparse; `explain`/`doctor`/`bench`/`snapshot-update` not yet implemented |
+
+**Completed this iteration:**
+- Added root `.gitignore` (target/, IDE files, `/tmp` artifacts, generated `examples/*.rs`)
+- Removed CLI dead-code emitters (`emit_for_known`, `emit_early_rust_for_known_example`)
+- Added appendix B examples: `health_get.opt`, `health_set.opt`, `invalid_grade.opt`
+- Added `dump-ast`, `dump-cgir` CLI commands; CGIR `QueryGet`/`QuerySet` nodes; grade bound check (GRA-104)
+- AI-slop hygiene: tightened comments in impl crates; cleaned hardware section above
+
+**Next iteration priorities (M3–M6 gaps):**
+1. Golden fixtures: tokens/ast/cgir pre+post for all positive examples
+2. Sound map + compose fusion (ch10) with post-fusion verifier
+3. Codegen: lower real HirExpr map bodies from CGIR (not demo deltas)
+4. CLI: `explain`, `doctor`, `dump-summary`, `bench` stub per appendix B
+5. More negative fixtures: `grade_mismatch`, `unsupported_prism` (parse/type reject)
 
 ---
 

@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock policy: keep committed for binaries (opticc); ignore for pure libs if needed later
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test / verification temp dirs
+/tmp/optic_verify/
+/tmp/grok-*
+
+# Generated example output (transpile artifacts)
+examples/*.rs
+
+# Backup / patch artifacts
+*.orig
+*.rej

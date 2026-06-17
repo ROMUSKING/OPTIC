@@ -5,14 +5,16 @@
 pub struct SourceId(pub u32);
 
 impl Default for SourceId {
-    fn default() -> Self { SourceId(0) }
+    fn default() -> Self {
+        SourceId(0)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Span {
     pub source: SourceId,
     pub start: u32,
-    pub end: u32,   // exclusive
+    pub end: u32, // exclusive
 }
 
 impl Span {
@@ -21,11 +23,17 @@ impl Span {
     }
 
     pub fn dummy() -> Self {
-        Span { source: SourceId(0), start: 0, end: 0 }
+        Span {
+            source: SourceId(0),
+            start: 0,
+            end: 0,
+        }
     }
 
     #[inline]
-    pub fn len(&self) -> u32 { self.end.saturating_sub(self.start) }
+    pub fn len(&self) -> u32 {
+        self.end.saturating_sub(self.start)
+    }
 
     pub fn merge(self, other: Span) -> Span {
         if self.source != other.source {
@@ -33,7 +41,11 @@ impl Span {
         }
         let start = self.start.min(other.start);
         let end = self.end.max(other.end);
-        Span { source: self.source, start, end }
+        Span {
+            source: self.source,
+            start,
+            end,
+        }
     }
 }
 
