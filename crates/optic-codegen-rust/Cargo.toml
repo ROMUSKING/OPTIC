@@ -9,3 +9,6 @@ optic-hir = { path = "../optic-hir" }
 optic-syntax = { path = "../optic-syntax" }
 optic-opt = { path = "../optic-opt" }
 optic-runtime = { path = "../optic-runtime" }
+
+[dev-dependencies]
+optic-typeck = { path = "../optic-typeck" }

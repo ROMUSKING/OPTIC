@@ -1,0 +1,4 @@
+CGIR (2 nodes, roots [1])
+  [0] OpticLeaf(HealthView)  provenance=Build
+  [1] QuerySet(HealthView, val=42.0)  provenance=Build
+

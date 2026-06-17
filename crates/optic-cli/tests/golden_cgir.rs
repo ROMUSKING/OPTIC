@@ -68,3 +68,23 @@ fn golden_cgir_pre_health_position() {
 fn golden_cgir_post_health_position() {
     assert_golden("cgir/post", "health_position.opt", false);
 }
+
+#[test]
+fn golden_cgir_pre_health_get() {
+    assert_golden("cgir/pre", "health_get.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_health_get() {
+    assert_golden("cgir/post", "health_get.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_health_set() {
+    assert_golden("cgir/pre", "health_set.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_health_set() {
+    assert_golden("cgir/post", "health_set.opt", false);
+}

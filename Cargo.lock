@@ -362,6 +362,7 @@ dependencies = [
  "optic-opt",
  "optic-runtime",
  "optic-syntax",
+ "optic-typeck",
 ]
 
 [[package]]

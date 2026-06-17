@@ -1,0 +1,34 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-003",
+      "confidence": 0.9,
+      "evidence": {
+        "reason": "v0 does not support .map().set() chain"
+      },
+      "minimal_fix_options": [
+        "simplify map/set value expression"
+      ],
+      "next_commands": [
+        "optic dump-hir file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 0.0,
+        "source": 0.0,
+        "start": 0.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "simplify map/set value expression"
+        }
+      ],
+      "related_spans": [],
+      "rule": "v0 does not support .map().set() chain",
+      "severity": "error",
+      "title": "unsupported expression in query body"
+    }
+  ],
+  "ok": false
+}

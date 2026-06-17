@@ -1,0 +1,20 @@
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PositionView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+let combined = HealthView *** PositionView;
+
+fn main() {
+    entities.query(combined).map(|(h, p)| h);
+}

@@ -14,7 +14,7 @@ pub struct Program {
 #[derive(Debug, Clone)]
 pub enum Item {
     Data(DataDecl),
-    Optic(OpticDecl),
+    Optic(Box<OpticDecl>),
     Let(LetBinding),
     Fn(FnDecl),
     /// Top-level expr stmt (for demo/scripts; EBNF items are decls but examples use bare queries)

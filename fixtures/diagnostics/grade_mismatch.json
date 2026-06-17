@@ -1,0 +1,60 @@
+{
+  "diagnostics": [
+    {
+      "code": "GRA-104",
+      "confidence": 0.9,
+      "evidence": {
+        "annotated": 2.0,
+        "binding": "bad",
+        "inferred": 4.0,
+        "lhs_cache": 2.0,
+        "rhs_cache": 2.0
+      },
+      "minimal_fix_options": [
+        "raise sequential CacheGrade bound",
+        "split composition into separate queries"
+      ],
+      "next_commands": [
+        "optic explain GRA-104",
+        "optic dump-summary --node ..."
+      ],
+      "phase": "grade",
+      "primary_span": {
+        "end": 375.0,
+        "source": 1.0,
+        "start": 372.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "raise sequential CacheGrade bound"
+        },
+        {
+          "confidence": 0.9,
+          "description": "split composition into separate queries"
+        }
+      ],
+      "related_spans": [
+        {
+          "end": 375.0,
+          "source": 1.0,
+          "start": 372.0
+        },
+        {
+          "end": 371.0,
+          "source": 1.0,
+          "start": 370.0
+        },
+        {
+          "end": 377.0,
+          "source": 1.0,
+          "start": 376.0
+        }
+      ],
+      "rule": "sequential composition cache exceeds declared bound",
+      "severity": "error",
+      "title": "sequential composition exceeds cache bound"
+    }
+  ],
+  "ok": false
+}

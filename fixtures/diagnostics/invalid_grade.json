@@ -1,0 +1,48 @@
+{
+  "diagnostics": [
+    {
+      "code": "GRA-110",
+      "confidence": 0.9,
+      "evidence": {
+        "annotated": 1.0,
+        "inferred": 3.0,
+        "optic": "BadCache"
+      },
+      "minimal_fix_options": [
+        "raise CacheGrade annotation",
+        "reduce read/write regions in optic body"
+      ],
+      "next_commands": [
+        "optic explain GRA-110",
+        "optic dump-summary --node ..."
+      ],
+      "phase": "grade",
+      "primary_span": {
+        "end": 399.0,
+        "source": 1.0,
+        "start": 214.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "raise CacheGrade annotation"
+        },
+        {
+          "confidence": 0.9,
+          "description": "reduce read/write regions in optic body"
+        }
+      ],
+      "related_spans": [
+        {
+          "end": 284.0,
+          "source": 1.0,
+          "start": 257.0
+        }
+      ],
+      "rule": "declared CacheGrade is tighter than inferred from optic body",
+      "severity": "error",
+      "title": "declared grade tighter than inferred"
+    }
+  ],
+  "ok": false
+}

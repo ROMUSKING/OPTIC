@@ -576,10 +576,10 @@ Program {
                                                 ),
                                                 span: Span {
                                                     source: SourceId(
-                                                        0,
+                                                        1,
                                                     ),
-                                                    start: 0,
-                                                    end: 0,
+                                                    start: 451,
+                                                    end: 459,
                                                 },
                                             },
                                             span: Span {

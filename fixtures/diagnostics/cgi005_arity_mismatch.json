@@ -1,0 +1,32 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-005",
+      "confidence": 1.0,
+      "evidence": {},
+      "minimal_fix_options": [
+        "fix map body tuple arity or unsupported forms"
+      ],
+      "next_commands": [
+        "optic transpile file.opt"
+      ],
+      "phase": "codegen",
+      "primary_span": {
+        "end": 0.0,
+        "source": 0.0,
+        "start": 0.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "fix map body tuple arity or unsupported forms"
+        }
+      ],
+      "related_spans": [],
+      "rule": "product map tuple arity mismatch: 2 regions, body Var(\"h\", Span { source: SourceId(1), start: 478, end: 479 })",
+      "severity": "error",
+      "title": "codegen failed"
+    }
+  ],
+  "ok": false
+}

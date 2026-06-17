@@ -1,0 +1,5 @@
+data Entities { healths: SoA<f32> }
+
+fn main() {
+    entities.query(NotDeclared).get();
+}

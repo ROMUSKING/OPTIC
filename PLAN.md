@@ -223,8 +223,10 @@ Minimum **2 GB RAM** recommended for `rustc` and the `opticc run` verification h
 - Single-crate checks: `cargo check -p <crate> --quiet`
 - Sequential tests: `cargo test -p <crate> -- --quiet` (one crate at a time; avoid full-workspace parallel builds)
 - Keep synthetic N caps modest in tests (N≤12 in hir, N≤8 in cgir integration)
-- Optional low-mem probe: `ulimit -v 2000000 cargo test -p optic-hir -- --ignored`
-- Run harness uses `tempfile::tempdir()` (auto-cleaned per run); relative path to `optic-runtime`
+- Optional low-mem probes (manual): `ulimit -v 2000000 cargo test -p optic-syntax -- --ignored` and `ulimit -v 2000000 cargo test -p optic-hir -- --ignored`
+- Run harness uses `tempfile::tempdir()` (auto-cleaned per run); `optic-runtime` path is canonicalized and must stay inside the workspace root (symlinks escaping the repo are rejected)
+- **Trust boundary:** `opticc run` / `optic bench` invoke `cargo` in an isolated env (temp `HOME`/`CARGO_HOME`, fixed tool `PATH`) but **do not** use OS-level sandboxing (namespaces/seccomp). Intentional for trusted-local dev/CI — treat untrusted `.opt` as `check` only
+- Cargo stderr from the run harness is redacted by default (`--verbose` for full output)
 
 **Implementation notes (ch8–ch11):** `Arc<OpticSummary>` for cheap sharing; `dedup_regions` O(n) on small region sets; compose produces new summary data per ch8.9.5.1 (unavoidable clone once per composition).
 
@@ -253,17 +255,17 @@ After full M5/M6: the workspace contains a self-contained, runnable, tested real
 
 This plan is derived directly from the book (specific chapter/appendix references above). Implementation will cross-reference the book in code comments and the final `docs/`.
 
-## 8. Current progress (updated 2026-06-17, review pass 5e79ac44)
+## 8. Current progress (updated 2026-06-17, review pass 5e79ac44 round 6)
 
 | Milestone | Status | Evidence |
 |---|---|---|
-| M0 lexer/parser | **mostly done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative tokens) |
-| M1 HIR + summaries | **mostly done** | Tuple/`TupleProj`; HIR map-chain fusion; `Unsupported` lowering; `fixtures/hir/health_position.txt` |
-| M2 types/grades/alias | **mostly done** | ch9.9.3 inference; GRA-110/GRA-104; ALI-201; `check` runs CGIR+verify |
-| M3 CGIR + verifier | **mostly done** | `resolved_optics` alias map; `dump-cgir --check` passes decay alias; CGIR goldens |
-| M4 fusions | **partial** | ch10 order map→compose→product; compose FusedLoop; verify propagated; CGIR map_fusion infra |
-| M5 Rust backend + run | **partial** | Product spine region order; execution tests; harness via `tempfile` (see §5) |
-| M6 release polish | **in progress** | `explain`/`doctor`/`dump-summary`/`bench`/`snapshot-update`; JSON diagnostic goldens started |
+| M0 lexer/parser | **mostly done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative tokens); parser hang regression test |
+| M1 HIR + summaries | **mostly done** | Tuple/`TupleProj`; HIR map-chain fusion + multi-param guard; `Arc<HirExpr>` map bodies shared to CGIR; HIR goldens for all positive examples (`fixtures/hir/`); `cargo test -p optic-hir golden_hir` |
+| M2 types/grades/alias | **mostly done** | ch9.9.3 inference; GRA-110/GRA-104/ALI-201 with `related_spans`; `check` runs CGIR+verify+codegen dry-run |
+| M3 CGIR + verifier | **mostly done** | `resolved_optics` alias map; reachability GC through query→optic spine; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
+| M4 fusions | **partial — OUT OF SCOPE this /implement run** | ch10 order map→compose→product; map fusion + FusedLoop provenance for compose/product. **Next /implement gate:** full compose body rewrite (ch10) + execution equivalence tests. Reviewers: explicit PLAN deferral — not a defect in this delivery. |
+| M5 Rust backend + run | **mostly done** | `is_valid_rust_ident` + keyword denylist + hostile-name emit test; `fixtures/rust/` emit shape tests (all four positives); execution + transpile-compile tests; `fixtures/bench/` baselines |
+| M6 release polish | **mostly done** | Full diagnostic JSON witnesses (GRA/ALI/PAR/CGI/RES) with `ranked_fixes` regression; security regression tests; sandboxed toolchain env; bench + execution for all positives; `--verbose` cargo stderr |
 
 **Diagnostic catalog (aligned to book):**
 - GRA-110: optic-decl CacheGrade tighter than inferred (ch9.9.3)
@@ -273,12 +275,11 @@ This plan is derived directly from the book (specific chapter/appendix reference
 
 **Positive examples** use `CacheGrade<2>` for single-field get+put lenses (inferred cache = sat_add(1,1) = 2).
 
-**Next iteration priorities:**
-1. Full compose fusion body rewrite (not just FusedLoop annotation) + equivalence tests
-2. Freeze all diagnostic JSON witnesses (`related_spans`, `ranked_fixes`) in `fixtures/diagnostics/`
-3. CGIR goldens for `health_get`/`health_set` and negative examples
-4. Box large AST variants (clippy `large_enum_variant`); low-mem `#[ignore]` probes
-5. M5 bench baselines committed and timing regression enforced in CI
+**Next iteration priorities (/implement gate):**
+1. **M4:** Full compose fusion body rewrite (ch10) + execution equivalence tests
+2. Broader codegen hardening beyond `is_valid_rust_ident` + keyword denylist
+
+**Done (round 6):** HIR goldens (decay/get/set/position); PAR-001 `ranked_fixes`; security regression suite; runtime path canonicalization; cargo stderr redaction (`--verbose`); hostile-name codegen pipeline test
 
 ---
 

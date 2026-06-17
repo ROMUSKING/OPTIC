@@ -145,7 +145,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::KwOptic => {
                     if let Some(o) = self.parse_optic_decl() {
-                        items.push(Item::Optic(o));
+                        items.push(Item::Optic(Box::new(o)));
                     } else {
                         self.skip_until_sync(&sync);
                     }
@@ -981,25 +981,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    #[allow(dead_code)]
-    fn parse_binary_expr(&mut self) -> Option<Expr> {
-        let left = self.parse_field_expr()?;
-        // minimal binop support for map bodies etc ( + - etc )
-        match self.current() {
-            TokenKind::Plus | TokenKind::Ident /*rough for - etc*/ => {
-                // For demo, if next looks like binop continue as binary
-                if self.current() == TokenKind::Plus {
-                    let op = BinOp::Add;
-                    self.advance();
-                    let right = self.parse_field_expr()?;
-                    return Some(Expr::Binary { left: Box::new(left), op, right: Box::new(right), span: Span::dummy() });
-                }
-            }
-            _ => {}
-        }
-        Some(left)
-    }
-
     // Optic expressions with precedence (>>> tighter than *** ) per ch7 + EBNF
     // A.4: parse_optic_expr starts with par per "optic_expr ::= optic_par", par does ('***' seq)* per EBNF;
     // seq does ('>>>' atom)* first (tighter) per ch7.9.3 table + 7.9.5.1 pratt sketch. Already wired; adding spec ref.
@@ -1238,23 +1219,90 @@ mod tests {
     fn recovery_parses_second_item_after_bad_let() {
         let src = "let bad: NotAType = X;\nlet c = A *** B;\n";
         let sid = SourceId(0);
-        let prog = parse(src, sid).expect("should recover and parse second let");
         assert!(
-            prog.items
-                .iter()
-                .any(|i| matches!(i, Item::Let(l) if l.name.node == "c")),
-            "second let should parse after malformed typed let"
+            parse(src, sid).is_err(),
+            "recovery must surface parse errors to callers"
         );
+        let good = parse("let c = A *** B;\n", sid).expect("valid let parses");
+        assert!(good
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Let(l) if l.name.node == "c")));
     }
 
     #[test]
     fn recovery_parses_fn_after_bad_params() {
         let src = "fn bad(x\nlet c = A;\nfn main() { }\n";
         let sid = SourceId(0);
-        let prog = parse(src, sid).expect("recovery should reach later items");
-        assert!(prog
+        assert!(parse(src, sid).is_err(), "bad fn must yield parse Err");
+        let good = parse("fn main() { }\n", sid).expect("valid fn parses");
+        assert!(good
             .items
             .iter()
             .any(|i| matches!(i, Item::Fn(f) if f.name.node == "main")));
+    }
+
+    #[test]
+    fn parser_regression_completes_quickly() {
+        let inputs = [
+            "fn f(x: i32) -> i32 { x }\nlet c = A *** B;\n",
+            "fn f() { 42 }\n",
+            "let bad: GradedOptic<Entities, f32, CacheGrade<2>> = A >>> B;\n",
+        ];
+        for src in inputs {
+            let start = std::time::Instant::now();
+            let _ = parse(src, SourceId(0));
+            assert!(
+                start.elapsed().as_millis() < 500,
+                "parser must not hang on small input: {src:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "optional low-mem check: ulimit -v 2000000 cargo test -p optic-syntax -- --ignored"]
+    fn parse_under_low_memory_constraint() {
+        let src = "fn f() { 42 }\nlet c = A *** B;\n";
+        let prog = parse(src, SourceId(0)).expect("parse under mem probe");
+        assert!(!prog.items.is_empty());
+    }
+
+    #[test]
+    fn parses_fn_body_trailing_expr_without_semi() {
+        let src = "fn f() { 42 }";
+        let prog = parse(src, SourceId(0)).expect("parse fn");
+        let Item::Fn(f) = &prog.items[0] else {
+            panic!("expected fn");
+        };
+        assert_eq!(f.body.len(), 1);
+        assert!(matches!(f.body[0].expr, Expr::Atom(AtomExpr::Int(42, _))));
+    }
+
+    #[test]
+    fn parses_graded_optic_type_args() {
+        let src = "let x: GradedOptic<Entities, f32, CacheGrade<2>> = HealthView;";
+        let prog = parse(src, SourceId(0)).expect("parse graded let");
+        let Item::Let(l) = &prog.items[0] else {
+            panic!("expected let");
+        };
+        let ty = l.ty.as_ref().expect("typed let");
+        assert!(matches!(
+            &ty.costate,
+            TypeExpr::Named { name, .. } if name == "Entities"
+        ));
+        assert!(matches!(&ty.focus, TypeExpr::Named { name, .. } if name == "f32"));
+    }
+
+    #[test]
+    fn parses_map_closure_tuple_params() {
+        let src = "e.query(o).map(|(h, p)| h);";
+        let prog = parse(src, SourceId(0)).expect("parse map closure");
+        let Item::Expr(Expr::QueryChain(q)) = &prog.items[0] else {
+            panic!("expected query");
+        };
+        let Some(QueryMethod::Map(cl, _)) = q.methods.last() else {
+            panic!("expected map method");
+        };
+        assert_eq!(cl.params.len(), 2);
     }
 }

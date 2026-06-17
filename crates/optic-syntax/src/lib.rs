@@ -134,4 +134,31 @@ mod golden_tests {
         let src = std::fs::read_to_string(examples_dir().join("invalid_alias.opt")).expect("read");
         assert_golden("tokens", "invalid_alias", &dump_tokens(&src, SourceId(1)));
     }
+
+    #[test]
+    fn golden_ast_invalid_grade() {
+        let src = std::fs::read_to_string(examples_dir().join("invalid_grade.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "invalid_grade", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_ast_invalid_alias() {
+        let src = std::fs::read_to_string(examples_dir().join("invalid_alias.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "invalid_alias", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_grade_mismatch() {
+        let src = std::fs::read_to_string(examples_dir().join("grade_mismatch.opt")).expect("read");
+        assert_golden("tokens", "grade_mismatch", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_grade_mismatch() {
+        let src = std::fs::read_to_string(examples_dir().join("grade_mismatch.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "grade_mismatch", &dump_ast(&prog));
+    }
 }

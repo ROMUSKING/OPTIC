@@ -23,7 +23,7 @@ pub struct FusionProvenance {
     pub reason: FusionReason,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FusionReason {
     /// Pre-fusion graph node from CGIR build (not a rewrite).
     Build,
@@ -82,7 +82,7 @@ pub enum CgirNode {
         costate: String,
         cursor: String,
         map_param: String,
-        map_body: hir::HirExpr,
+        map_body: std::sync::Arc<hir::HirExpr>,
         provenance: Span,
     },
     FusedLoop {
@@ -254,7 +254,6 @@ pub fn build(
                         );
                     }
                 }
-                _ => {}
             },
             hir::HirItem::Query(q) => {
                 query_count += 1;
@@ -311,7 +310,7 @@ pub fn build(
                         costate: q.costate.clone(),
                         cursor: q.cursor.clone(),
                         map_param: param.clone(),
-                        map_body: body.clone(),
+                        map_body: std::sync::Arc::clone(body),
                         provenance: q.span,
                     },
                 };
@@ -331,12 +330,9 @@ pub fn build(
     }
 
     if query_count > 1 {
-        return Err(vec![optic_diagnostics::cgir_diag(
-            optic_diagnostics::CGIR_MULTI_QUERY,
-            Span::dummy(),
-            "v0 supports at most one query root per program",
-            serde_json::json!({ "query_count": query_count }),
-        )]);
+        return Err(vec![optic_diagnostics::fusion_verify_diag(&format!(
+            "v0 supports at most one query root per program (query_count={query_count})"
+        ))]);
     }
 
     Ok(CgirGraph {
@@ -408,6 +404,7 @@ pub fn format_hir_expr(e: &hir::HirExpr) -> String {
                 format_hir_expr(right)
             )
         }
+        hir::HirExpr::Paren(inner, _) => format!("({})", format_hir_expr(inner)),
         hir::HirExpr::Tuple(elems, _) => {
             let parts: Vec<_> = elems.iter().map(format_hir_expr).collect();
             format!("({})", parts.join(", "))
@@ -492,7 +489,13 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
             _ => {}
         }
     }
-    // Reachability: every non-OpticLeaf node must be reachable from roots or be a dependency.
+    // Reachability: orphan QueryMaps are invalid unless superseded by fusion provenance.
+    let mut superseded = std::collections::HashSet::new();
+    for prov in g.provenance_index.values() {
+        for &oid in &prov.original_ids {
+            superseded.insert(oid);
+        }
+    }
     let mut live = std::collections::HashSet::new();
     for &r in &g.roots {
         mark_reachable(g, r, &mut live);
@@ -503,9 +506,9 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
             live.insert(id);
         }
         if !live.contains(&id) {
-            if matches!(node, CgirNode::QueryMap { .. }) {
+            if matches!(node, CgirNode::QueryMap { .. }) && !superseded.contains(&id) {
                 return Err(format!(
-                    "node {idx}: unreachable orphan QueryMap after fusion"
+                    "node {id}: unreachable orphan QueryMap after fusion"
                 ));
             }
         }
@@ -530,6 +533,13 @@ fn mark_reachable(g: &CgirGraph, id: NodeId, live: &mut std::collections::HashSe
             CgirNode::FusedLoop { original_ids, .. } => {
                 for &oid in original_ids {
                     mark_reachable(g, oid, live);
+                }
+            }
+            CgirNode::QueryGet { optic_name, .. }
+            | CgirNode::QuerySet { optic_name, .. }
+            | CgirNode::QueryMap { optic_name, .. } => {
+                if let Some(&nid) = g.resolved_optics.get(optic_name) {
+                    mark_reachable(g, nid, live);
                 }
             }
             _ => {}

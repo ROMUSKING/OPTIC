@@ -124,7 +124,7 @@ pub struct HirQuery {
 pub enum QueryKind {
     Get,
     Set { value: HirExpr },
-    Map { param: String, body: HirExpr },
+    Map { param: String, body: Arc<HirExpr> },
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +148,8 @@ pub enum HirExpr {
         right: Box<HirExpr>,
         span: Span,
     },
+    /// Parenthesized subexpression (distinct from 1-tuple for product maps).
+    Paren(Box<HirExpr>, Span),
     /// Tuple literal / product focus value (ch8 product queries).
     Tuple(Vec<HirExpr>, Span),
     /// Tuple field projection, e.g. `p.0` in map bodies.
@@ -196,6 +198,7 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
         match item {
             syn::Item::Data(d) => hir_items.push(HirItem::Data(d)),
             syn::Item::Optic(decl) => {
+                let decl = *decl;
                 let summary = build_summary_from_decl(&decl, &optic_env);
                 let arc = Arc::new(summary);
                 optic_env.insert(decl.name.node.clone(), Arc::clone(&arc));
@@ -304,6 +307,69 @@ optic HealthView: GradedOptic<Entities, f32, CacheGrade<1>> {
     }
 
     #[test]
+    fn test_reject_get_map_lowers_unsupported() {
+        let src = r#"
+optic H: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).get().map(|h| h); }
+"#;
+        let prog = parse(src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let unsupported = hirp.items.iter().any(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return matches!(
+                        body.as_ref(),
+                        HirExpr::Unsupported { reason, .. }
+                            if reason.contains(".get().map()")
+                    );
+                }
+            }
+            false
+        });
+        assert!(unsupported, "get().map() must lower to Unsupported");
+    }
+
+    fn assert_hir_golden(example: &str) {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(example);
+        let src = std::fs::read_to_string(&path).expect("read example");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let actual = dump_hir(&hirp);
+        let stem = example.trim_end_matches(".opt");
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/hir")
+            .join(format!("{stem}.txt"));
+        if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+            std::fs::write(&fixture, &actual).expect("write golden");
+        } else {
+            let expected = std::fs::read_to_string(&fixture).expect("hir golden");
+            assert_eq!(actual, expected, "HIR golden mismatch for {example}");
+        }
+    }
+
+    #[test]
+    fn golden_hir_health_decay() {
+        assert_hir_golden("health_decay.opt");
+    }
+
+    #[test]
+    fn golden_hir_health_get() {
+        assert_hir_golden("health_get.opt");
+    }
+
+    #[test]
+    fn golden_hir_health_set() {
+        assert_hir_golden("health_set.opt");
+    }
+
+    #[test]
+    fn golden_hir_health_position() {
+        assert_hir_golden("health_position.opt");
+    }
+
+    #[test]
     fn test_fuse_map_chain_substitutes_body() {
         let src = r#"
 optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
@@ -314,7 +380,7 @@ fn main() { entities.query(H).map(|h| h - 1.0).map(|x| x * 2.0); }
         let map_body = hirp.items.iter().find_map(|it| {
             if let HirItem::Query(q) = it {
                 if let QueryKind::Map { body, .. } = &q.kind {
-                    return Some(body.clone());
+                    return Some(body.as_ref().clone());
                 }
             }
             None
@@ -337,6 +403,98 @@ fn main() { entities.query(H).map(|h| h - 1.0).map(|x| x * 2.0); }
     }
 
     #[test]
+    fn test_fuse_map_chain_multi_param_tuple() {
+        let src = r#"
+data E { healths: SoA<f32>, positions: SoA<f32> }
+optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+optic P: GradedOptic<E,f32,_> { get s=>s.positions[s.id] put(s,v)=>{s.positions[s.id]=v} }
+let c = H *** P;
+fn main() { entities.query(c).map(|(h,p)| (h - 1.0, p + 1.0)).map(|(x,y)| (x * 2.0, y)); }
+"#;
+        let prog = parse(src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let body = hirp.items.iter().find_map(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return Some(body.as_ref().clone());
+                }
+            }
+            None
+        });
+        let body = body.expect("fused product map");
+        match body {
+            HirExpr::Tuple(elems, _) => {
+                assert_eq!(elems.len(), 2);
+                match &elems[0] {
+                    HirExpr::Bin {
+                        op: syn::BinOp::Mul,
+                        left,
+                        ..
+                    } => match &**left {
+                        HirExpr::Bin {
+                            op: syn::BinOp::Sub,
+                            ..
+                        } => {}
+                        other => panic!("expected fused sub in mul tuple arm, got {other:?}"),
+                    },
+                    other => panic!("expected mul in tuple arm 0, got {other:?}"),
+                }
+            }
+            other => panic!("expected fused tuple body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_incompatible_map_chain_lowers_unsupported() {
+        let src = r#"
+data E { healths: SoA<f32>, positions: SoA<f32> }
+optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).map(|h| h).map(|(x,y)| (x,y)); }
+"#;
+        let prog = parse(src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let unsupported = hirp.items.iter().any(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return matches!(
+                        body.as_ref(),
+                        HirExpr::Unsupported { reason, .. }
+                            if reason.contains("incompatible map chain")
+                    );
+                }
+            }
+            false
+        });
+        assert!(
+            unsupported,
+            "incompatible map chain must lower to Unsupported"
+        );
+    }
+
+    #[test]
+    fn test_map_set_lowers_unsupported_for_cgi003() {
+        let src = r#"
+optic H: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).map(|h| h - 1.0).set(42.0); }
+"#;
+        let prog = parse(src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let unsupported = hirp.items.iter().any(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return matches!(
+                        body.as_ref(),
+                        HirExpr::Unsupported { reason, .. }
+                            if reason.contains(".map().set()")
+                    );
+                }
+            }
+            false
+        });
+        assert!(unsupported, ".map().set() must lower to Unsupported");
+    }
+
+    #[test]
     fn test_dump_hir_and_query_map_lowering() {
         let src = r#"
 optic H: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
@@ -345,11 +503,7 @@ fn main() { entities.query(H).map(|h| h - 1 ); }
         let prog = parse(src, SourceId(1)).expect("p");
         let hirp = lower(prog).expect("l");
         let d = dump_hir(&hirp);
-        assert!(
-            d.contains("Optic") || d.contains("Query"),
-            "dump shows items"
-        );
-        // structural: has Query + Map kind (not just contains)
+        assert!(d.contains("Query"), "dump_hir must contain Query item");
         let has_query_map = hirp.items.iter().any(|it| {
             if let HirItem::Query(q) = it {
                 matches!(q.kind, QueryKind::Map { .. })
@@ -358,6 +512,25 @@ fn main() { entities.query(H).map(|h| h - 1 ); }
             }
         });
         assert!(has_query_map, "lowered QueryMap present");
+        assert!(
+            d.contains("kind="),
+            "dump_hir must include query kind discriminant"
+        );
+        let map_body = hirp.items.iter().find_map(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return Some(body.as_ref());
+                }
+            }
+            None
+        });
+        match map_body.expect("map body") {
+            HirExpr::Bin {
+                op: syn::BinOp::Sub,
+                ..
+            } => {}
+            other => panic!("expected Sub in map body, got {other:?}"),
+        }
     }
 
     #[test]
@@ -905,15 +1078,18 @@ fn lower_query_methods_to_kind(methods: &[syn::QueryMethod]) -> QueryKind {
             syn::QueryMethod::Set(_, _) if seen_map => {
                 return QueryKind::Map {
                     param: "it".into(),
-                    body: HirExpr::Unsupported {
+                    body: Arc::new(HirExpr::Unsupported {
                         reason: "v0 does not support .map().set() chain".into(),
                         span: Span::dummy(),
-                    },
+                    }),
                 };
             }
             _ => {}
         }
     }
+    let has_get = methods
+        .iter()
+        .any(|m| matches!(m, syn::QueryMethod::Get(_)));
     let map_closures: Vec<&syn::Closure> = methods
         .iter()
         .filter_map(|m| {
@@ -924,6 +1100,22 @@ fn lower_query_methods_to_kind(methods: &[syn::QueryMethod]) -> QueryKind {
             }
         })
         .collect();
+    if has_get && !map_closures.is_empty() {
+        let span = methods
+            .iter()
+            .find_map(|m| match m {
+                syn::QueryMethod::Get(sp) => Some(*sp),
+                _ => None,
+            })
+            .unwrap_or_else(Span::dummy);
+        return QueryKind::Map {
+            param: "it".into(),
+            body: Arc::new(HirExpr::Unsupported {
+                reason: "v0 does not support .get().map() chain".into(),
+                span,
+            }),
+        };
+    }
     if !map_closures.is_empty() {
         return fuse_map_chain(&map_closures);
     }
@@ -955,13 +1147,28 @@ fn fuse_map_chain(maps: &[&syn::Closure]) -> QueryKind {
     let param = closure_param(maps[0]);
     let mut body = lower_expr(&maps[0].body);
     for cl in maps.iter().skip(1) {
+        if cl.params.len() > 1 && !matches!(body, HirExpr::Tuple(_, _)) {
+            return QueryKind::Map {
+                param,
+                body: Arc::new(HirExpr::Unsupported {
+                    reason: "incompatible map chain: multi-param map requires tuple focus from prior map".into(),
+                    span: cl.span,
+                }),
+            };
+        }
         let next = lower_expr(&cl.body);
         body = substitute_closure_params(&next, cl, &body);
     }
-    QueryKind::Map { param, body }
+    QueryKind::Map {
+        param,
+        body: Arc::new(body),
+    }
 }
 
 fn substitute_closure_params(e: &HirExpr, cl: &syn::Closure, repl: &HirExpr) -> HirExpr {
+    if cl.params.len() > 1 && !matches!(repl, HirExpr::Tuple(_, _)) {
+        return e.clone();
+    }
     if cl.params.len() > 1 {
         if let HirExpr::Tuple(elems, _) = repl {
             let mut out = e.clone();
@@ -977,6 +1184,24 @@ fn substitute_closure_params(e: &HirExpr, cl: &syn::Closure, repl: &HirExpr) -> 
 
 fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
     match e {
+        HirExpr::CursorField {
+            cursor,
+            field: _,
+            span: _,
+        }
+        | HirExpr::CursorIndex {
+            cursor,
+            field: _,
+            span: _,
+        } => {
+            if cursor == name {
+                repl.clone()
+            } else {
+                e.clone()
+            }
+        }
+        HirExpr::LitInt(n, sp) => HirExpr::LitInt(*n, *sp),
+        HirExpr::LitFloat(f, sp) => HirExpr::LitFloat(*f, *sp),
         HirExpr::Var(v, sp) if v == name => repl.clone(),
         HirExpr::Var(v, sp) => HirExpr::Var(v.clone(), *sp),
         HirExpr::Bin {
@@ -997,6 +1222,9 @@ fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
                 .collect(),
             *sp,
         ),
+        HirExpr::Paren(inner, sp) => {
+            HirExpr::Paren(Box::new(substitute_hir_var(inner, name, repl)), *sp)
+        }
         HirExpr::TupleProj { base, index, span } => HirExpr::TupleProj {
             base: Box::new(substitute_hir_var(base, name, repl)),
             index: *index,
@@ -1006,7 +1234,6 @@ fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
             reason: reason.clone(),
             span: *span,
         },
-        other => other.clone(),
     }
 }
 
@@ -1030,7 +1257,7 @@ fn lower_expr(e: &syn::Expr) -> HirExpr {
         syn::Expr::Atom(syn::AtomExpr::Float(f, sp)) => HirExpr::LitFloat(*f, *sp),
         syn::Expr::Atom(syn::AtomExpr::Ident(id)) => HirExpr::Var(id.node.clone(), id.span),
         syn::Expr::Atom(syn::AtomExpr::Paren(inner, sp)) => {
-            HirExpr::Tuple(vec![lower_expr(inner)], *sp)
+            HirExpr::Paren(Box::new(lower_expr(inner)), *sp)
         }
         syn::Expr::Atom(syn::AtomExpr::Tuple(exprs, sp)) => {
             HirExpr::Tuple(exprs.iter().map(lower_expr).collect(), *sp)
@@ -1057,14 +1284,25 @@ fn lower_field_expr(fe: &syn::FieldExpr) -> HirExpr {
                 other => lower_field_expr(other),
             };
             if field.node.chars().all(|c| c.is_ascii_digit()) {
-                let idx: u32 = field.node.parse().unwrap_or(0);
-                HirExpr::TupleProj {
-                    base: Box::new(base_h),
-                    index: idx,
-                    span: *span,
+                match field.node.parse::<u32>() {
+                    Ok(idx) => HirExpr::TupleProj {
+                        base: Box::new(base_h),
+                        index: idx,
+                        span: *span,
+                    },
+                    Err(_) => HirExpr::Unsupported {
+                        reason: format!("invalid tuple index `{}`", field.node),
+                        span: *span,
+                    },
                 }
             } else {
-                HirExpr::Var(field.node.clone(), field.span)
+                HirExpr::Unsupported {
+                    reason: format!(
+                        "record field access `.{}` not supported in map body",
+                        field.node
+                    ),
+                    span: field.span,
+                }
             }
         }
         syn::FieldExpr::Index { base, index, span } => {

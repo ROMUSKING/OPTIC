@@ -1,0 +1,34 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-003",
+      "confidence": 0.9,
+      "evidence": {
+        "reason": "incompatible map chain: multi-param map requires tuple focus from prior map"
+      },
+      "minimal_fix_options": [
+        "simplify map/set value expression"
+      ],
+      "next_commands": [
+        "optic dump-hir file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 224.0,
+        "source": 1.0,
+        "start": 221.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "simplify map/set value expression"
+        }
+      ],
+      "related_spans": [],
+      "rule": "incompatible map chain: multi-param map requires tuple focus from prior map",
+      "severity": "error",
+      "title": "unsupported expression in query body"
+    }
+  ],
+  "ok": false
+}

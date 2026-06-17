@@ -1,4 +1,4 @@
 CGIR (2 nodes, roots [1])
-  [0] OpticLeaf(HealthView)  provenance=ProductFlattening
-  [1] QueryMap(decay)  provenance=MapFusion
+  [0] OpticLeaf(HealthView)  provenance=Build
+  [1] QueryMap(decay)  provenance=Build
 

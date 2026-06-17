@@ -21,6 +21,17 @@ fn explain_gra104() {
 }
 
 #[test]
+fn explain_cgi_codes() {
+    for code in ["CGI-003", "CGI-004", "CGI-005", "RES-001"] {
+        opticc()
+            .args(["explain", code])
+            .assert()
+            .success()
+            .stdout(predicates::str::contains(code));
+    }
+}
+
+#[test]
 fn doctor_ok() {
     opticc()
         .arg("doctor")

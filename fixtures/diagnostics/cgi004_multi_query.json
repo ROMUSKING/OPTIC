@@ -1,0 +1,32 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-004",
+      "confidence": 1.0,
+      "evidence": {},
+      "minimal_fix_options": [
+        "optic dump-cgir file.opt --check"
+      ],
+      "next_commands": [
+        "optic dump-cgir file.opt --check"
+      ],
+      "phase": "fusion",
+      "primary_span": {
+        "end": 0.0,
+        "source": 0.0,
+        "start": 0.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "optic dump-cgir file.opt --check"
+        }
+      ],
+      "related_spans": [],
+      "rule": "v0 supports at most one query root per program (query_count=2)",
+      "severity": "error",
+      "title": "fusion or CGIR verify failed"
+    }
+  ],
+  "ok": false
+}

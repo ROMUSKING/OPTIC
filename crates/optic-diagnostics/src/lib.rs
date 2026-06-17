@@ -77,6 +77,8 @@ pub const ALIAS_CONFLICT: &str = "ALI-201";
 pub const RESOLVE_UNKNOWN: &str = "RES-001";
 pub const CGIR_MULTI_QUERY: &str = "CGI-001";
 pub const CGIR_UNRESOLVED_OPTIC: &str = "CGI-002";
+pub const CGIR_UNSUPPORTED_EXPR: &str = "CGI-003";
+pub const CGIR_VERIFY_FAILED: &str = "CGI-004";
 
 fn ranked(fixes: &[&str]) -> Vec<RankedFix> {
     fixes
@@ -90,6 +92,10 @@ fn ranked(fixes: &[&str]) -> Vec<RankedFix> {
 }
 
 pub fn parse_diag(span: Span, message: String) -> Diagnostic {
+    let fixes = vec![
+        "fix syntax near primary span".into(),
+        "compare with appendix D EBNF".into(),
+    ];
     Diagnostic {
         code: "PAR-001".into(),
         title: "parse error".into(),
@@ -99,10 +105,13 @@ pub fn parse_diag(span: Span, message: String) -> Diagnostic {
         related_spans: vec![],
         rule: message,
         evidence: json!({}),
-        minimal_fix_options: vec![],
-        ranked_fixes: vec![],
+        minimal_fix_options: fixes.clone(),
+        ranked_fixes: ranked(&[
+            "fix syntax near primary span",
+            "compare with appendix D EBNF",
+        ]),
         confidence: 1.0,
-        next_commands: vec![],
+        next_commands: vec!["optic dump-tokens file.opt".into()],
     }
 }
 
@@ -123,7 +132,12 @@ pub fn resolve_diag(span: Span, message: String) -> Diagnostic {
     }
 }
 
-pub fn grade_decl_diag(span: Span, rule: &str, evidence: serde_json::Value) -> Diagnostic {
+pub fn grade_decl_diag(
+    span: Span,
+    related_spans: Vec<Span>,
+    rule: &str,
+    evidence: serde_json::Value,
+) -> Diagnostic {
     let fixes = vec![
         "raise CacheGrade annotation".into(),
         "reduce read/write regions in optic body".into(),
@@ -134,7 +148,7 @@ pub fn grade_decl_diag(span: Span, rule: &str, evidence: serde_json::Value) -> D
         severity: Severity::Error,
         phase: Phase::Grade,
         primary_span: span,
-        related_spans: vec![],
+        related_spans,
         rule: rule.into(),
         evidence,
         minimal_fix_options: fixes.clone(),
@@ -150,7 +164,12 @@ pub fn grade_decl_diag(span: Span, rule: &str, evidence: serde_json::Value) -> D
     }
 }
 
-pub fn grade_compose_diag(span: Span, rule: &str, evidence: serde_json::Value) -> Diagnostic {
+pub fn grade_compose_diag(
+    span: Span,
+    related_spans: Vec<Span>,
+    rule: &str,
+    evidence: serde_json::Value,
+) -> Diagnostic {
     let fixes = vec![
         "raise sequential CacheGrade bound".into(),
         "split composition into separate queries".into(),
@@ -161,7 +180,7 @@ pub fn grade_compose_diag(span: Span, rule: &str, evidence: serde_json::Value) -
         severity: Severity::Error,
         phase: Phase::Grade,
         primary_span: span,
-        related_spans: vec![],
+        related_spans,
         rule: rule.into(),
         evidence,
         minimal_fix_options: fixes.clone(),
@@ -177,14 +196,36 @@ pub fn grade_compose_diag(span: Span, rule: &str, evidence: serde_json::Value) -
     }
 }
 
-pub fn alias_diag(span: Span, regions: &[String], rule: &str) -> Diagnostic {
+pub fn codegen_failed_diag(rule: &str) -> Diagnostic {
+    Diagnostic {
+        code: "CGI-005".into(),
+        title: "codegen failed".into(),
+        severity: Severity::Error,
+        phase: Phase::Codegen,
+        primary_span: Span::dummy(),
+        related_spans: vec![],
+        rule: rule.into(),
+        evidence: json!({}),
+        minimal_fix_options: vec!["fix map body tuple arity or unsupported forms".into()],
+        ranked_fixes: ranked(&["fix map body tuple arity or unsupported forms"]),
+        confidence: 1.0,
+        next_commands: vec!["optic transpile file.opt".into()],
+    }
+}
+
+pub fn alias_diag(
+    span: Span,
+    related_spans: Vec<Span>,
+    regions: &[String],
+    rule: &str,
+) -> Diagnostic {
     Diagnostic {
         code: ALIAS_CONFLICT.into(),
         title: "alias conflict".into(),
         severity: Severity::Error,
         phase: Phase::Alias,
         primary_span: span,
-        related_spans: vec![],
+        related_spans,
         rule: rule.into(),
         evidence: json!({ "conflicting_regions": regions }),
         minimal_fix_options: vec![
@@ -200,6 +241,40 @@ pub fn alias_diag(span: Span, regions: &[String], rule: &str) -> Diagnostic {
             "optic explain ALI-201".into(),
             "optic dump-summary --node ...".into(),
         ],
+    }
+}
+
+pub fn unsupported_expr_diag(span: Span, reason: &str) -> Diagnostic {
+    Diagnostic {
+        code: CGIR_UNSUPPORTED_EXPR.into(),
+        title: "unsupported expression in query body".into(),
+        severity: Severity::Error,
+        phase: Phase::Type,
+        primary_span: span,
+        related_spans: vec![],
+        rule: reason.into(),
+        evidence: json!({ "reason": reason }),
+        minimal_fix_options: vec!["simplify map/set value expression".into()],
+        ranked_fixes: ranked(&["simplify map/set value expression"]),
+        confidence: 0.95,
+        next_commands: vec!["optic dump-hir file.opt".into()],
+    }
+}
+
+pub fn fusion_verify_diag(rule: &str) -> Diagnostic {
+    Diagnostic {
+        code: CGIR_VERIFY_FAILED.into(),
+        title: "fusion or CGIR verify failed".into(),
+        severity: Severity::Error,
+        phase: Phase::Fusion,
+        primary_span: Span::dummy(),
+        related_spans: vec![],
+        rule: rule.into(),
+        evidence: json!({}),
+        minimal_fix_options: vec!["optic dump-cgir file.opt --check".into()],
+        ranked_fixes: ranked(&["optic dump-cgir file.opt --check"]),
+        confidence: 1.0,
+        next_commands: vec!["optic dump-cgir file.opt --check".into()],
     }
 }
 

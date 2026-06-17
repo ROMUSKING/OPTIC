@@ -27,6 +27,7 @@ pub fn check(hir: hir::HirProgram) -> TypeckResult<TypedHir> {
                     if inferred.cache > ann_cache {
                         diags.push(diag::grade_decl_diag(
                             decl.span,
+                            vec![decl.grade.span],
                             "declared CacheGrade is tighter than inferred from optic body",
                             serde_json::json!({
                                 "annotated": ann_cache,
@@ -75,6 +76,7 @@ pub fn check(hir: hir::HirProgram) -> TypeckResult<TypedHir> {
                                 if combined > bound {
                                     diags.push(diag::grade_compose_diag(
                                         *span,
+                                        compose_related_spans(&optic),
                                         "sequential composition cache exceeds declared bound",
                                         serde_json::json!({
                                             "annotated": bound,
@@ -116,6 +118,15 @@ pub fn check(hir: hir::HirProgram) -> TypeckResult<TypedHir> {
                         (Err(d), _) | (_, Err(d)) => diags.push(d),
                     }
                 }
+                match &q.kind {
+                    hir::QueryKind::Map { body, .. } => {
+                        collect_unsupported_expr(body.as_ref(), &mut diags);
+                    }
+                    hir::QueryKind::Set { value } => {
+                        collect_unsupported_expr(value, &mut diags);
+                    }
+                    _ => {}
+                }
                 typed_items.push(hir::HirItem::Query(q));
             }
             other => typed_items.push(other),
@@ -129,6 +140,50 @@ pub fn check(hir: hir::HirProgram) -> TypeckResult<TypedHir> {
         items: typed_items,
         summaries,
     })
+}
+
+fn compose_related_spans(optic: &hir::HirOptic) -> Vec<Span> {
+    match optic {
+        hir::HirOptic::Seq { lhs, rhs, span } => {
+            let mut out = vec![*span];
+            if let hir::HirOptic::Named { span, .. } = &**lhs {
+                out.push(*span);
+            }
+            if let hir::HirOptic::Named { span, .. } = &**rhs {
+                out.push(*span);
+            }
+            out
+        }
+        other => vec![optic_span(other)],
+    }
+}
+
+fn optic_span(o: &hir::HirOptic) -> Span {
+    match o {
+        hir::HirOptic::Named { span, .. }
+        | hir::HirOptic::Seq { span, .. }
+        | hir::HirOptic::Par { span, .. } => *span,
+    }
+}
+
+fn collect_unsupported_expr(e: &hir::HirExpr, diags: &mut Vec<Diagnostic>) {
+    match e {
+        hir::HirExpr::Unsupported { reason, span } => {
+            diags.push(diag::unsupported_expr_diag(*span, reason));
+        }
+        hir::HirExpr::Bin { left, right, .. } => {
+            collect_unsupported_expr(left, diags);
+            collect_unsupported_expr(right, diags);
+        }
+        hir::HirExpr::Paren(inner, _) => collect_unsupported_expr(inner, diags),
+        hir::HirExpr::Tuple(elems, _) => {
+            for el in elems {
+                collect_unsupported_expr(el, diags);
+            }
+        }
+        hir::HirExpr::TupleProj { base, .. } => collect_unsupported_expr(base, diags),
+        _ => {}
+    }
 }
 
 /// ch9.9.3: cache = sat_add(reads, writes) with separate body counts.
@@ -266,6 +321,7 @@ pub fn alias_safe(left: &OpticSummary, right: &OpticSummary) -> Result<(), Diagn
         }
         return Err(diag::alias_diag(
             left.provenance,
+            vec![left.provenance, right.provenance],
             &vec![l.clone(), r.clone()],
             "put_writes overlaps effective region (including put_reads hazard)",
         ));
@@ -290,6 +346,7 @@ pub fn alias_safe(left: &OpticSummary, right: &OpticSummary) -> Result<(), Diagn
         }
         return Err(diag::alias_diag(
             right.provenance,
+            vec![left.provenance, right.provenance],
             &vec![r.clone(), l.clone()],
             "put_writes overlaps effective region (including put_reads hazard)",
         ));
@@ -405,6 +462,31 @@ fn main() { entities.query(HealthView).get(); }
         let hirp = optic_hir::lower(prog).expect("lower");
         let err = check(hirp).unwrap_err();
         assert!(err.iter().any(|d| d.code == diag::GRADE_DECL_TIGHT));
+    }
+
+    #[test]
+    fn test_cgi003_rejects_incompatible_map_chain() {
+        let src = r#"
+data E { healths: SoA<f32>, positions: SoA<f32> }
+optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).map(|h| h).map(|(x,y)| (x,y)); }
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let err = check(hirp).unwrap_err();
+        assert!(err.iter().any(|d| d.code == diag::CGIR_UNSUPPORTED_EXPR));
+    }
+
+    #[test]
+    fn test_cgi003_rejects_unsupported_map_body() {
+        let src = r#"
+optic H: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).get().map(|h| h); }
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let err = check(hirp).unwrap_err();
+        assert!(err.iter().any(|d| d.code == diag::CGIR_UNSUPPORTED_EXPR));
     }
 
     #[test]

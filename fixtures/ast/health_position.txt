@@ -959,10 +959,10 @@ Program {
                                                             ),
                                                             span: Span {
                                                                 source: SourceId(
-                                                                    0,
+                                                                    1,
                                                                 ),
-                                                                start: 0,
-                                                                end: 0,
+                                                                start: 674,
+                                                                end: 681,
                                                             },
                                                         },
                                                         Atom(
@@ -1026,10 +1026,10 @@ Program {
                                                                         ),
                                                                         span: Span {
                                                                             source: SourceId(
-                                                                                0,
+                                                                                1,
                                                                             ),
-                                                                            start: 0,
-                                                                            end: 0,
+                                                                            start: 684,
+                                                                            end: 693,
                                                                         },
                                                                     },
                                                                     Field(

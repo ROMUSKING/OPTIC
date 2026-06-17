@@ -1,0 +1,34 @@
+{
+  "diagnostics": [
+    {
+      "code": "RES-001",
+      "confidence": 0.9,
+      "evidence": {
+        "name": "unknown optic `NotDeclared`"
+      },
+      "minimal_fix_options": [
+        "check optic spelling"
+      ],
+      "next_commands": [
+        "optic dump-hir file.opt"
+      ],
+      "phase": "resolve",
+      "primary_span": {
+        "end": 61.0,
+        "source": 1.0,
+        "start": 53.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "declare the optic before use"
+        }
+      ],
+      "related_spans": [],
+      "rule": "unknown optic `NotDeclared`",
+      "severity": "error",
+      "title": "name resolution failed"
+    }
+  ],
+  "ok": false
+}

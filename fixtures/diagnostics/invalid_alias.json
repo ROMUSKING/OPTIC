@@ -1,0 +1,54 @@
+{
+  "diagnostics": [
+    {
+      "code": "ALI-201",
+      "confidence": 0.9,
+      "evidence": {
+        "conflicting_regions": [
+          "healths",
+          "healths"
+        ]
+      },
+      "minimal_fix_options": [
+        "split product into sequential passes",
+        "use read-only grades if possible"
+      ],
+      "next_commands": [
+        "optic explain ALI-201",
+        "optic dump-summary --node ..."
+      ],
+      "phase": "alias",
+      "primary_span": {
+        "end": 294.0,
+        "source": 1.0,
+        "start": 164.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "split product into sequential passes"
+        },
+        {
+          "confidence": 0.9,
+          "description": "use read-only grades if possible"
+        }
+      ],
+      "related_spans": [
+        {
+          "end": 294.0,
+          "source": 1.0,
+          "start": 164.0
+        },
+        {
+          "end": 436.0,
+          "source": 1.0,
+          "start": 296.0
+        }
+      ],
+      "rule": "put_writes overlaps effective region (including put_reads hazard)",
+      "severity": "error",
+      "title": "alias conflict"
+    }
+  ],
+  "ok": false
+}

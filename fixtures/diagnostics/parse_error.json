@@ -1,0 +1,37 @@
+{
+  "diagnostics": [
+    {
+      "code": "PAR-001",
+      "confidence": 1.0,
+      "evidence": {},
+      "minimal_fix_options": [
+        "fix syntax near primary span",
+        "compare with appendix D EBNF"
+      ],
+      "next_commands": [
+        "optic dump-tokens file.opt"
+      ],
+      "phase": "parse",
+      "primary_span": {
+        "end": 11.0,
+        "source": 1.0,
+        "start": 10.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "fix syntax near primary span"
+        },
+        {
+          "confidence": 0.9,
+          "description": "compare with appendix D EBNF"
+        }
+      ],
+      "related_spans": [],
+      "rule": "expected optic atom (ident or ( ))",
+      "severity": "error",
+      "title": "parse error"
+    }
+  ],
+  "ok": false
+}
