@@ -12,6 +12,8 @@ pub struct CgirGraph {
     pub nodes: Vec<CgirNode>,
     pub roots: Vec<NodeId>,
     pub provenance_index: std::collections::BTreeMap<NodeId, FusionProvenance>,
+    /// Query-resolvable optic names -> CGIR node id (leaves, products, composes, aliases).
+    pub resolved_optics: std::collections::HashMap<String, NodeId>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,6 +25,8 @@ pub struct FusionProvenance {
 
 #[derive(Clone, Debug)]
 pub enum FusionReason {
+    /// Pre-fusion graph node from CGIR build (not a rewrite).
+    Build,
     MapFusion,
     ComposeFusion,
     ProductFlattening,
@@ -77,6 +81,8 @@ pub enum CgirNode {
         optic_name: String,
         costate: String,
         cursor: String,
+        map_param: String,
+        map_body: hir::HirExpr,
         provenance: Span,
     },
     FusedLoop {
@@ -95,9 +101,11 @@ pub fn build(
     let mut roots = vec![];
     let mut prov = std::collections::BTreeMap::new();
     let mut id: NodeId = 0;
-    // track leaf ids by optic name for structural Par/Product construction (avoids brittle len>=2 + dangling)
     let mut optic_leaf_ids: std::collections::HashMap<String, NodeId> =
         std::collections::HashMap::new();
+    let mut resolved_optics: std::collections::HashMap<String, NodeId> =
+        std::collections::HashMap::new();
+    let mut query_count = 0usize;
 
     for item in &typed.items {
         match item {
@@ -137,18 +145,29 @@ pub fn build(
                     provenance: decl.span,
                 });
                 optic_leaf_ids.insert(decl.name.node.clone(), nid);
+                resolved_optics.insert(decl.name.node.clone(), nid);
                 prov.insert(
                     nid,
                     FusionProvenance {
                         original_ids: vec![nid],
                         spans: vec![decl.span],
-                        reason: FusionReason::ProductFlattening,
+                        reason: FusionReason::Build,
                     },
                 );
             }
-            hir::HirItem::Let { optic, .. } => {
-                // structural Product for let-bound Par (e.g. "let bad = W *** A", "let combined = H *** P") per ch10.9
-                if let hir::HirOptic::Par { lhs, rhs, .. } = optic {
+            hir::HirItem::Let {
+                name,
+                optic,
+                summary: _,
+                ..
+            } => match optic {
+                hir::HirOptic::Named { name: target, .. } => {
+                    if let Some(&nid) = optic_leaf_ids.get(target) {
+                        optic_leaf_ids.insert(name.clone(), nid);
+                        resolved_optics.insert(name.clone(), nid);
+                    }
+                }
+                hir::HirOptic::Par { lhs, rhs, span } => {
                     let lname = if let hir::HirOptic::Named { name, .. } = &**lhs {
                         name.clone()
                     } else {
@@ -162,6 +181,18 @@ pub fn build(
                     if let (Some(&lid), Some(&rid)) =
                         (optic_leaf_ids.get(&lname), optic_leaf_ids.get(&rname))
                     {
+                        let lsum = typed
+                            .summaries
+                            .get(&lname)
+                            .or_else(|| nodes.get(lid as usize).and_then(|n| n.summary()));
+                        let rsum = typed
+                            .summaries
+                            .get(&rname)
+                            .or_else(|| nodes.get(rid as usize).and_then(|n| n.summary()));
+                        let alias_ok = match (lsum, rsum) {
+                            (Some(l), Some(r)) => optic_typeck::alias_safe(l, r).is_ok(),
+                            _ => false,
+                        };
                         let pid = id;
                         id += 1;
                         nodes.push(CgirNode::Product {
@@ -170,29 +201,92 @@ pub fn build(
                             rhs: rid,
                             grade: nodes
                                 .get(lid as usize)
-                                .map_or_else(|| grade_for_demo_fallback(), |n| n.grade_for_demo()),
-                            alias_safe: true,
-                            provenance: Span::dummy(),
+                                .map_or_else(default_grade_v0, |n| n.node_grade()),
+                            alias_safe: alias_ok,
+                            provenance: *span,
                         });
+                        optic_leaf_ids.insert(name.clone(), pid);
+                        resolved_optics.insert(name.clone(), pid);
                         prov.insert(
                             pid,
                             FusionProvenance {
                                 original_ids: vec![lid, rid, pid],
-                                spans: vec![],
-                                reason: FusionReason::ProductFlattening,
+                                spans: vec![*span],
+                                reason: FusionReason::Build,
                             },
                         );
                     }
                 }
-            }
+                hir::HirOptic::Seq { lhs, rhs, span } => {
+                    let lname = if let hir::HirOptic::Named { name, .. } = &**lhs {
+                        name.clone()
+                    } else {
+                        "lhs".into()
+                    };
+                    let rname = if let hir::HirOptic::Named { name, .. } = &**rhs {
+                        name.clone()
+                    } else {
+                        "rhs".into()
+                    };
+                    if let (Some(&lid), Some(&rid)) =
+                        (optic_leaf_ids.get(&lname), optic_leaf_ids.get(&rname))
+                    {
+                        let cid = id;
+                        id += 1;
+                        nodes.push(CgirNode::Compose {
+                            id: cid,
+                            lhs: lid,
+                            rhs: rid,
+                            grade: nodes
+                                .get(lid as usize)
+                                .map_or_else(default_grade_v0, |n| n.node_grade()),
+                            provenance: *span,
+                        });
+                        optic_leaf_ids.insert(name.clone(), cid);
+                        resolved_optics.insert(name.clone(), cid);
+                        prov.insert(
+                            cid,
+                            FusionProvenance {
+                                original_ids: vec![lid, rid, cid],
+                                spans: vec![*span],
+                                reason: FusionReason::Build,
+                            },
+                        );
+                    }
+                }
+                _ => {}
+            },
             hir::HirItem::Query(q) => {
-                let optic_name = if let hir::HirOptic::Named { name, .. } = &q.optic {
-                    name.clone()
-                } else if let hir::HirOptic::Par { .. } = &q.optic {
-                    "par-direct".into()
-                } else {
-                    "unknown".into()
+                query_count += 1;
+                let optic_name = match &q.optic {
+                    hir::HirOptic::Named { name, .. } => name.clone(),
+                    hir::HirOptic::Par { .. } => {
+                        return Err(vec![optic_diagnostics::cgir_diag(
+                            optic_diagnostics::CGIR_UNRESOLVED_OPTIC,
+                            q.span,
+                            "inline product in query must be bound to a let name",
+                            serde_json::json!({ "optic": "par-direct" }),
+                        )]);
+                    }
+                    _ => {
+                        return Err(vec![optic_diagnostics::cgir_diag(
+                            optic_diagnostics::CGIR_UNRESOLVED_OPTIC,
+                            q.span,
+                            "unresolved optic in query",
+                            serde_json::json!({}),
+                        )]);
+                    }
                 };
+                if !resolved_optics.contains_key(&optic_name)
+                    && !typed.summaries.contains_key(&optic_name)
+                {
+                    return Err(vec![optic_diagnostics::cgir_diag(
+                        optic_diagnostics::CGIR_UNRESOLVED_OPTIC,
+                        q.span,
+                        &format!("unresolved optic `{optic_name}` in query"),
+                        serde_json::json!({ "optic": optic_name }),
+                    )]);
+                }
                 let qid = id;
                 id += 1;
                 let node = match &q.kind {
@@ -211,11 +305,13 @@ pub fn build(
                         value_repr: format_hir_expr(value),
                         provenance: q.span,
                     },
-                    hir::QueryKind::Map { .. } => CgirNode::QueryMap {
+                    hir::QueryKind::Map { param, body } => CgirNode::QueryMap {
                         id: qid,
                         optic_name,
                         costate: q.costate.clone(),
                         cursor: q.cursor.clone(),
+                        map_param: param.clone(),
+                        map_body: body.clone(),
                         provenance: q.span,
                     },
                 };
@@ -226,7 +322,7 @@ pub fn build(
                     FusionProvenance {
                         original_ids: vec![qid],
                         spans: vec![q.span],
-                        reason: FusionReason::MapFusion,
+                        reason: FusionReason::Build,
                     },
                 );
             }
@@ -234,17 +330,24 @@ pub fn build(
         }
     }
 
-    // no more len>=2 brittle synth (now structural from Let Par above; keeps for direct cases if needed but ids allocated correctly)
-    // if nodes.len() >=2 fallback removed to prevent wrong ids for decay etc.
+    if query_count > 1 {
+        return Err(vec![optic_diagnostics::cgir_diag(
+            optic_diagnostics::CGIR_MULTI_QUERY,
+            Span::dummy(),
+            "v0 supports at most one query root per program",
+            serde_json::json!({ "query_count": query_count }),
+        )]);
+    }
 
     Ok(CgirGraph {
         nodes,
         roots,
         provenance_index: prov,
+        resolved_optics,
     })
 }
 
-fn grade_for_demo_fallback() -> hir::ConcreteGrade {
+fn default_grade_v0() -> hir::ConcreteGrade {
     hir::ConcreteGrade {
         cache: 1,
         ownership: hir::OwnershipDim {
@@ -256,25 +359,34 @@ fn grade_for_demo_fallback() -> hir::ConcreteGrade {
 }
 
 impl CgirNode {
-    fn grade_for_demo(&self) -> hir::ConcreteGrade {
-        if let CgirNode::OpticLeaf { grade, .. } = self {
-            grade.clone()
+    fn node_grade(&self) -> hir::ConcreteGrade {
+        match self {
+            CgirNode::OpticLeaf { grade, .. }
+            | CgirNode::Compose { grade, .. }
+            | CgirNode::Product { grade, .. } => grade.clone(),
+            _ => default_grade_v0(),
+        }
+    }
+
+    fn summary(&self) -> Option<&Arc<hir::OpticSummary>> {
+        if let CgirNode::OpticLeaf { summary, .. } = self {
+            Some(summary)
         } else {
-            hir::ConcreteGrade {
-                cache: 1,
-                ownership: hir::OwnershipDim {
-                    share: hir::Rational::one(),
-                    read_only: false,
-                    must_use: false,
-                },
-            }
+            None
         }
     }
 }
 
-fn format_hir_expr(e: &hir::HirExpr) -> String {
+pub fn format_hir_expr(e: &hir::HirExpr) -> String {
     match e {
         hir::HirExpr::LitInt(n, _) => n.to_string(),
+        hir::HirExpr::LitFloat(f, _) => {
+            if f.fract() == 0.0 {
+                format!("{f:.1}")
+            } else {
+                f.to_string()
+            }
+        }
         hir::HirExpr::Var(v, _) => v.clone(),
         hir::HirExpr::Bin {
             op, left, right, ..
@@ -296,6 +408,14 @@ fn format_hir_expr(e: &hir::HirExpr) -> String {
                 format_hir_expr(right)
             )
         }
+        hir::HirExpr::Tuple(elems, _) => {
+            let parts: Vec<_> = elems.iter().map(format_hir_expr).collect();
+            format!("({})", parts.join(", "))
+        }
+        hir::HirExpr::TupleProj { base, index, .. } => {
+            format!("{}.{}", format_hir_expr(base), index)
+        }
+        hir::HirExpr::Unsupported { reason, .. } => format!("/* unsupported: {reason} */"),
         _ => "v".into(),
     }
 }
@@ -305,32 +425,116 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
     if n == 0 && !g.roots.is_empty() {
         return Err("roots reference empty graph".into());
     }
+    if g.roots.len() > 1 {
+        return Err(format!(
+            "v0 expects at most one root, found {}",
+            g.roots.len()
+        ));
+    }
+    let resolved = &g.resolved_optics;
     for &root in &g.roots {
         if root as usize >= n {
-            return Err(format!("root {} out of bounds (nodes={n})", root));
+            return Err(format!("root {root} out of bounds (nodes={n})"));
         }
     }
     for (idx, node) in g.nodes.iter().enumerate() {
         match node {
-            CgirNode::Compose { lhs, rhs, .. } | CgirNode::Product { lhs, rhs, .. } => {
-                if *lhs as usize >= n {
-                    return Err(format!("node {idx}: lhs {lhs} out of bounds"));
+            CgirNode::Compose { lhs, rhs, .. } => {
+                if *lhs as usize >= n || *rhs as usize >= n {
+                    return Err(format!("node {idx}: compose edge out of bounds"));
                 }
-                if *rhs as usize >= n {
-                    return Err(format!("node {idx}: rhs {rhs} out of bounds"));
+                if *lhs == idx as u32 || *rhs == idx as u32 {
+                    return Err(format!("node {idx}: self-referential compose edge"));
                 }
             }
-            CgirNode::FusedLoop { original_ids, .. } => {
+            CgirNode::Product {
+                lhs,
+                rhs,
+                alias_safe,
+                ..
+            } => {
+                if *lhs as usize >= n || *rhs as usize >= n {
+                    return Err(format!("node {idx}: product edge out of bounds"));
+                }
+                if *lhs == idx as u32 || *rhs == idx as u32 {
+                    return Err(format!("node {idx}: self-referential product edge"));
+                }
+                if !alias_safe {
+                    return Err(format!("node {idx}: product alias_safe is false"));
+                }
+            }
+            CgirNode::FusedLoop {
+                id, original_ids, ..
+            } => {
+                if g.provenance_index.get(id).is_none() {
+                    return Err(format!(
+                        "node {idx}: FusedLoop missing provenance_index entry"
+                    ));
+                }
                 for oid in original_ids {
                     if *oid as usize >= n {
                         return Err(format!("node {idx}: fused ref {oid} out of bounds"));
                     }
                 }
             }
+            CgirNode::QueryGet { optic_name, .. }
+            | CgirNode::QuerySet { optic_name, .. }
+            | CgirNode::QueryMap { optic_name, .. } => {
+                if optic_name == "par-direct" || optic_name == "unknown" {
+                    return Err(format!("node {idx}: unresolved query optic `{optic_name}`"));
+                }
+                if !resolved.contains_key(optic_name) {
+                    return Err(format!(
+                        "node {idx}: query optic `{optic_name}` not in resolved_optics"
+                    ));
+                }
+            }
             _ => {}
         }
     }
+    // Reachability: every non-OpticLeaf node must be reachable from roots or be a dependency.
+    let mut live = std::collections::HashSet::new();
+    for &r in &g.roots {
+        mark_reachable(g, r, &mut live);
+    }
+    for (i, node) in g.nodes.iter().enumerate() {
+        let id = i as NodeId;
+        if matches!(node, CgirNode::OpticLeaf { .. }) {
+            live.insert(id);
+        }
+        if !live.contains(&id) {
+            if matches!(node, CgirNode::QueryMap { .. }) {
+                return Err(format!(
+                    "node {idx}: unreachable orphan QueryMap after fusion"
+                ));
+            }
+        }
+    }
     Ok(())
+}
+
+fn mark_reachable(g: &CgirGraph, id: NodeId, live: &mut std::collections::HashSet<NodeId>) {
+    if !live.insert(id) {
+        return;
+    }
+    if let Some(node) = g.nodes.get(id as usize) {
+        match node {
+            CgirNode::Compose { lhs, rhs, .. } => {
+                mark_reachable(g, *lhs, live);
+                mark_reachable(g, *rhs, live);
+            }
+            CgirNode::Product { lhs, rhs, .. } => {
+                mark_reachable(g, *lhs, live);
+                mark_reachable(g, *rhs, live);
+            }
+            CgirNode::FusedLoop { original_ids, .. } => {
+                for &oid in original_ids {
+                    mark_reachable(g, oid, live);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn dump_pretty(g: &CgirGraph) -> String {
@@ -382,7 +586,7 @@ mod tests {
     use optic_typeck::TypedHir;
     use std::collections::HashMap;
 
-    fn mk_typed_with_optic(name: &str) -> TypedHir {
+    fn mk_typed_with_optic(_name: &str) -> TypedHir {
         // minimal: use lower on small src? but to avoid cycle, construct simple
         // for test, we call build on empty-ish; real tests use CLI or hir lower
         TypedHir {
@@ -392,7 +596,6 @@ mod tests {
     }
 
     fn minimal_hir_optic_item(name: &str, summary: Arc<hir::OpticSummary>) -> hir::HirItem {
-        // minimal HirItem for tests (bypass full src parse/decl weight per issue6); decl satisfies type but build only uses summary for OpticLeaf (ch10.9). Reuses mk_typed pattern.
         hir::HirItem::Optic {
             decl: optic_syntax::OpticDecl {
                 name: optic_syntax::Spanned::new(name.into(), optic_syntax::Span::dummy()),
@@ -464,7 +667,6 @@ mod tests {
             provenance: optic_syntax::Span::dummy(),
         });
         let mut items = vec![];
-        // minimal via helper (reduces heavy dummy in test fn body per review issue6; decl satisfies type but build uses only summary for leaf per ch10.9). Reuses mk_typed pattern.
         items.push(minimal_hir_optic_item("H", std::sync::Arc::clone(&arc_sum)));
         let typed = optic_typeck::TypedHir {
             items,
@@ -509,7 +711,6 @@ mod tests {
             optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse for integration");
         let hirp = optic_hir::lower(prog).expect("lower for integration");
         let typed = optic_typeck::check(hirp).expect("check for integration");
-        // strengthened canary pre (issue3): capture for flow proof (build does Arc::clone from typed item summary)
         let h0_pre = typed
             .summaries
             .get("H0")
@@ -557,5 +758,92 @@ mod tests {
             "dedup exercised end-to-end in pipeline (overlaps)"
         );
         assert!(!g.nodes.is_empty());
+    }
+
+    #[test]
+    fn test_verify_ok_and_fail() {
+        let g_ok = CgirGraph {
+            nodes: vec![CgirNode::OpticLeaf {
+                id: 0,
+                name: "H".into(),
+                costate: "E".into(),
+                focus: "f".into(),
+                grade: default_grade_v0(),
+                get_fn: "".into(),
+                put_fn: "".into(),
+                summary: std::sync::Arc::new(hir::OpticSummary {
+                    name: Some("H".into()),
+                    costate: "E".into(),
+                    focus: "f32".into(),
+                    lift: hir::PathLift::default(),
+                    get_reads: vec!["healths".into()],
+                    put_reads: vec![],
+                    put_writes: vec![],
+                    get_grade: default_grade_v0(),
+                    put_grade: default_grade_v0(),
+                    get_determinism: hir::Determinism::Pure,
+                    put_determinism: hir::Determinism::Pure,
+                    serializable: true,
+                    provenance: optic_syntax::Span::dummy(),
+                }),
+                provenance: optic_syntax::Span::dummy(),
+            }],
+            roots: vec![],
+            provenance_index: std::collections::BTreeMap::new(),
+            resolved_optics: [("H".into(), 0)].into_iter().collect(),
+        };
+        assert!(verify(&g_ok).is_ok());
+
+        let g_bad = CgirGraph {
+            nodes: vec![],
+            roots: vec![0],
+            provenance_index: std::collections::BTreeMap::new(),
+            resolved_optics: std::collections::HashMap::new(),
+        };
+        assert!(verify(&g_bad).is_err());
+    }
+
+    #[test]
+    fn test_verify_accepts_let_alias_decay() {
+        let src = std::fs::read_to_string(format!(
+            "{}/../../examples/health_decay.opt",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read");
+        let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let typed = optic_typeck::check(hirp).expect("check");
+        let g = build(&typed).expect("build");
+        assert!(g.resolved_optics.contains_key("decay"));
+        verify(&g).expect("decay alias should verify");
+    }
+
+    #[test]
+    fn test_query_get_set_pipeline() {
+        for (file, kind) in [
+            ("health_get.opt", "QueryGet"),
+            ("health_set.opt", "QuerySet"),
+        ] {
+            let src = std::fs::read_to_string(format!(
+                "{}/../../examples/{file}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("read example");
+            let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
+            let hirp = optic_hir::lower(prog).expect("lower");
+            let typed = optic_typeck::check(hirp).expect("check");
+            let g = build(&typed).expect("build");
+            assert!(g.nodes.iter().any(|n| {
+                match n {
+                    CgirNode::QueryGet { optic_name, .. } if kind == "QueryGet" => {
+                        optic_name == "HealthView"
+                    }
+                    CgirNode::QuerySet { optic_name, .. } if kind == "QuerySet" => {
+                        optic_name == "HealthView"
+                    }
+                    _ => false,
+                }
+            }));
+        }
     }
 }

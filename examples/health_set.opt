@@ -6,7 +6,7 @@ data Entities {
     positions: SoA<Vec2>,
 }
 
-optic HealthView: GradedOptic<Entities, f32, CacheGrade<1> + AffineGrade> {
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
     get  s      => s.healths[s.id]
     put  (s, v) => { s.healths[s.id] = v }
 }

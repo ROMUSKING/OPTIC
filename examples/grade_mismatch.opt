@@ -1,0 +1,21 @@
+-- Must be rejected: sequential composition exceeds CacheGrade bound (GRA-104, ch9.9.4)
+
+data E {
+    h: SoA<f32>,
+}
+
+optic A: GradedOptic<E, f32, _> {
+    get  s      => s.h[s.id]
+    put  (s, v) => { s.h[s.id] = v }
+}
+
+optic B: GradedOptic<E, f32, _> {
+    get  s      => s.h[s.id]
+    put  (s, v) => { s.h[s.id] = v }
+}
+
+let bad: GradedOptic<E, f32, CacheGrade<2>> = A >>> B;
+
+fn main() {
+    entities.query(bad).map(|x| x);
+}

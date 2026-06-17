@@ -51,7 +51,32 @@ enum Commands {
     },
     /// Transpile + verified execution harness (M5/M6)
     Run { file: PathBuf },
+    /// Explain a diagnostic code (appendix B stub)
+    Explain { code: String },
+    /// Environment / toolchain sanity check (appendix B stub)
+    Doctor,
+    /// Dump OpticSummary for an optic or CGIR node (appendix B stub)
+    DumpSummary {
+        file: PathBuf,
+        #[arg(long)]
+        node: Option<u32>,
+    },
+    /// Run acceptance harnesses and compare to baselines (appendix B stub)
+    Bench {
+        #[arg(long)]
+        update: bool,
+    },
+    /// Update golden fixtures after review (appendix B)
+    SnapshotUpdate {
+        #[arg(long)]
+        confirm: bool,
+    },
 }
+
+/// Maximum `.opt` source size (4 MiB) to avoid OOM on hostile inputs.
+const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
+/// Bench timing tolerance multiplier vs committed baseline.
+const BENCH_TOLERANCE_MULT: u128 = 5;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -67,8 +92,12 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 Err(diags) => {
-                    for d in diags {
-                        eprintln!("{}", optic_diagnostics::emit_human(&d));
+                    if json {
+                        eprintln!("{}", optic_diagnostics::diagnostics_to_json(&diags));
+                    } else {
+                        for d in &diags {
+                            eprintln!("{}", optic_diagnostics::emit_human(d));
+                        }
                     }
                     std::process::exit(1);
                 }
@@ -77,16 +106,13 @@ fn main() -> anyhow::Result<()> {
         Commands::Transpile { file, out } => {
             let src = read_source(&file)?;
             let emitted = compile_emit(&src)?;
-            let out_path = out.unwrap_or_else(|| file.with_extension("rs"));
+            let out_path = safe_output_path(&file, out)?;
             fs::write(&out_path, &emitted)?;
             println!("transpiled -> {}", out_path.display());
         }
         Commands::DumpTokens { file } => {
             let src = read_source(&file)?;
-            let sid = SourceId(1);
-            for t in optic_syntax::Lexer::new(&src, sid).lex() {
-                println!("{:?} {:?}", t.kind, t.span);
-            }
+            print!("{}", optic_syntax::dump_tokens(&src, SourceId(1)));
         }
         Commands::DumpAst { file } => {
             let src = read_source(&file)?;
@@ -128,11 +154,220 @@ fn main() -> anyhow::Result<()> {
             let emitted = compile_emit(&src)?;
             run_verification_harness(&emitted, &file)?;
         }
+        Commands::Explain { code } => {
+            println!("{}", explain_code(&code));
+        }
+        Commands::Doctor => {
+            doctor_check()?;
+        }
+        Commands::DumpSummary { file, node } => {
+            let src = read_source(&file)?;
+            dump_summary(&src, node)?;
+        }
+        Commands::Bench { update } => {
+            bench_examples(update)?;
+        }
+        Commands::SnapshotUpdate { confirm } => {
+            if !confirm {
+                anyhow::bail!("refusing snapshot update without --confirm");
+            }
+            snapshot_update_goldens()?;
+        }
     }
     Ok(())
 }
 
+fn safe_output_path(file: &Path, out: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let out_path = out.unwrap_or_else(|| file.with_extension("rs"));
+    if out_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        anyhow::bail!(
+            "output path {} must not contain '..'; use --out with a safe path",
+            out_path.display()
+        );
+    }
+    Ok(out_path)
+}
+
+fn snapshot_update_goldens() -> anyhow::Result<()> {
+    println!("Updating goldens (OPTIC_UPDATE_GOLDEN=1)...");
+    let status = Command::new("cargo")
+        .env("OPTIC_UPDATE_GOLDEN", "1")
+        .args(["test", "-p", "optic-syntax", "golden_", "--", "--quiet"])
+        .status()
+        .context("optic-syntax golden update")?;
+    if !status.success() {
+        anyhow::bail!("optic-syntax golden update failed");
+    }
+    let status = Command::new("cargo")
+        .env("OPTIC_UPDATE_GOLDEN", "1")
+        .args(["test", "-p", "optic-cli", "golden_cgir", "--", "--quiet"])
+        .status()
+        .context("optic-cli cgir golden update")?;
+    if !status.success() {
+        anyhow::bail!("optic-cli cgir golden update failed");
+    }
+    bench_examples(true)?;
+    println!("Goldens updated. Review diffs before commit.");
+    Ok(())
+}
+
+fn explain_code(code: &str) -> String {
+    let (title, rule, phase) = match code {
+        "GRA-110" => (
+            "declared grade tighter than inferred",
+            "CacheGrade annotation must be >= inferred distinct-region count (ch9.9.3)",
+            "grade",
+        ),
+        "GRA-104" => (
+            "sequential composition exceeds cache bound",
+            ">>> cache grades combine with sat_add (ch9.9.4)",
+            "grade",
+        ),
+        "ALI-201" | "ALI-101" => (
+            "alias conflict in product composition",
+            "put_reads hazards across product arms (ch9)",
+            "alias",
+        ),
+        "PAR-001" => (
+            "parse error",
+            "surface syntax does not match appendix D EBNF",
+            "parse",
+        ),
+        "CGI-001" | "CGI-002" => (
+            "CGIR invariant violation",
+            "graph wiring / unresolved optic (ch10)",
+            "cgir",
+        ),
+        _ => (
+            "unknown code",
+            "no catalog entry yet; see optic-diagnostics",
+            "unknown",
+        ),
+    };
+    format!("{code}: {title}\nphase: {phase}\nrule: {rule}\nnext: optic check <file.opt> --json")
+}
+
+fn doctor_check() -> anyhow::Result<()> {
+    let rustc = Command::new("rustc").arg("--version").output();
+    let cargo = Command::new("cargo").arg("--version").output();
+    match (&rustc, &cargo) {
+        (Ok(r), Ok(c)) if r.status.success() && c.status.success() => {
+            println!("rustc: {}", String::from_utf8_lossy(&r.stdout).trim());
+            println!("cargo: {}", String::from_utf8_lossy(&c.stdout).trim());
+        }
+        _ => anyhow::bail!("rustc/cargo not available"),
+    }
+    let runtime = runtime_crate_path();
+    if !Path::new(&runtime).join("src/lib.rs").exists() {
+        anyhow::bail!("optic-runtime not found at {runtime}");
+    }
+    println!("optic-runtime: OK ({runtime})");
+    println!("doctor: OK");
+    Ok(())
+}
+
+fn dump_summary(src: &str, node: Option<u32>) -> anyhow::Result<()> {
+    let graph = compile_cgir(src, false)?;
+    if let Some(n) = node {
+        if let Some(nd) = graph.nodes.get(n as usize) {
+            if let optic_cgir::CgirNode::OpticLeaf { summary, name, .. } = nd {
+                println!("summary for node {n} ({name}): {summary:#?}");
+            } else {
+                println!("node {n}: {nd:#?}");
+            }
+        } else {
+            anyhow::bail!("node {n} not found");
+        }
+    } else {
+        let hir = lower_or_exit(src)?;
+        for item in &hir.items {
+            if let optic_hir::HirItem::Optic { decl, summary } = item {
+                println!("{}: {summary:#?}", decl.name.node);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn bench_examples(update: bool) -> anyhow::Result<()> {
+    let examples = [
+        "health_decay.opt",
+        "health_position.opt",
+        "health_get.opt",
+        "health_set.opt",
+    ];
+    let bench_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bench");
+    if update {
+        fs::create_dir_all(&bench_dir)?;
+    }
+    for ex in examples {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(ex);
+        let src = read_source(&path)?;
+        let start = std::time::Instant::now();
+        let emitted = compile_emit(&src)?;
+        let compile_ms = start.elapsed().as_millis();
+        let run_start = std::time::Instant::now();
+        run_verification_harness(&emitted, &path)?;
+        let run_ms = run_start.elapsed().as_millis();
+        let line = format!("{ex}: compile_ms={compile_ms} run_ms={run_ms} ok=1\n");
+        let baseline = bench_dir.join(ex.replace(".opt", ".txt"));
+        if update {
+            fs::write(&baseline, &line)?;
+            println!("updated {}", baseline.display());
+        } else if baseline.exists() {
+            let expected = fs::read_to_string(&baseline)?;
+            if !expected.contains("ok=1") {
+                anyhow::bail!("baseline failed for {ex}");
+            }
+            if let (Some((ec, er)), Some((nc, nr))) =
+                (parse_bench_line(&expected), parse_bench_line(&line))
+            {
+                if nc > ec * BENCH_TOLERANCE_MULT || nr > er * BENCH_TOLERANCE_MULT {
+                    anyhow::bail!(
+                        "bench regression for {ex}: baseline compile_ms={ec} run_ms={er}, got compile_ms={nc} run_ms={nr}"
+                    );
+                }
+            }
+            println!("{line}within tolerance (baseline present)");
+        } else {
+            println!("{line}(no baseline; use --update)");
+        }
+    }
+    Ok(())
+}
+
+fn parse_bench_line(s: &str) -> Option<(u128, u128)> {
+    let compile = s
+        .split("compile_ms=")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    let run = s
+        .split("run_ms=")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some((compile, run))
+}
+
 fn read_source(file: &Path) -> anyhow::Result<String> {
+    let meta = fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
+    if meta.len() > MAX_SOURCE_BYTES {
+        anyhow::bail!(
+            "source {} exceeds {} byte limit",
+            file.display(),
+            MAX_SOURCE_BYTES
+        );
+    }
     fs::read_to_string(file).with_context(|| format!("read {}", file.display()))
 }
 
@@ -150,55 +385,71 @@ fn lower_or_exit(src: &str) -> anyhow::Result<optic_hir::HirProgram> {
     let prog = parse_or_exit(src)?;
     optic_hir::lower(prog).map_err(|errs| {
         for e in &errs {
-            eprintln!("parse: {}", e.message);
+            eprintln!("resolve: {}", e.message);
         }
         anyhow::anyhow!("hir lower failed")
     })
 }
 
+fn lower_to_diags(errs: Vec<optic_syntax::ParseError>) -> Vec<optic_diagnostics::Diagnostic> {
+    errs.into_iter()
+        .map(|e| optic_diagnostics::resolve_diag(e.span, e.message))
+        .collect()
+}
+
 fn compile_check(src: &str) -> Result<(), Vec<optic_diagnostics::Diagnostic>> {
     let prog = parse(src, SourceId(1)).map_err(|errs| {
         errs.into_iter()
-            .map(|e| optic_diagnostics::Diagnostic {
-                code: "PAR-001".into(),
-                phase: optic_diagnostics::Phase::Parse,
-                primary_span: e.span,
-                rule: e.message,
-                evidence: serde_json::json!({}),
-                minimal_fix_options: vec![],
-                next_commands: vec![],
-            })
+            .map(|e| optic_diagnostics::parse_diag(e.span, e.message))
             .collect::<Vec<_>>()
     })?;
-    let hir = optic_hir::lower(prog).map_err(|_| Vec::<optic_diagnostics::Diagnostic>::new())?;
-    optic_typeck::check(hir).map(|_| ())
+    let hir = optic_hir::lower(prog).map_err(lower_to_diags)?;
+    let typed = optic_typeck::check(hir)?;
+    let cg = optic_cgir::build(&typed).map_err(|diags| diags)?;
+    let graph = optic_opt::optimize(cg).map_err(|e| {
+        vec![optic_diagnostics::cgir_diag(
+            optic_diagnostics::CGIR_MULTI_QUERY,
+            optic_syntax::Span::dummy(),
+            &format!("fusion/verify failed: {e}"),
+            serde_json::json!({}),
+        )]
+    })?;
+    optic_cgir::verify(&graph).map_err(|e| {
+        vec![optic_diagnostics::cgir_diag(
+            optic_diagnostics::CGIR_UNRESOLVED_OPTIC,
+            optic_syntax::Span::dummy(),
+            &e,
+            serde_json::json!({}),
+        )]
+    })?;
+    Ok(())
 }
 
 fn compile_cgir(src: &str, before_fusion: bool) -> anyhow::Result<CgirGraph> {
     let prog = parse_or_exit(src)?;
     let hir = optic_hir::lower(prog).map_err(|errs| {
         for e in &errs {
-            eprintln!("parse: {}", e.message);
+            eprintln!("resolve: {}", e.message);
         }
         anyhow::anyhow!("hir lower failed")
     })?;
     let typed = optic_typeck::check(hir).map_err(|diags| {
         for d in &diags {
-            eprintln!("{}", optic_diagnostics::emit_human(&d));
+            eprintln!("{}", optic_diagnostics::emit_human(d));
         }
         anyhow::anyhow!("type check failed ({} diagnostics)", diags.len())
     })?;
     let cg = optic_cgir::build(&typed).map_err(|diags| {
         for d in &diags {
-            eprintln!("{}", optic_diagnostics::emit_human(&d));
+            eprintln!("{}", optic_diagnostics::emit_human(d));
         }
         anyhow::anyhow!("cgir build failed")
     })?;
-    Ok(if before_fusion {
-        cg
+    if before_fusion {
+        Ok(cg)
     } else {
-        optic_opt::optimize(cg)
-    })
+        optic_opt::optimize(cg).map_err(|e| anyhow::anyhow!("fusion verify failed: {e}"))
+    }
 }
 
 fn compile_emit(src: &str) -> anyhow::Result<String> {
@@ -211,24 +462,29 @@ fn runtime_crate_path() -> String {
 }
 
 fn run_verification_harness(emitted: &str, file: &Path) -> anyhow::Result<()> {
-    let vdir = "/tmp/optic_verify";
-    let _ = fs::remove_dir_all(vdir);
-    fs::create_dir_all(vdir)?;
+    let tmp = tempfile::tempdir().context("create temp dir for verification harness")?;
+    let vdir = tmp.path();
     let runtime = runtime_crate_path();
     fs::write(
-        format!("{vdir}/Cargo.toml"),
+        vdir.join("Cargo.toml"),
         format!(
             "[package]\nname=\"v\"\nversion=\"0.1.0\"\nedition=\"2021\"\n[dependencies]\noptic-runtime = {{ path = \"{runtime}\" }}\n[[bin]]\nname=\"v\"\npath=\"main.rs\"\n"
         ),
     )?;
-    fs::write(format!("{vdir}/main.rs"), emitted)?;
+    fs::write(vdir.join("main.rs"), emitted)?;
+    let manifest = vdir.join("Cargo.toml");
     let out = Command::new("cargo")
-        .args([
-            "run",
-            "--quiet",
-            "--manifest-path",
-            &format!("{vdir}/Cargo.toml"),
-        ])
+        .env_clear()
+        .env(
+            "PATH",
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
+        )
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["run", "--quiet", "--manifest-path"])
+        .arg(&manifest)
         .current_dir(vdir)
         .output()
         .context("execute cargo run in verification harness")?;
@@ -238,16 +494,30 @@ fn run_verification_harness(emitted: &str, file: &Path) -> anyhow::Result<()> {
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     println!("{stdout}");
+
     let path = file.to_string_lossy();
-    if stdout.contains("99.0") && stdout.contains("0.1") {
-        println!("RUN VERIFIED (fused product mutations per book ch.11)");
-    } else if stdout.contains("90.0") || stdout.contains("70.0") || stdout.contains("40.0") {
-        println!("RUN VERIFIED (decay map per book ch.11)");
-    } else if path.contains("health_set") && stdout.contains("42") {
-        println!("RUN VERIFIED (set query per book ch.7)");
-    } else if path.contains("health_get") && stdout.contains("get:") {
-        println!("RUN VERIFIED (get query per book ch.7)");
+    let verified = if path.contains("health_position") {
+        stdout.contains("99.0") && stdout.contains("0.1")
+    } else if path.contains("health_decay") {
+        stdout.contains("90.0") && stdout.contains("70.0")
+    } else if path.contains("health_set") {
+        stdout.contains("42.0")
+    } else if path.contains("health_get") {
+        stdout.contains("get:")
+    } else {
+        false
+    };
+
+    if verified {
+        println!(
+            "RUN VERIFIED ({})",
+            file.file_name().unwrap().to_string_lossy()
+        );
+    } else {
+        anyhow::bail!(
+            "verification predicate did not match output for {}",
+            file.display()
+        );
     }
-    let _ = fs::remove_dir_all(vdir);
     Ok(())
 }

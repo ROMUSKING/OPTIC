@@ -5,4 +5,5 @@ edition.workspace = true
 
 [dependencies]
 optic-cgir = { path = "../optic-cgir" }
+optic-hir = { path = "../optic-hir" }
 optic-syntax = { path = "../optic-syntax" }

@@ -1,0 +1,2 @@
+GRA-104 [grade] sequential composition exceeds cache bound: sequential composition cache exceeds declared bound
+  evidence: {"annotated":2,"inferred":4,"binding":"bad"}

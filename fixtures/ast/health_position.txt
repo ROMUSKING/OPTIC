@@ -1,0 +1,1149 @@
+Program {
+    items: [
+        Data(
+            DataDecl {
+                name: Spanned {
+                    node: "Entities",
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 130,
+                        end: 138,
+                    },
+                },
+                fields: [
+                    FieldDecl {
+                        name: Spanned {
+                            node: "healths",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 145,
+                                end: 152,
+                            },
+                        },
+                        ty: Soa(
+                            Named {
+                                name: "f32",
+                                args: [],
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 158,
+                                    end: 161,
+                                },
+                            },
+                            Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 154,
+                                end: 162,
+                            },
+                        ),
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 145,
+                            end: 162,
+                        },
+                    },
+                    FieldDecl {
+                        name: Spanned {
+                            node: "positions",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 168,
+                                end: 177,
+                            },
+                        },
+                        ty: Soa(
+                            Named {
+                                name: "Vec2",
+                                args: [],
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 183,
+                                    end: 187,
+                                },
+                            },
+                            Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 179,
+                                end: 188,
+                            },
+                        ),
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 168,
+                            end: 188,
+                        },
+                    },
+                ],
+                span: Span {
+                    source: SourceId(
+                        1,
+                    ),
+                    start: 125,
+                    end: 191,
+                },
+            },
+        ),
+        Optic(
+            OpticDecl {
+                name: Spanned {
+                    node: "HealthView",
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 199,
+                        end: 209,
+                    },
+                },
+                costate: Named {
+                    name: "Entities",
+                    args: [],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 223,
+                        end: 231,
+                    },
+                },
+                focus: Named {
+                    name: "f32",
+                    args: [],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 233,
+                        end: 236,
+                    },
+                },
+                grade: GradeExpr {
+                    dims: [
+                        Cache {
+                            n: Some(
+                                2,
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 238,
+                                end: 248,
+                            },
+                        },
+                        Named {
+                            name: "AffineGrade",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 254,
+                                end: 265,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 238,
+                        end: 265,
+                    },
+                },
+                get: GetClause {
+                    param: Spanned {
+                        node: "s",
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 278,
+                            end: 279,
+                        },
+                    },
+                    body: Field(
+                        Index {
+                            base: FieldAccess {
+                                base: Base(
+                                    Ident(
+                                        Spanned {
+                                            node: "s",
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 283,
+                                                end: 284,
+                                            },
+                                        },
+                                    ),
+                                    Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 283,
+                                        end: 284,
+                                    },
+                                ),
+                                field: Spanned {
+                                    node: "healths",
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 285,
+                                        end: 292,
+                                    },
+                                },
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 283,
+                                    end: 292,
+                                },
+                            },
+                            index: Field(
+                                FieldAccess {
+                                    base: Base(
+                                        Ident(
+                                            Spanned {
+                                                node: "s",
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 293,
+                                                    end: 294,
+                                                },
+                                            },
+                                        ),
+                                        Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 293,
+                                            end: 294,
+                                        },
+                                    ),
+                                    field: Spanned {
+                                        node: "id",
+                                        span: Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 295,
+                                            end: 297,
+                                        },
+                                    },
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 293,
+                                        end: 297,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 283,
+                                end: 298,
+                            },
+                        },
+                    ),
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 273,
+                        end: 276,
+                    },
+                },
+                put: Some(
+                    PutClause {
+                        state_param: Spanned {
+                            node: "s",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 309,
+                                end: 310,
+                            },
+                        },
+                        value_param: Spanned {
+                            node: "v",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 312,
+                                end: 313,
+                            },
+                        },
+                        body: Block {
+                            stmts: [],
+                            result: Some(
+                                Assign {
+                                    target: Field(
+                                        Index {
+                                            base: FieldAccess {
+                                                base: Base(
+                                                    Ident(
+                                                        Spanned {
+                                                            node: "s",
+                                                            span: Span {
+                                                                source: SourceId(
+                                                                    1,
+                                                                ),
+                                                                start: 320,
+                                                                end: 321,
+                                                            },
+                                                        },
+                                                    ),
+                                                    Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 320,
+                                                        end: 321,
+                                                    },
+                                                ),
+                                                field: Spanned {
+                                                    node: "healths",
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 322,
+                                                        end: 329,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 320,
+                                                    end: 329,
+                                                },
+                                            },
+                                            index: Field(
+                                                FieldAccess {
+                                                    base: Base(
+                                                        Ident(
+                                                            Spanned {
+                                                                node: "s",
+                                                                span: Span {
+                                                                    source: SourceId(
+                                                                        1,
+                                                                    ),
+                                                                    start: 330,
+                                                                    end: 331,
+                                                                },
+                                                            },
+                                                        ),
+                                                        Span {
+                                                            source: SourceId(
+                                                                1,
+                                                            ),
+                                                            start: 330,
+                                                            end: 331,
+                                                        },
+                                                    ),
+                                                    field: Spanned {
+                                                        node: "id",
+                                                        span: Span {
+                                                            source: SourceId(
+                                                                1,
+                                                            ),
+                                                            start: 332,
+                                                            end: 334,
+                                                        },
+                                                    },
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 330,
+                                                        end: 334,
+                                                    },
+                                                },
+                                            ),
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 320,
+                                                end: 335,
+                                            },
+                                        },
+                                    ),
+                                    value: Atom(
+                                        Ident(
+                                            Spanned {
+                                                node: "v",
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 338,
+                                                    end: 339,
+                                                },
+                                            },
+                                        ),
+                                    ),
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 320,
+                                        end: 339,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 318,
+                                end: 341,
+                            },
+                        },
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 303,
+                            end: 306,
+                        },
+                    },
+                ),
+                span: Span {
+                    source: SourceId(
+                        1,
+                    ),
+                    start: 193,
+                    end: 343,
+                },
+            },
+        ),
+        Optic(
+            OpticDecl {
+                name: Spanned {
+                    node: "PositionView",
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 351,
+                        end: 363,
+                    },
+                },
+                costate: Named {
+                    name: "Entities",
+                    args: [],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 377,
+                        end: 385,
+                    },
+                },
+                focus: Named {
+                    name: "Vec2",
+                    args: [],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 387,
+                        end: 391,
+                    },
+                },
+                grade: GradeExpr {
+                    dims: [
+                        Cache {
+                            n: Some(
+                                2,
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 393,
+                                end: 403,
+                            },
+                        },
+                        Named {
+                            name: "AffineGrade",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 409,
+                                end: 420,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 393,
+                        end: 420,
+                    },
+                },
+                get: GetClause {
+                    param: Spanned {
+                        node: "s",
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 433,
+                            end: 434,
+                        },
+                    },
+                    body: Field(
+                        Index {
+                            base: FieldAccess {
+                                base: Base(
+                                    Ident(
+                                        Spanned {
+                                            node: "s",
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 438,
+                                                end: 439,
+                                            },
+                                        },
+                                    ),
+                                    Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 438,
+                                        end: 439,
+                                    },
+                                ),
+                                field: Spanned {
+                                    node: "positions",
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 440,
+                                        end: 449,
+                                    },
+                                },
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 438,
+                                    end: 449,
+                                },
+                            },
+                            index: Field(
+                                FieldAccess {
+                                    base: Base(
+                                        Ident(
+                                            Spanned {
+                                                node: "s",
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 450,
+                                                    end: 451,
+                                                },
+                                            },
+                                        ),
+                                        Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 450,
+                                            end: 451,
+                                        },
+                                    ),
+                                    field: Spanned {
+                                        node: "id",
+                                        span: Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 452,
+                                            end: 454,
+                                        },
+                                    },
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 450,
+                                        end: 454,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 438,
+                                end: 455,
+                            },
+                        },
+                    ),
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 428,
+                        end: 431,
+                    },
+                },
+                put: Some(
+                    PutClause {
+                        state_param: Spanned {
+                            node: "s",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 466,
+                                end: 467,
+                            },
+                        },
+                        value_param: Spanned {
+                            node: "v",
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 469,
+                                end: 470,
+                            },
+                        },
+                        body: Block {
+                            stmts: [],
+                            result: Some(
+                                Assign {
+                                    target: Field(
+                                        Index {
+                                            base: FieldAccess {
+                                                base: Base(
+                                                    Ident(
+                                                        Spanned {
+                                                            node: "s",
+                                                            span: Span {
+                                                                source: SourceId(
+                                                                    1,
+                                                                ),
+                                                                start: 477,
+                                                                end: 478,
+                                                            },
+                                                        },
+                                                    ),
+                                                    Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 477,
+                                                        end: 478,
+                                                    },
+                                                ),
+                                                field: Spanned {
+                                                    node: "positions",
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 479,
+                                                        end: 488,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 477,
+                                                    end: 488,
+                                                },
+                                            },
+                                            index: Field(
+                                                FieldAccess {
+                                                    base: Base(
+                                                        Ident(
+                                                            Spanned {
+                                                                node: "s",
+                                                                span: Span {
+                                                                    source: SourceId(
+                                                                        1,
+                                                                    ),
+                                                                    start: 489,
+                                                                    end: 490,
+                                                                },
+                                                            },
+                                                        ),
+                                                        Span {
+                                                            source: SourceId(
+                                                                1,
+                                                            ),
+                                                            start: 489,
+                                                            end: 490,
+                                                        },
+                                                    ),
+                                                    field: Spanned {
+                                                        node: "id",
+                                                        span: Span {
+                                                            source: SourceId(
+                                                                1,
+                                                            ),
+                                                            start: 491,
+                                                            end: 493,
+                                                        },
+                                                    },
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 489,
+                                                        end: 493,
+                                                    },
+                                                },
+                                            ),
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 477,
+                                                end: 494,
+                                            },
+                                        },
+                                    ),
+                                    value: Atom(
+                                        Ident(
+                                            Spanned {
+                                                node: "v",
+                                                span: Span {
+                                                    source: SourceId(
+                                                        1,
+                                                    ),
+                                                    start: 497,
+                                                    end: 498,
+                                                },
+                                            },
+                                        ),
+                                    ),
+                                    span: Span {
+                                        source: SourceId(
+                                            1,
+                                        ),
+                                        start: 477,
+                                        end: 498,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                source: SourceId(
+                                    1,
+                                ),
+                                start: 475,
+                                end: 500,
+                            },
+                        },
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 460,
+                            end: 463,
+                        },
+                    },
+                ),
+                span: Span {
+                    source: SourceId(
+                        1,
+                    ),
+                    start: 345,
+                    end: 502,
+                },
+            },
+        ),
+        Let(
+            LetBinding {
+                name: Spanned {
+                    node: "combined",
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 508,
+                        end: 516,
+                    },
+                },
+                ty: None,
+                value: Par {
+                    left: Atom(
+                        Named(
+                            Spanned {
+                                node: "HealthView",
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 519,
+                                    end: 529,
+                                },
+                            },
+                        ),
+                    ),
+                    right: Atom(
+                        Named(
+                            Spanned {
+                                node: "PositionView",
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 534,
+                                    end: 546,
+                                },
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 530,
+                        end: 533,
+                    },
+                },
+                span: Span {
+                    source: SourceId(
+                        1,
+                    ),
+                    start: 504,
+                    end: 533,
+                },
+            },
+        ),
+        Fn(
+            FnDecl {
+                name: Spanned {
+                    node: "main",
+                    span: Span {
+                        source: SourceId(
+                            1,
+                        ),
+                        start: 552,
+                        end: 556,
+                    },
+                },
+                params: [],
+                ret: None,
+                body: [
+                    Stmt {
+                        target: None,
+                        expr: QueryChain(
+                            QueryChain {
+                                base: Atom(
+                                    Ident(
+                                        Spanned {
+                                            node: "entities",
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 635,
+                                                end: 643,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                optic: Atom(
+                                    Named(
+                                        Spanned {
+                                            node: "combined",
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 650,
+                                                end: 658,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                methods: [
+                                    Map(
+                                        Closure {
+                                            params: [
+                                                Spanned {
+                                                    node: "h",
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 666,
+                                                        end: 667,
+                                                    },
+                                                },
+                                                Spanned {
+                                                    node: "p",
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 669,
+                                                        end: 670,
+                                                    },
+                                                },
+                                            ],
+                                            body: Atom(
+                                                Tuple(
+                                                    [
+                                                        Binary {
+                                                            left: Atom(
+                                                                Ident(
+                                                                    Spanned {
+                                                                        node: "h",
+                                                                        span: Span {
+                                                                            source: SourceId(
+                                                                                1,
+                                                                            ),
+                                                                            start: 674,
+                                                                            end: 675,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            op: Sub,
+                                                            right: Atom(
+                                                                Float(
+                                                                    1.0,
+                                                                    Span {
+                                                                        source: SourceId(
+                                                                            1,
+                                                                        ),
+                                                                        start: 678,
+                                                                        end: 681,
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            span: Span {
+                                                                source: SourceId(
+                                                                    0,
+                                                                ),
+                                                                start: 0,
+                                                                end: 0,
+                                                            },
+                                                        },
+                                                        Atom(
+                                                            Tuple(
+                                                                [
+                                                                    Binary {
+                                                                        left: Field(
+                                                                            FieldAccess {
+                                                                                base: Base(
+                                                                                    Ident(
+                                                                                        Spanned {
+                                                                                            node: "p",
+                                                                                            span: Span {
+                                                                                                source: SourceId(
+                                                                                                    1,
+                                                                                                ),
+                                                                                                start: 684,
+                                                                                                end: 685,
+                                                                                            },
+                                                                                        },
+                                                                                    ),
+                                                                                    Span {
+                                                                                        source: SourceId(
+                                                                                            1,
+                                                                                        ),
+                                                                                        start: 684,
+                                                                                        end: 685,
+                                                                                    },
+                                                                                ),
+                                                                                field: Spanned {
+                                                                                    node: "0",
+                                                                                    span: Span {
+                                                                                        source: SourceId(
+                                                                                            1,
+                                                                                        ),
+                                                                                        start: 686,
+                                                                                        end: 687,
+                                                                                    },
+                                                                                },
+                                                                                span: Span {
+                                                                                    source: SourceId(
+                                                                                        1,
+                                                                                    ),
+                                                                                    start: 684,
+                                                                                    end: 687,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        op: Add,
+                                                                        right: Atom(
+                                                                            Float(
+                                                                                0.1,
+                                                                                Span {
+                                                                                    source: SourceId(
+                                                                                        1,
+                                                                                    ),
+                                                                                    start: 690,
+                                                                                    end: 693,
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                        span: Span {
+                                                                            source: SourceId(
+                                                                                0,
+                                                                            ),
+                                                                            start: 0,
+                                                                            end: 0,
+                                                                        },
+                                                                    },
+                                                                    Field(
+                                                                        FieldAccess {
+                                                                            base: Base(
+                                                                                Ident(
+                                                                                    Spanned {
+                                                                                        node: "p",
+                                                                                        span: Span {
+                                                                                            source: SourceId(
+                                                                                                1,
+                                                                                            ),
+                                                                                            start: 695,
+                                                                                            end: 696,
+                                                                                        },
+                                                                                    },
+                                                                                ),
+                                                                                Span {
+                                                                                    source: SourceId(
+                                                                                        1,
+                                                                                    ),
+                                                                                    start: 695,
+                                                                                    end: 696,
+                                                                                },
+                                                                            ),
+                                                                            field: Spanned {
+                                                                                node: "1",
+                                                                                span: Span {
+                                                                                    source: SourceId(
+                                                                                        1,
+                                                                                    ),
+                                                                                    start: 697,
+                                                                                    end: 698,
+                                                                                },
+                                                                            },
+                                                                            span: Span {
+                                                                                source: SourceId(
+                                                                                    1,
+                                                                                ),
+                                                                                start: 695,
+                                                                                end: 698,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                ],
+                                                                Span {
+                                                                    source: SourceId(
+                                                                        1,
+                                                                    ),
+                                                                    start: 683,
+                                                                    end: 699,
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                    Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 673,
+                                                        end: 700,
+                                                    },
+                                                ),
+                                            ),
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 660,
+                                                end: 663,
+                                            },
+                                        },
+                                        Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 660,
+                                            end: 663,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 635,
+                                    end: 643,
+                                },
+                            },
+                        ),
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 635,
+                            end: 643,
+                        },
+                    },
+                ],
+                span: Span {
+                    source: SourceId(
+                        1,
+                    ),
+                    start: 549,
+                    end: 551,
+                },
+            },
+        ),
+    ],
+    span: Span {
+        source: SourceId(
+            1,
+        ),
+        start: 125,
+        end: 551,
+    },
+}

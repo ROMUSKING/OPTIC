@@ -140,6 +140,7 @@ pub enum HirExpr {
         span: Span,
     },
     LitInt(i64, Span),
+    LitFloat(f64, Span),
     Var(String, Span),
     Bin {
         op: syn::BinOp,
@@ -147,7 +148,19 @@ pub enum HirExpr {
         right: Box<HirExpr>,
         span: Span,
     },
-    // etc for full; sufficient for examples
+    /// Tuple literal / product focus value (ch8 product queries).
+    Tuple(Vec<HirExpr>, Span),
+    /// Tuple field projection, e.g. `p.0` in map bodies.
+    TupleProj {
+        base: Box<HirExpr>,
+        index: u32,
+        span: Span,
+    },
+    /// Unsupported surface form in map/value lowering (surfaced at codegen).
+    Unsupported {
+        reason: String,
+        span: Span,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -191,8 +204,7 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
             syn::Item::Let(lb) => {
                 let optic = lower_optic_expr(&lb.value, &optic_env);
                 let summary = if let Some(ty) = &lb.ty {
-                    // from ann
-                    make_summary_from_ann(&lb.name.node, ty)
+                    make_summary_from_ann(&lb.name.node, ty, &optic, &optic_env)
                 } else {
                     compute_summary_for_optic(&optic, &optic_env)
                 };
@@ -292,6 +304,39 @@ optic HealthView: GradedOptic<Entities, f32, CacheGrade<1>> {
     }
 
     #[test]
+    fn test_fuse_map_chain_substitutes_body() {
+        let src = r#"
+optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
+fn main() { entities.query(H).map(|h| h - 1.0).map(|x| x * 2.0); }
+"#;
+        let prog = parse(src, SourceId(1)).expect("parse");
+        let hirp = lower(prog).expect("lower");
+        let map_body = hirp.items.iter().find_map(|it| {
+            if let HirItem::Query(q) = it {
+                if let QueryKind::Map { body, .. } = &q.kind {
+                    return Some(body.clone());
+                }
+            }
+            None
+        });
+        let body = map_body.expect("fused map query");
+        match body {
+            HirExpr::Bin {
+                op: syn::BinOp::Mul,
+                left,
+                ..
+            } => match &*left {
+                HirExpr::Bin {
+                    op: syn::BinOp::Sub,
+                    ..
+                } => {}
+                other => panic!("expected fused sub in mul, got {other:?}"),
+            },
+            other => panic!("expected fused mul at top, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_dump_hir_and_query_map_lowering() {
         let src = r#"
 optic H: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
@@ -352,7 +397,7 @@ fn main() { entities.query(bad).map(|(a,b)| a+b); }
 
     #[test]
     fn test_arc_sharing_and_dedup_in_lower() {
-        // OOM/Arc canary + dedup (addresses re-reviews #5,16,21,22): after lower, items hold Arc<OpticSummary>;
+        // ch8.9: Arc<OpticSummary> sharing after lower.
         // strong_count==1 post-drop of internal env; dedup preserves order/no dups for regions.
         // Uses real lower on par source (ch8.9).
         let src = r#"
@@ -438,7 +483,7 @@ fn main() { entities.query(c).map(|(h1,h2)| h1 + h2); }
             max_regions <= 5,
             "dedup under overlap (r%5) exercised in unions/collect during compute Par/Seq"
         );
-        // ptr_eq canary (re-review #4/22): proves actual sharing (same ptr) vs would-be data clones; counts >= prove no leak post lower (env dropped).
+        // ptr_eq proves Arc sharing post-lower (ch8.9).
         if let Some(a) = &first_arc {
             let before = std::sync::Arc::strong_count(a);
             let b = std::sync::Arc::clone(a);
@@ -623,36 +668,18 @@ pub fn annotated_cache_bound(g: &syn::GradeExpr) -> Option<u8> {
     None
 }
 
-fn make_summary_from_ann(name: &str, _ty: &syn::GradeOpticType) -> OpticSummary {
-    OpticSummary {
-        name: Some(name.into()),
-        costate: "Entities".into(),
-        focus: "f32".into(),
-        lift: PathLift::default(),
-        get_reads: vec!["healths".into()],
-        put_reads: vec!["healths".into()],
-        put_writes: vec!["healths".into()],
-        get_grade: ConcreteGrade {
-            cache: 1,
-            ownership: OwnershipDim {
-                share: Rational::one(),
-                read_only: false,
-                must_use: false,
-            },
-        },
-        put_grade: ConcreteGrade {
-            cache: 1,
-            ownership: OwnershipDim {
-                share: Rational::one(),
-                read_only: false,
-                must_use: false,
-            },
-        },
-        get_determinism: Determinism::Pure,
-        put_determinism: Determinism::Pure,
-        serializable: true,
-        provenance: Span::dummy(),
-    }
+fn make_summary_from_ann(
+    name: &str,
+    ty: &syn::GradeOpticType,
+    optic: &HirOptic,
+    env: &HashMap<String, Arc<OpticSummary>>,
+) -> OpticSummary {
+    let mut summary = compute_summary_for_optic(optic, env);
+    let grade = extract_grade_from_ann(&ty.grade);
+    summary.name = Some(name.into());
+    summary.get_grade = grade.clone();
+    summary.put_grade = grade;
+    summary
 }
 
 fn compute_summary_for_optic(
@@ -737,7 +764,7 @@ fn default_summary(name: &str) -> OpticSummary {
 }
 
 /// Small helper to dedup Region lists preserving first-seen order, O(n) using HashSet.
-/// Reduces alloc pressure for Vec<String> in region handling (post OOM Arc on summaries).
+/// Dedup region lists preserving first-seen order (ch8.9).
 /// Per ch8.9/9.9 region driven.
 pub fn dedup_regions(v: Vec<Region>) -> Vec<Region> {
     let mut out = vec![];
@@ -812,7 +839,7 @@ fn lower_top_query(e: &syn::Expr, env: &HashMap<String, Arc<OpticSummary>>) -> O
             costate: "entities".into(),
             optic,
             cursor: "cur_0".into(),
-            kind: lower_query_method_to_kind(qc.methods.first(), &qc.base),
+            kind: lower_query_methods_to_kind(&qc.methods),
             span: qc.span,
         })
     } else {
@@ -866,28 +893,120 @@ fn collect_queries_from_expr(
     }
 }
 
-fn lower_query_method_to_kind(m: Option<&syn::QueryMethod>, _base: &syn::Expr) -> QueryKind {
-    match m {
-        Some(syn::QueryMethod::Map { 0: cl, .. }) => {
-            let param = if cl.params.len() > 1 {
-                // e.g. (h,p) case; represent as joined or first for v0 Hir
-                cl.params
-                    .iter()
-                    .map(|p| p.node.clone())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            } else if let Some(p) = cl.params.first() {
-                p.node.clone()
-            } else {
-                "it".into()
-            };
-            let body = lower_expr(&cl.body);
-            QueryKind::Map { param, body }
+fn lower_query_methods_to_kind(methods: &[syn::QueryMethod]) -> QueryKind {
+    if methods.is_empty() {
+        return QueryKind::Get;
+    }
+    // Reject unsupported trailing methods after map (v0: no .map().set()).
+    let mut seen_map = false;
+    for m in methods {
+        match m {
+            syn::QueryMethod::Map(_, _) => seen_map = true,
+            syn::QueryMethod::Set(_, _) if seen_map => {
+                return QueryKind::Map {
+                    param: "it".into(),
+                    body: HirExpr::Unsupported {
+                        reason: "v0 does not support .map().set() chain".into(),
+                        span: Span::dummy(),
+                    },
+                };
+            }
+            _ => {}
         }
+    }
+    let map_closures: Vec<&syn::Closure> = methods
+        .iter()
+        .filter_map(|m| {
+            if let syn::QueryMethod::Map(cl, _) = m {
+                Some(cl)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if !map_closures.is_empty() {
+        return fuse_map_chain(&map_closures);
+    }
+    match methods.last() {
         Some(syn::QueryMethod::Set(v, _)) => QueryKind::Set {
             value: lower_expr(v),
         },
         _ => QueryKind::Get,
+    }
+}
+
+fn closure_param(cl: &syn::Closure) -> String {
+    if cl.params.len() > 1 {
+        cl.params
+            .iter()
+            .map(|p| p.node.clone())
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        cl.params
+            .first()
+            .map(|p| p.node.clone())
+            .unwrap_or_else(|| "it".into())
+    }
+}
+
+/// Map fusion at HIR layer (ch10): collapse `.map(f).map(g)` into one map body `g(f(x))`.
+fn fuse_map_chain(maps: &[&syn::Closure]) -> QueryKind {
+    let param = closure_param(maps[0]);
+    let mut body = lower_expr(&maps[0].body);
+    for cl in maps.iter().skip(1) {
+        let next = lower_expr(&cl.body);
+        body = substitute_closure_params(&next, cl, &body);
+    }
+    QueryKind::Map { param, body }
+}
+
+fn substitute_closure_params(e: &HirExpr, cl: &syn::Closure, repl: &HirExpr) -> HirExpr {
+    if cl.params.len() > 1 {
+        if let HirExpr::Tuple(elems, _) = repl {
+            let mut out = e.clone();
+            for (p, el) in cl.params.iter().zip(elems.iter()) {
+                out = substitute_hir_var(&out, &p.node, el);
+            }
+            return out;
+        }
+    }
+    let inner = cl.params.first().map(|p| p.node.as_str()).unwrap_or("it");
+    substitute_hir_var(e, inner, repl)
+}
+
+fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
+    match e {
+        HirExpr::Var(v, sp) if v == name => repl.clone(),
+        HirExpr::Var(v, sp) => HirExpr::Var(v.clone(), *sp),
+        HirExpr::Bin {
+            op,
+            left,
+            right,
+            span,
+        } => HirExpr::Bin {
+            op: *op,
+            left: Box::new(substitute_hir_var(left, name, repl)),
+            right: Box::new(substitute_hir_var(right, name, repl)),
+            span: *span,
+        },
+        HirExpr::Tuple(elems, sp) => HirExpr::Tuple(
+            elems
+                .iter()
+                .map(|el| substitute_hir_var(el, name, repl))
+                .collect(),
+            *sp,
+        ),
+        HirExpr::TupleProj { base, index, span } => HirExpr::TupleProj {
+            base: Box::new(substitute_hir_var(base, name, repl)),
+            index: *index,
+            span: *span,
+        },
+        HirExpr::Unsupported { reason, span } => HirExpr::Unsupported {
+            reason: reason.clone(),
+            span: *span,
+        },
+        other => other.clone(),
     }
 }
 
@@ -908,18 +1027,62 @@ fn lower_expr(e: &syn::Expr) -> HirExpr {
             span: *span,
         },
         syn::Expr::Atom(syn::AtomExpr::Int(i, sp)) => HirExpr::LitInt(*i, *sp),
-        syn::Expr::Atom(syn::AtomExpr::Float(f, sp)) => HirExpr::LitInt(f.trunc() as i64, *sp), // approx for demo; real would have LitFloat
+        syn::Expr::Atom(syn::AtomExpr::Float(f, sp)) => HirExpr::LitFloat(*f, *sp),
         syn::Expr::Atom(syn::AtomExpr::Ident(id)) => HirExpr::Var(id.node.clone(), id.span),
-        syn::Expr::Atom(syn::AtomExpr::Paren(inner, _sp)) => lower_expr(inner), // flatten paren
-        syn::Expr::Field(fe) => {
-            // Represent field/index as Cursor* form (even if cursor name not resolved here); see 8.9.3 table
-            // For map bodies, fields not typical; for optic bodies the decls keep original.
-            if let syn::FieldExpr::FieldAccess { field, .. } = fe {
-                HirExpr::Var(field.node.clone(), field.span)
+        syn::Expr::Atom(syn::AtomExpr::Paren(inner, sp)) => {
+            HirExpr::Tuple(vec![lower_expr(inner)], *sp)
+        }
+        syn::Expr::Atom(syn::AtomExpr::Tuple(exprs, sp)) => {
+            HirExpr::Tuple(exprs.iter().map(lower_expr).collect(), *sp)
+        }
+        syn::Expr::Field(fe) => lower_field_expr(fe),
+        syn::Expr::QueryChain(q) => HirExpr::Unsupported {
+            reason: "query chain not supported in map/value context".into(),
+            span: q.span,
+        },
+        syn::Expr::Assign { span, .. } | syn::Expr::Block { span, .. } => HirExpr::Unsupported {
+            reason: "expression form not supported in map/value context".into(),
+            span: *span,
+        },
+    }
+}
+
+fn lower_field_expr(fe: &syn::FieldExpr) -> HirExpr {
+    match fe {
+        syn::FieldExpr::FieldAccess { base, field, span } => {
+            let base_h = match &**base {
+                syn::FieldExpr::Base(syn::AtomExpr::Ident(id), _) => {
+                    HirExpr::Var(id.node.clone(), id.span)
+                }
+                other => lower_field_expr(other),
+            };
+            if field.node.chars().all(|c| c.is_ascii_digit()) {
+                let idx: u32 = field.node.parse().unwrap_or(0);
+                HirExpr::TupleProj {
+                    base: Box::new(base_h),
+                    index: idx,
+                    span: *span,
+                }
             } else {
-                HirExpr::Var("field".into(), Span::dummy())
+                HirExpr::Var(field.node.clone(), field.span)
             }
         }
-        _ => HirExpr::Var("expr".into(), Span::dummy()),
+        syn::FieldExpr::Index { base, index, span } => {
+            let _ = lower_field_expr(base);
+            let _idx = lower_expr(index);
+            HirExpr::Unsupported {
+                reason: "field[index] not supported in map body (use tuple projection)".into(),
+                span: *span,
+            }
+        }
+        syn::FieldExpr::Base(atom, _span) => match atom {
+            syn::AtomExpr::Ident(id) => HirExpr::Var(id.node.clone(), id.span),
+            syn::AtomExpr::Int(i, sp) => HirExpr::LitInt(*i, *sp),
+            syn::AtomExpr::Float(f, sp) => HirExpr::LitFloat(*f, *sp),
+            syn::AtomExpr::Paren(inner, _) => lower_expr(inner),
+            syn::AtomExpr::Tuple(exprs, sp) => {
+                HirExpr::Tuple(exprs.iter().map(lower_expr).collect(), *sp)
+            }
+        },
     }
 }

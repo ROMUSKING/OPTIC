@@ -1,1 +1,2 @@
-GRA-104 [Grade]: inferred cache grade exceeds annotated CacheGrade bound
+GRA-110 [grade] declared grade tighter than inferred: declared CacheGrade is tighter than inferred from optic body
+  evidence: {"annotated":1,"inferred":3,"optic":"BadCache"}

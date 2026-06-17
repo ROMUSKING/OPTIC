@@ -224,7 +224,7 @@ Minimum **2 GB RAM** recommended for `rustc` and the `opticc run` verification h
 - Sequential tests: `cargo test -p <crate> -- --quiet` (one crate at a time; avoid full-workspace parallel builds)
 - Keep synthetic N caps modest in tests (N≤12 in hir, N≤8 in cgir integration)
 - Optional low-mem probe: `ulimit -v 2000000 cargo test -p optic-hir -- --ignored`
-- Run harness uses `/tmp/optic_verify` (cleaned after each run); relative path to `optic-runtime`
+- Run harness uses `tempfile::tempdir()` (auto-cleaned per run); relative path to `optic-runtime`
 
 **Implementation notes (ch8–ch11):** `Arc<OpticSummary>` for cheap sharing; `dedup_regions` O(n) on small region sets; compose produces new summary data per ch8.9.5.1 (unavoidable clone once per composition).
 
@@ -253,31 +253,32 @@ After full M5/M6: the workspace contains a self-contained, runnable, tested real
 
 This plan is derived directly from the book (specific chapter/appendix references above). Implementation will cross-reference the book in code comments and the final `docs/`.
 
-## 8. Current progress (updated 2026-06-16)
+## 8. Current progress (updated 2026-06-17, review pass 5e79ac44)
 
 | Milestone | Status | Evidence |
 |---|---|---|
-| M0 lexer/parser | **mostly done** | Hand-written lexer/parser; `dump-tokens`, `dump-ast`; examples parse |
-| M1 HIR + summaries | **mostly done** | `dump-hir`; region extraction; compose/par summaries; golden `fixtures/hir/` |
-| M2 types/grades/alias | **mostly done** | `invalid_alias.opt` → ALI-101; `invalid_grade.opt` → GRA-104; alias checker per ch9 |
-| M3 CGIR + verifier | **in progress** | `dump-cgir [--before-fusion] [--check] [--node N]`; basic `verify()`; provenance on nodes |
-| M4 fusions | **partial** | Product → `FusedLoop` in `optic-opt`; map/compose fusion not yet sound-complete |
-| M5 Rust backend + run | **partial** | `transpile`, `run` harness; decay/position/get/set examples; codegen still uses demo map bodies for `.map` |
-| M6 release polish | **not started** | Fixtures sparse; `explain`/`doctor`/`bench`/`snapshot-update` not yet implemented |
+| M0 lexer/parser | **mostly done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative tokens) |
+| M1 HIR + summaries | **mostly done** | Tuple/`TupleProj`; HIR map-chain fusion; `Unsupported` lowering; `fixtures/hir/health_position.txt` |
+| M2 types/grades/alias | **mostly done** | ch9.9.3 inference; GRA-110/GRA-104; ALI-201; `check` runs CGIR+verify |
+| M3 CGIR + verifier | **mostly done** | `resolved_optics` alias map; `dump-cgir --check` passes decay alias; CGIR goldens |
+| M4 fusions | **partial** | ch10 order map→compose→product; compose FusedLoop; verify propagated; CGIR map_fusion infra |
+| M5 Rust backend + run | **partial** | Product spine region order; execution tests; harness via `tempfile` (see §5) |
+| M6 release polish | **in progress** | `explain`/`doctor`/`dump-summary`/`bench`/`snapshot-update`; JSON diagnostic goldens started |
 
-**Completed this iteration:**
-- Added root `.gitignore` (target/, IDE files, `/tmp` artifacts, generated `examples/*.rs`)
-- Removed CLI dead-code emitters (`emit_for_known`, `emit_early_rust_for_known_example`)
-- Added appendix B examples: `health_get.opt`, `health_set.opt`, `invalid_grade.opt`
-- Added `dump-ast`, `dump-cgir` CLI commands; CGIR `QueryGet`/`QuerySet` nodes; grade bound check (GRA-104)
-- AI-slop hygiene: tightened comments in impl crates; cleaned hardware section above
+**Diagnostic catalog (aligned to book):**
+- GRA-110: optic-decl CacheGrade tighter than inferred (ch9.9.3)
+- GRA-104: sequential `>>>` composition exceeds bound (ch9.9.4)
+- ALI-201: alias conflict with `conflicting_regions` evidence
+- RES-001 / CGI-*: resolve and CGIR build errors
 
-**Next iteration priorities (M3–M6 gaps):**
-1. Golden fixtures: tokens/ast/cgir pre+post for all positive examples
-2. Sound map + compose fusion (ch10) with post-fusion verifier
-3. Codegen: lower real HirExpr map bodies from CGIR (not demo deltas)
-4. CLI: `explain`, `doctor`, `dump-summary`, `bench` stub per appendix B
-5. More negative fixtures: `grade_mismatch`, `unsupported_prism` (parse/type reject)
+**Positive examples** use `CacheGrade<2>` for single-field get+put lenses (inferred cache = sat_add(1,1) = 2).
+
+**Next iteration priorities:**
+1. Full compose fusion body rewrite (not just FusedLoop annotation) + equivalence tests
+2. Freeze all diagnostic JSON witnesses (`related_spans`, `ranked_fixes`) in `fixtures/diagnostics/`
+3. CGIR goldens for `health_get`/`health_set` and negative examples
+4. Box large AST variants (clippy `large_enum_variant`); low-mem `#[ignore]` probes
+5. M5 bench baselines committed and timing regression enforced in CI
 
 ---
 

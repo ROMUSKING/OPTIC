@@ -106,8 +106,19 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn should_consume_sync_token(kind: TokenKind) -> bool {
+        matches!(kind, TokenKind::RBrace | TokenKind::Semi | TokenKind::Eof)
+    }
+
     fn skip_until_sync(&mut self, sync: &[TokenKind]) {
         while !sync.contains(&self.current()) && self.current() != TokenKind::Eof {
+            self.advance();
+        }
+        // ch7.6: consume only closing tokens; stop at next decl keyword without eating it.
+        if self.current() != TokenKind::Eof
+            && sync.contains(&self.current())
+            && Self::should_consume_sync_token(self.current())
+        {
             self.advance();
         }
     }
@@ -128,21 +139,29 @@ impl<'a> Parser<'a> {
                 TokenKind::KwData => {
                     if let Some(d) = self.parse_data_decl() {
                         items.push(Item::Data(d));
+                    } else {
+                        self.skip_until_sync(&sync);
                     }
                 }
                 TokenKind::KwOptic => {
                     if let Some(o) = self.parse_optic_decl() {
                         items.push(Item::Optic(o));
+                    } else {
+                        self.skip_until_sync(&sync);
                     }
                 }
                 TokenKind::KwLet => {
                     if let Some(l) = self.parse_let_binding() {
                         items.push(Item::Let(l));
+                    } else {
+                        self.skip_until_sync(&sync);
                     }
                 }
                 TokenKind::KwFn => {
                     if let Some(f) = self.parse_fn_decl() {
                         items.push(Item::Fn(f));
+                    } else {
+                        self.skip_until_sync(&sync);
                     }
                 }
                 _ => {
@@ -358,13 +377,27 @@ impl<'a> Parser<'a> {
                         }
                         if let TokenKind::IntLit = self.current() {
                             let n_tok = self.advance();
-                            let n: u32 = self.text_of(&n_tok).parse().unwrap_or(0);
+                            let n: u32 = match self.text_of(&n_tok).parse() {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    self.errors.push(ParseError {
+                                        message: "invalid CacheGrade literal".into(),
+                                        span: n_tok.span,
+                                    });
+                                    return None;
+                                }
+                            };
                             self.expect(TokenKind::Gt, ">")?;
                             return Some(GradeDim::Cache {
                                 n: Some(n),
                                 span: sp,
                             });
                         }
+                        self.errors.push(ParseError {
+                            message: "expected CacheGrade<_> or CacheGrade<N>".into(),
+                            span: sp,
+                        });
+                        return None;
                     }
                     Some(GradeDim::Cache { n: None, span: sp })
                 } else if txt == "OwnershipGrade" {
@@ -445,21 +478,31 @@ impl<'a> Parser<'a> {
         let name_tok = self.advance();
         let name = Spanned::new(self.text_of(&name_tok), name_tok.span);
 
-        let ty = if self.current() == TokenKind::Colon {
+        let had_colon = self.current() == TokenKind::Colon;
+        let ty = if had_colon {
             self.advance();
-            // very simplified: we accept a full GradedOptic<...> annotation
-            let costate = self.parse_type_expr()?;
-            self.expect(TokenKind::Comma, ",")?;
-            let focus = self.parse_type_expr()?;
-            self.expect(TokenKind::Comma, ",")?;
-            let grade = self.parse_grade_expr()?;
-            self.expect(TokenKind::Gt, ">")?; // rough
-            Some(GradeOpticType {
-                costate,
-                focus,
-                grade,
-                span: start,
-            })
+            if self.current() == TokenKind::Ident && self.text_of_current() == "GradedOptic" {
+                self.advance();
+                self.expect(TokenKind::Lt, "GradedOptic<")?;
+                let costate = self.parse_type_expr()?;
+                self.expect(TokenKind::Comma, ",")?;
+                let focus = self.parse_type_expr()?;
+                self.expect(TokenKind::Comma, ",")?;
+                let grade = self.parse_grade_expr()?;
+                self.expect(TokenKind::Gt, ">")?;
+                Some(GradeOpticType {
+                    costate,
+                    focus,
+                    grade,
+                    span: start,
+                })
+            } else {
+                self.errors.push(ParseError {
+                    message: "expected GradedOptic<...> type annotation after let name:".into(),
+                    span: self.current_span(),
+                });
+                return None;
+            }
         } else {
             None
         };
@@ -483,7 +526,7 @@ impl<'a> Parser<'a> {
         let name = Spanned::new(self.text_of(&name_tok), name_tok.span);
         self.expect(TokenKind::LParen, "(")?;
         let mut params = vec![];
-        while self.current() != TokenKind::RParen {
+        while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
             let p_name = self.advance();
             let p = Spanned::new(self.text_of(&p_name), p_name.span);
             self.expect(TokenKind::Colon, ":")?;
@@ -518,7 +561,33 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBrace, "{")?;
         let mut body = vec![];
         while self.current() != TokenKind::RBrace && self.current() != TokenKind::Eof {
-            body.push(self.parse_stmt()?);
+            let start = self.current_span();
+            let mut target = None;
+            if let TokenKind::Ident = self.current() {
+                let saved = self.pos;
+                let id_tok = self.advance();
+                if self.current() == TokenKind::Equals {
+                    self.advance();
+                    target = Some(Spanned::new(self.text_of(&id_tok), id_tok.span));
+                } else {
+                    self.pos = saved;
+                }
+            }
+            let expr = self.parse_expr()?;
+            if self.current() == TokenKind::Semi {
+                self.advance();
+            } else if self.current() != TokenKind::RBrace {
+                self.errors.push(ParseError {
+                    message: "expected ';' or '}' after statement in fn body".into(),
+                    span: self.current_span(),
+                });
+                break;
+            }
+            let span = start.merge(body_span(&expr));
+            body.push(Stmt { target, expr, span });
+            if self.current() == TokenKind::RBrace {
+                break;
+            }
         }
         self.expect(TokenKind::RBrace, "}")?;
         Some(FnDecl {
@@ -528,27 +597,6 @@ impl<'a> Parser<'a> {
             body,
             span: start,
         })
-    }
-
-    fn parse_stmt(&mut self) -> Option<Stmt> {
-        let start = self.current_span();
-        // very simple: optional target = expr ;
-        let mut target = None;
-        if let TokenKind::Ident = self.current() {
-            // peek for =
-            let saved = self.pos;
-            let id_tok = self.advance();
-            if self.current() == TokenKind::Equals {
-                self.advance();
-                target = Some(Spanned::new(self.text_of(&id_tok), id_tok.span));
-            } else {
-                self.pos = saved; // backtrack
-            }
-        }
-        let expr = self.parse_expr()?;
-        self.expect(TokenKind::Semi, "stmt ;")?;
-        let span = start.merge(body_span(&expr));
-        Some(Stmt { target, expr, span })
     }
 
     fn parse_expr(&mut self) -> Option<Expr> {
@@ -575,81 +623,89 @@ impl<'a> Parser<'a> {
             TokenKind::Plus => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Add,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Minus => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Sub,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Star => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Mul,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Slash => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Div,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Lt => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Lt,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Gt => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Gt,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Le => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Le,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             TokenKind::Ge => {
                 self.advance();
                 let right = self.parse_field_expr()?;
+                let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
                     op: BinOp::Ge,
                     right: Box::new(right),
-                    span: Span::dummy(),
+                    span,
                 });
             }
             _ => {}
@@ -762,11 +818,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let end = self.expect(TokenKind::RParen, "tuple/paren )")?;
-                if exprs.len() == 1 {
-                    Some(AtomExpr::Paren(
-                        Box::new(exprs.into_iter().next().unwrap()),
-                        start.merge(end),
-                    ))
+                if let [inner] = exprs.as_slice() {
+                    Some(AtomExpr::Paren(Box::new(inner.clone()), start.merge(end)))
                 } else {
                     Some(AtomExpr::Tuple(exprs, start.merge(end)))
                 }
@@ -1179,5 +1232,29 @@ mod tests {
         let src = "fn f(x: i32) -> i32 { x }";
         let sid = SourceId(0);
         assert!(parse(src, sid).is_ok(), "fn_decl with -> ret type per EBNF");
+    }
+
+    #[test]
+    fn recovery_parses_second_item_after_bad_let() {
+        let src = "let bad: NotAType = X;\nlet c = A *** B;\n";
+        let sid = SourceId(0);
+        let prog = parse(src, sid).expect("should recover and parse second let");
+        assert!(
+            prog.items
+                .iter()
+                .any(|i| matches!(i, Item::Let(l) if l.name.node == "c")),
+            "second let should parse after malformed typed let"
+        );
+    }
+
+    #[test]
+    fn recovery_parses_fn_after_bad_params() {
+        let src = "fn bad(x\nlet c = A;\nfn main() { }\n";
+        let sid = SourceId(0);
+        let prog = parse(src, sid).expect("recovery should reach later items");
+        assert!(prog
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Fn(f) if f.name.node == "main")));
     }
 }

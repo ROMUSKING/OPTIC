@@ -1,3 +1,2 @@
-ALI-101 [Alias]: put_writes overlaps effective region (including put_reads hazard) (at Span { source: SourceId(1), start: 164, end: 294 })
-  evidence: {"overlapping_regions":["healths","healths"]}
-  next: ["optic explain ALI-101", "optic dump-summary --node ..."]
+ALI-201 [alias] alias conflict: put_writes overlaps effective region (including put_reads hazard)
+  evidence: {"conflicting_regions":["healths","healths"]}

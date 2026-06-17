@@ -8,3 +8,4 @@ optic-hir = { path = "../optic-hir" }
 optic-diagnostics = { path = "../optic-diagnostics" }
 optic-syntax = { path = "../optic-syntax" }
 optic-typeck = { path = "../optic-typeck" }
+serde_json.workspace = true

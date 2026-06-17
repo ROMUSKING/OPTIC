@@ -23,3 +23,9 @@ examples/*.rs
 # Backup / patch artifacts
 *.orig
 *.rej
+
+# Logs / profiling / env
+*.log
+*.profraw
+.env
+.env.*
