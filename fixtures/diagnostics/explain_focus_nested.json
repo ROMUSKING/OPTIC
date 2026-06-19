@@ -1,0 +1,13 @@
+{
+  "focus": {
+    "costate": "Entities",
+    "focus": "Transform",
+    "focus_fields": [],
+    "node": "nested",
+    "path_lift_prefix": [
+      "position"
+    ],
+    "root_path": "entities.transforms[id].position"
+  },
+  "ok": true
+}

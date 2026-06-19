@@ -1,0 +1,14 @@
+-- Appendix B negative: prism syntax rejected in narrow v0 (M7+)
+data Entities {
+    flags: BitSet,
+    healths: SoA<f32>,
+}
+
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+fn main() {
+    entities.query(AliveFilter).map(|h| h);
+}

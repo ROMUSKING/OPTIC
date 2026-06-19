@@ -8,6 +8,7 @@ name = "opticc"
 path = "src/main.rs"
 
 [dependencies]
+optic = { path = "../optic" }
 optic-syntax = { path = "../optic-syntax" }
 optic-runtime = { path = "../optic-runtime" }
 optic-hir = { path = "../optic-hir" }

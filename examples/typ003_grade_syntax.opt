@@ -1,0 +1,14 @@
+-- TYP-003: invalid OwnershipGrade rational syntax
+
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic BadGrade: GradedOptic<Entities, f32, OwnershipGrade<not_a_rational> + _> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BadGrade).get();
+}

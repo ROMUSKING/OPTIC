@@ -1,0 +1,12 @@
+-- Appendix B negative: traversal syntax rejected in narrow v0 (M7+)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<1>> {
+    get s => s.healths[s.id]
+}
+
+fn main() {
+    entities.query(AllHealths).map(|h| h);
+}

@@ -81,6 +81,63 @@ fn doctor_validates_runtime_crate_path() {
 }
 
 #[test]
+fn rejects_deeply_nested_parens_without_stack_overflow() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("deep.opt");
+    let depth = 700usize;
+    let mut src = String::from("fn main() { entities.query(H).map(|x| ");
+    src.push_str(&"(".repeat(depth));
+    src.push('x');
+    src.push_str(&")".repeat(depth));
+    src.push_str("); }");
+    std::fs::write(&path, &src).expect("write deep.opt");
+    opticc()
+        .args(["check", "--json", &path.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("PAR-001"));
+}
+
+#[test]
+fn rejects_deeply_nested_soa_type_without_stack_overflow() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("deep_soa.opt");
+    let depth = 700usize;
+    let mut inner = String::from("f32");
+    for _ in 0..depth {
+        inner = format!("SoA<{inner}>");
+    }
+    let src = format!("data Entities {{ healths: {inner} }}\n");
+    std::fs::write(&path, &src).expect("write deep_soa.opt");
+    opticc()
+        .args(["check", "--json", &path.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("PAR-001"));
+}
+
+#[test]
+fn rejects_deep_optic_compose_chain_without_stack_overflow() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("deep_compose.opt");
+    let depth = 700usize;
+    let mut src = String::from(
+        "data Entities { healths: SoA<f32> }\n\
+         optic A: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }\n\
+         optic B: GradedOptic<Entities,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }\n\
+         let deep = ",
+    );
+    src.push_str(&format!("{}A", "B >>> ".repeat(depth)));
+    src.push_str(";\nfn main() { entities.query(deep).map(|x| x); }\n");
+    std::fs::write(&path, &src).expect("write deep_compose.opt");
+    opticc()
+        .args(["check", "--json", &path.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("compose depth limit exceeded"));
+}
+
+#[test]
 fn verbose_flag_accepted_on_run() {
     opticc()
         .args([

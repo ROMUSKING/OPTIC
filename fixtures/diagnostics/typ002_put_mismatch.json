@@ -1,0 +1,43 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-002",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "actual_type": "f32",
+        "clause": "put",
+        "expected_type": "Vec2",
+        "optic": "BadPut"
+      },
+      "minimal_fix_options": [
+        "change declared focus type to match the body",
+        "adjust get/put body to return the declared focus type"
+      ],
+      "next_commands": [
+        "opticc explain TYP-002",
+        "edit declared focus type or get/put body in source"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 221.0,
+        "source": 1.0,
+        "start": 218.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "change declared focus type to match the body"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "adjust get/put body to return the declared focus type"
+        }
+      ],
+      "related_spans": [],
+      "rule": "put body type `f32` does not match declared focus `Vec2`",
+      "severity": "error",
+      "title": "type mismatch in optic body"
+    }
+  ],
+  "ok": false
+}

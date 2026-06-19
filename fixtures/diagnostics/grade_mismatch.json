@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "GRA-104",
-      "confidence": 0.9,
+      "confidence": 0.8999999761581421,
       "evidence": {
         "annotated": 2.0,
         "binding": "bad",
@@ -15,8 +15,8 @@
         "split composition into separate queries"
       ],
       "next_commands": [
-        "optic explain GRA-104",
-        "optic dump-summary --node ..."
+        "opticc explain GRA-104",
+        "opticc dump-summary --node ..."
       ],
       "phase": "grade",
       "primary_span": {
@@ -30,7 +30,7 @@
           "description": "raise sequential CacheGrade bound"
         },
         {
-          "confidence": 0.9,
+          "confidence": 0.8999999761581421,
           "description": "split composition into separate queries"
         }
       ],

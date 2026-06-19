@@ -11,10 +11,28 @@ pub struct Program {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpticTypeCtor {
+    GradedOptic,
+    GradedPrism,
+    GradedTraversal,
+}
+
+impl OpticDecl {
+    /// True when the surface form is deferred to M7+ (prism, unsafe boundary, traversal).
+    pub fn is_unsupported_v0(&self) -> bool {
+        self.unsafe_boundary
+            || self.type_ctor != OpticTypeCtor::GradedOptic
+            || self.preview.is_some()
+            || self.review.is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Item {
     Data(DataDecl),
     Optic(Box<OpticDecl>),
+    Extern(ExternDecl),
     Let(LetBinding),
     Fn(FnDecl),
     /// Top-level expr stmt (for demo/scripts; EBNF items are decls but examples use bare queries)
@@ -50,11 +68,24 @@ pub enum TypeExpr {
 #[derive(Debug, Clone)]
 pub struct OpticDecl {
     pub name: Ident,
+    pub type_ctor: OpticTypeCtor,
+    pub unsafe_boundary: bool,
     pub costate: TypeExpr,
     pub focus: TypeExpr,
     pub grade: GradeExpr,
-    pub get: GetClause,
+    pub get: Option<GetClause>,
     pub put: Option<PutClause>,
+    pub preview: Option<GetClause>,
+    pub review: Option<PutClause>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternDecl {
+    pub abi: String,
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub ret: Option<TypeExpr>,
     pub span: Span,
 }
 

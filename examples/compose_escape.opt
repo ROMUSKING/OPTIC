@@ -1,0 +1,20 @@
+-- Compose fusion blocked: map body references intermediate (DoubleView get param `x`).
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic DoubleView: GradedOptic<f32, f32, CacheGrade<1> + AffineGrade> {
+    get  x      => x * 2.0
+    put  (x, v) => v / 2.0
+}
+
+let pipeline = HealthView >>> DoubleView;
+
+fn main() {
+    entities.query(pipeline).map(|y| y + x);
+}

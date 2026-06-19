@@ -1,0 +1,7 @@
+CGIR (5 nodes, roots [4])
+  [0] OpticLeaf(HealthView)  provenance=Build
+  [1] OpticLeaf(DoubleView)  provenance=Build
+  [2] Compose(0,1)  provenance=Build
+  [3] QueryMap(pipeline)  provenance=Build
+  [4] FusedLoop(orig=[0, 1, 2, 3],compose=0,1)  provenance=ComposeFusion
+

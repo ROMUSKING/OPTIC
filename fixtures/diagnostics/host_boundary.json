@@ -1,0 +1,79 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-010",
+      "confidence": 1.0,
+      "evidence": {
+        "detail": "foreign `extern` declarations are not supported in narrow v0 (M7+ host boundaries)",
+        "feature": "foreign_decl",
+        "name": "host_helper"
+      },
+      "minimal_fix_options": [
+        "use lens-like GradedOptic forms supported in v0",
+        "defer prisms and host boundaries to M7+"
+      ],
+      "next_commands": [
+        "opticc explain TYP-010",
+        "opticc check file.opt --json"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 143.0,
+        "source": 1.0,
+        "start": 116.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use lens-like GradedOptic forms supported in v0"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer prisms and host boundaries to M7+"
+        }
+      ],
+      "related_spans": [],
+      "rule": "foreign `extern` declarations are not supported in narrow v0 (M7+ host boundaries)",
+      "severity": "error",
+      "title": "unsupported in narrow v0"
+    },
+    {
+      "code": "TYP-010",
+      "confidence": 1.0,
+      "evidence": {
+        "detail": "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
+        "feature": "unsafe_optic",
+        "name": "HostCopy"
+      },
+      "minimal_fix_options": [
+        "use lens-like GradedOptic forms supported in v0",
+        "defer prisms and host boundaries to M7+"
+      ],
+      "next_commands": [
+        "opticc explain TYP-010",
+        "opticc check file.opt --json"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 283.0,
+        "source": 1.0,
+        "start": 146.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use lens-like GradedOptic forms supported in v0"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer prisms and host boundaries to M7+"
+        }
+      ],
+      "related_spans": [],
+      "rule": "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
+      "severity": "error",
+      "title": "unsupported in narrow v0"
+    }
+  ],
+  "ok": false
+}

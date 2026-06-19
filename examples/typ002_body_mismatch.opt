@@ -1,0 +1,15 @@
+-- TYP-002: get body returns Vec2 but declared focus is f32
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic BadFocus: GradedOptic<Entities, f32, _> {
+    get  s      => s.positions[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BadFocus).get();
+}

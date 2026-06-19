@@ -1,0 +1,10 @@
+HIR items: 9
+  other
+  other
+  other
+  Optic TransformView costate=Entities lift=[] reads=["transforms"] writes=["transforms"]
+  Optic MetaField costate=Transform lift=["meta"] reads=["meta"] writes=["meta"]
+  Optic TagField costate=Meta lift=["tag"] reads=["tag"] writes=["tag"]
+  Let triple lift=["meta", "tag"] reads=["transforms", "transforms.meta", "transforms.meta.tag"] writes=["transforms", "transforms.meta", "transforms.meta.tag"]
+  Query cursor=cur_0 kind=Discriminant(2)
+  other

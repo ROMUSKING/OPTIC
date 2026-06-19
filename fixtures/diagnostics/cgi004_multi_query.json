@@ -5,10 +5,10 @@
       "confidence": 1.0,
       "evidence": {},
       "minimal_fix_options": [
-        "optic dump-cgir file.opt --check"
+        "opticc dump-cgir file.opt --check"
       ],
       "next_commands": [
-        "optic dump-cgir file.opt --check"
+        "opticc dump-cgir file.opt --check"
       ],
       "phase": "fusion",
       "primary_span": {
@@ -19,7 +19,7 @@
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "optic dump-cgir file.opt --check"
+          "description": "opticc dump-cgir file.opt --check"
         }
       ],
       "related_spans": [],

@@ -1,0 +1,38 @@
+{
+  "diagnostics": [
+    {
+      "code": "EXP-001",
+      "confidence": 1.0,
+      "evidence": {
+        "candidates": [
+          "HealthView"
+        ],
+        "node": "MissingOptic"
+      },
+      "minimal_fix_options": [
+        "check optic or let binding spelling"
+      ],
+      "next_commands": [
+        "opticc dump-hir file.opt",
+        "opticc dump-summary file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 327.0,
+        "source": 1.0,
+        "start": 172.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "check optic or let binding spelling"
+        }
+      ],
+      "related_spans": [],
+      "rule": "no optic or let binding named `MissingOptic`",
+      "severity": "error",
+      "title": "explain: unknown optic or let name"
+    }
+  ],
+  "ok": false
+}

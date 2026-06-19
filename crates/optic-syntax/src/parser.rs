@@ -7,10 +7,29 @@ use crate::lexer::Lexer;
 use crate::span::{SourceId, Span, Spanned};
 use crate::token::{Token, TokenKind};
 
+/// Recursion depth cap — prevents stack overflow from deeply nested parens/types (security).
+const MAX_PARSE_DEPTH: usize = 512;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseErrorKind {
+    DuplicateSoaCostate { costate: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+    pub kind: Option<ParseErrorKind>,
+}
+
+impl ParseError {
+    pub fn at(span: Span, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span,
+            kind: None,
+        }
+    }
 }
 
 pub fn parse(src: &str, source_id: SourceId) -> Result<Program, Vec<ParseError>> {
@@ -30,6 +49,7 @@ pub fn parse(src: &str, source_id: SourceId) -> Result<Program, Vec<ParseError>>
             .map(|i| match i {
                 Item::Data(d) => d.span,
                 Item::Optic(o) => o.span,
+                Item::Extern(e) => e.span,
                 Item::Let(l) => l.span,
                 Item::Fn(f) => f.span,
                 Item::Expr(e) => body_span(e),
@@ -40,6 +60,7 @@ pub fn parse(src: &str, source_id: SourceId) -> Result<Program, Vec<ParseError>>
             .map(|i| match i {
                 Item::Data(d) => d.span,
                 Item::Optic(o) => o.span,
+                Item::Extern(e) => e.span,
                 Item::Let(l) => l.span,
                 Item::Fn(f) => f.span,
                 Item::Expr(e) => body_span(e),
@@ -101,6 +122,7 @@ impl<'a> Parser<'a> {
                     self.current()
                 ),
                 span: sp,
+                kind: None,
             });
             None
         }
@@ -129,6 +151,8 @@ impl<'a> Parser<'a> {
         let sync = [
             TokenKind::KwData,
             TokenKind::KwOptic,
+            TokenKind::KwUnsafe,
+            TokenKind::KwExtern,
             TokenKind::KwLet,
             TokenKind::KwFn,
             TokenKind::RBrace,
@@ -143,9 +167,16 @@ impl<'a> Parser<'a> {
                         self.skip_until_sync(&sync);
                     }
                 }
-                TokenKind::KwOptic => {
+                TokenKind::KwUnsafe | TokenKind::KwOptic => {
                     if let Some(o) = self.parse_optic_decl() {
                         items.push(Item::Optic(Box::new(o)));
+                    } else {
+                        self.skip_until_sync(&sync);
+                    }
+                }
+                TokenKind::KwExtern => {
+                    if let Some(e) = self.parse_extern_decl() {
+                        items.push(Item::Extern(e));
                     } else {
                         self.skip_until_sync(&sync);
                     }
@@ -184,6 +215,7 @@ impl<'a> Parser<'a> {
                     self.errors.push(ParseError {
                         message: "expected top-level item (data, optic, let, fn) or expr".into(),
                         span: sp,
+                kind: None,
                     });
                     self.skip_until_sync(&sync);
                 }
@@ -201,6 +233,7 @@ impl<'a> Parser<'a> {
             self.errors.push(ParseError {
                 message: "expected ident after data".into(),
                 span: name_tok.span,
+                kind: None,
             });
             self.skip_until_sync(&[TokenKind::LBrace, TokenKind::KwData, TokenKind::Eof]);
             return None;
@@ -231,6 +264,7 @@ impl<'a> Parser<'a> {
             self.errors.push(ParseError {
                 message: "expected field name".into(),
                 span: name_tok.span,
+                kind: None,
             });
             self.skip_until_sync(&[TokenKind::Comma, TokenKind::RBrace, TokenKind::Eof]); // A.8 recovery per ch7.6 type/field sync
             return None;
@@ -243,6 +277,17 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_expr(&mut self) -> Option<TypeExpr> {
+        self.parse_type_expr_depth(0)
+    }
+
+    fn parse_type_expr_depth(&mut self, depth: usize) -> Option<TypeExpr> {
+        if depth > MAX_PARSE_DEPTH {
+            self.errors.push(ParseError::at(
+                self.current_span(),
+                "parse depth limit exceeded",
+            ));
+            return None;
+        }
         match self.current() {
             TokenKind::Ident => {
                 let name_tok = self.advance();
@@ -250,7 +295,7 @@ impl<'a> Parser<'a> {
                 let span0 = name_tok.span;
                 if name == "SoA" {
                     self.expect(TokenKind::Lt, "SoA<")?;
-                    let inner = self.parse_type_expr()?;
+                    let inner = self.parse_type_expr_depth(depth + 1)?;
                     let gt = self.expect(TokenKind::Gt, "SoA>").unwrap_or(span0);
                     Some(TypeExpr::Soa(Box::new(inner), span0.merge(gt)))
                 } else if name == "BitSet" {
@@ -260,7 +305,7 @@ impl<'a> Parser<'a> {
                     if self.current() == TokenKind::Lt {
                         self.advance();
                         while self.current() != TokenKind::Gt && self.current() != TokenKind::Eof {
-                            if let Some(a) = self.parse_type_expr() {
+                            if let Some(a) = self.parse_type_expr_depth(depth) {
                                 args.push(a);
                             }
                             if self.current() == TokenKind::Comma {
@@ -281,7 +326,7 @@ impl<'a> Parser<'a> {
                 let start = self.advance().span;
                 let mut ts = vec![];
                 while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
-                    if let Some(t) = self.parse_type_expr() {
+                    if let Some(t) = self.parse_type_expr_depth(depth) {
                         ts.push(t);
                     }
                     if self.current() == TokenKind::Comma {
@@ -298,6 +343,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected type".into(),
                     span: sp,
+                kind: None,
                 });
                 None
             }
@@ -305,14 +351,58 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_optic_decl(&mut self) -> Option<OpticDecl> {
-        let start = self.advance().span; // optic
+        let mut unsafe_boundary = false;
+        let start = match self.current() {
+            TokenKind::KwUnsafe => {
+                unsafe_boundary = true;
+                let u = self.advance().span;
+                if self.current() != TokenKind::KwOptic {
+                    self.errors.push(ParseError {
+                        message: "expected `optic` after `unsafe`".into(),
+                        span: self.current_span(),
+                        kind: None,
+                    });
+                    return None;
+                }
+                let o = self.advance().span;
+                u.merge(o)
+            }
+            TokenKind::KwOptic => self.advance().span,
+            _ => {
+                self.errors.push(ParseError {
+                    message: "expected `optic` or `unsafe optic` declaration".into(),
+                    span: self.current_span(),
+                    kind: None,
+                });
+                return None;
+            }
+        };
         let name_tok = self.advance();
         let name = Spanned::new(self.text_of(&name_tok), name_tok.span);
         self.expect(TokenKind::Colon, "optic :")?;
 
-        // GradedOptic < S , A , G >
-        self.expect(TokenKind::Ident, "GradedOptic")?; // accept any ident for now; could check name
-                                                       // We are lenient on the exact "GradedOptic" token for simplicity in v0.
+        let ctor_tok = self.advance();
+        if ctor_tok.kind != TokenKind::Ident {
+            self.errors.push(ParseError {
+                message: "expected GradedOptic or GradedPrism type constructor".into(),
+                span: ctor_tok.span,
+                kind: None,
+            });
+            return None;
+        }
+        let type_ctor = match self.text_of(&ctor_tok).as_str() {
+            "GradedOptic" => OpticTypeCtor::GradedOptic,
+            "GradedPrism" => OpticTypeCtor::GradedPrism,
+            "GradedTraversal" => OpticTypeCtor::GradedTraversal,
+            other => {
+                self.errors.push(ParseError {
+                    message: format!("unknown optic type constructor `{other}`"),
+                    span: ctor_tok.span,
+                    kind: None,
+                });
+                OpticTypeCtor::GradedOptic
+            }
+        };
         self.expect(TokenKind::Lt, "<")?;
         let costate = self.parse_type_expr()?;
         self.expect(TokenKind::Comma, ",")?;
@@ -323,12 +413,27 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LBrace, "optic body {")?;
 
-        let get = self.parse_get_clause()?;
-        let put = if self.current() == TokenKind::KwPut {
-            Some(self.parse_put_clause()?)
-        } else {
-            None
-        };
+        let mut get = None;
+        let mut put = None;
+        let mut preview = None;
+        let mut review = None;
+        while self.current() != TokenKind::RBrace && self.current() != TokenKind::Eof {
+            match self.current() {
+                TokenKind::KwGet => get = Some(self.parse_get_clause()?),
+                TokenKind::KwPut => put = Some(self.parse_put_clause()?),
+                TokenKind::KwPreview => preview = Some(self.parse_preview_clause()?),
+                TokenKind::KwReview => review = Some(self.parse_review_clause()?),
+                _ => {
+                    self.errors.push(ParseError {
+                        message: "expected get, put, preview, or review clause in optic body"
+                            .into(),
+                        span: self.current_span(),
+                        kind: None,
+                    });
+                    self.advance();
+                }
+            }
+        }
 
         let rbrace = self
             .expect(TokenKind::RBrace, "optic }")
@@ -337,11 +442,97 @@ impl<'a> Parser<'a> {
 
         Some(OpticDecl {
             name,
+            type_ctor,
+            unsafe_boundary,
             costate,
             focus,
             grade,
             get,
             put,
+            preview,
+            review,
+            span,
+        })
+    }
+
+    fn parse_extern_decl(&mut self) -> Option<ExternDecl> {
+        let start = self.advance().span; // extern
+        let abi_tok = self.advance();
+        let abi = if abi_tok.kind == TokenKind::StringLit {
+            self.text_of(&abi_tok)
+                .trim_matches('"')
+                .replace("\\\"", "\"")
+        } else {
+            self.errors.push(ParseError {
+                message: "expected ABI string literal after extern".into(),
+                span: abi_tok.span,
+                kind: None,
+            });
+            "C".into()
+        };
+        self.expect(TokenKind::KwFn, "fn")?;
+        let name_tok = self.advance();
+        let name = Spanned::new(self.text_of(&name_tok), name_tok.span);
+        self.expect(TokenKind::LParen, "(")?;
+        let mut params = vec![];
+        while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
+            let p_name = self.advance();
+            let p = Spanned::new(self.text_of(&p_name), p_name.span);
+            self.expect(TokenKind::Colon, ":")?;
+            let ty = self.parse_type_expr()?;
+            params.push(Param {
+                name: p,
+                ty,
+                span: p_name.span,
+            });
+            if self.current() == TokenKind::Comma {
+                self.advance();
+            }
+        }
+        let rparen = self.expect(TokenKind::RParen, ")")?;
+        let ret = if self.current() == TokenKind::Colon {
+            self.advance();
+            self.parse_type_expr()
+        } else {
+            None
+        };
+        self.expect(TokenKind::Semi, ";")?;
+        let span = start.merge(ret.as_ref().map(ty_span).unwrap_or(rparen));
+        Some(ExternDecl {
+            abi,
+            name,
+            params,
+            ret,
+            span,
+        })
+    }
+
+    fn parse_preview_clause(&mut self) -> Option<GetClause> {
+        let start = self.expect(TokenKind::KwPreview, "preview")?;
+        let param_tok = self.advance();
+        let param = Spanned::new(self.text_of(&param_tok), param_tok.span);
+        self.expect(TokenKind::FatArrow, "=>")?;
+        let body = self.parse_expr()?;
+        let span = start.merge(body_span(&body));
+        Some(GetClause { param, body, span })
+    }
+
+    fn parse_review_clause(&mut self) -> Option<PutClause> {
+        let start = self.expect(TokenKind::KwReview, "review")?;
+        self.expect(TokenKind::LParen, "(")?;
+        let sp_tok = self.advance();
+        let state_param = Spanned::new(self.text_of(&sp_tok), sp_tok.span);
+        self.expect(TokenKind::Comma, ",")?;
+        let vp_tok = self.advance();
+        let value_param = Spanned::new(self.text_of(&vp_tok), vp_tok.span);
+        self.expect(TokenKind::RParen, ")")?;
+        self.expect(TokenKind::FatArrow, "=>")?;
+        let body = self.parse_expr()?;
+        let span = start.merge(body_span(&body));
+        Some(PutClause {
+            state_param,
+            value_param,
+            body,
             span,
         })
     }
@@ -383,6 +574,7 @@ impl<'a> Parser<'a> {
                                     self.errors.push(ParseError {
                                         message: "invalid CacheGrade literal".into(),
                                         span: n_tok.span,
+                kind: None,
                                     });
                                     return None;
                                 }
@@ -396,6 +588,7 @@ impl<'a> Parser<'a> {
                         self.errors.push(ParseError {
                             message: "expected CacheGrade<_> or CacheGrade<N>".into(),
                             span: sp,
+                kind: None,
                         });
                         return None;
                     }
@@ -437,6 +630,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected grade dim".into(),
                     span: sp,
+                kind: None,
                 });
                 Some(GradeDim::Infer(sp))
             }
@@ -500,6 +694,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected GradedOptic<...> type annotation after let name:".into(),
                     span: self.current_span(),
+                kind: None,
                 });
                 return None;
             }
@@ -580,6 +775,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected ';' or '}' after statement in fn body".into(),
                     span: self.current_span(),
+                kind: None,
                 });
                 break;
             }
@@ -601,15 +797,22 @@ impl<'a> Parser<'a> {
 
     fn parse_expr(&mut self) -> Option<Expr> {
         // Full EBNF support for v0 (expr ::= query_chain | assign_expr ; assign ::= field ( = assign )? ; field ::= atom ( . IDENT | [ expr ] )* ; ... )
-        self.parse_assign_expr()
+        self.parse_assign_expr(0)
     }
 
-    fn parse_assign_expr(&mut self) -> Option<Expr> {
+    fn parse_assign_expr(&mut self, depth: usize) -> Option<Expr> {
+        if depth > MAX_PARSE_DEPTH {
+            self.errors.push(ParseError::at(
+                self.current_span(),
+                "parse depth limit exceeded",
+            ));
+            return None;
+        }
         let start = self.current_span();
-        let left = self.parse_field_expr()?;
+        let left = self.parse_field_expr(depth)?;
         if self.current() == TokenKind::Equals {
             self.advance();
-            let right = self.parse_assign_expr()?;
+            let right = self.parse_assign_expr(depth + 1)?;
             let span = start.merge(body_span(&right));
             return Some(Expr::Assign {
                 target: Box::new(left),
@@ -622,7 +825,7 @@ impl<'a> Parser<'a> {
         match self.current() {
             TokenKind::Plus => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -633,7 +836,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Minus => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -644,7 +847,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Star => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -655,7 +858,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Slash => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -666,7 +869,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Lt => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -677,7 +880,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Gt => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -688,7 +891,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Le => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -699,7 +902,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Ge => {
                 self.advance();
-                let right = self.parse_field_expr()?;
+                let right = self.parse_field_expr(depth)?;
                 let span = start.merge(body_span(&right));
                 return Some(Expr::Binary {
                     left: Box::new(left),
@@ -713,7 +916,7 @@ impl<'a> Parser<'a> {
         Some(left)
     }
 
-    fn parse_field_expr(&mut self) -> Option<Expr> {
+    fn parse_field_expr(&mut self, depth: usize) -> Option<Expr> {
         // Support query_chain at expr level per EBNF "expr ::= query_chain | assign_expr" and app D.
         // This ensures Item::Expr in parse_items (bare or via fn body stmts) and Program span calc get real QueryChain.
         if self.looks_like_query_chain() {
@@ -723,7 +926,7 @@ impl<'a> Parser<'a> {
         // A.3: build recursive FieldExpr per app D "field_expr ::= atom_expr ('.' IDENT | '[' expr ']')*"
         // + ch7 field examples (s.healths[s.id]). Use existing FieldExpr {Base, FieldAccess, Index} + spans;
         // no more _temp placeholders. For bare atom (no dot/[) unwrap to Atom to minimize; chains use Expr::Field.
-        let base = self.parse_atom_expr()?;
+        let base = self.parse_atom_expr(depth)?;
         let mut span = match &base {
             AtomExpr::Ident(s) => s.span,
             AtomExpr::Int(_, sp)
@@ -742,6 +945,7 @@ impl<'a> Parser<'a> {
                         self.errors.push(ParseError {
                             message: "expected field ident after .".into(),
                             span: id_tok.span,
+                kind: None,
                         });
                         self.skip_until_sync(&[
                             TokenKind::Comma,
@@ -764,7 +968,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::LBracket => {
                     self.advance();
-                    let idx = self.parse_expr()?;
+                    let idx = self.parse_assign_expr(depth + 1)?;
                     let r = self.expect(TokenKind::RBracket, "]")?;
                     let new_span = span.merge(r);
                     field_expr = FieldExpr::Index {
@@ -791,7 +995,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_atom_expr(&mut self) -> Option<AtomExpr> {
+    fn parse_atom_expr(&mut self, depth: usize) -> Option<AtomExpr> {
+        if depth > MAX_PARSE_DEPTH {
+            self.errors.push(ParseError::at(
+                self.current_span(),
+                "parse depth limit exceeded",
+            ));
+            return None;
+        }
         match self.current() {
             TokenKind::Ident => {
                 let id = self.advance();
@@ -811,10 +1022,10 @@ impl<'a> Parser<'a> {
                 let start = self.advance().span;
                 let mut exprs = vec![];
                 if self.current() != TokenKind::RParen {
-                    exprs.push(self.parse_expr()?);
+                    exprs.push(self.parse_assign_expr(depth + 1)?);
                     while self.current() == TokenKind::Comma {
                         self.advance();
-                        exprs.push(self.parse_expr()?);
+                        exprs.push(self.parse_assign_expr(depth + 1)?);
                     }
                 }
                 let end = self.expect(TokenKind::RParen, "tuple/paren )")?;
@@ -842,6 +1053,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected atom (ident/lit/( / { / query )".into(),
                     span: sp,
+                kind: None,
                 });
                 Some(AtomExpr::Ident(Spanned::new("_err_atom".into(), sp)))
             }
@@ -1041,6 +1253,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected optic atom (ident or ( ))".into(),
                     span: sp,
+                kind: None,
                 });
                 None
             }

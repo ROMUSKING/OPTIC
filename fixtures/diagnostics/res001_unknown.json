@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "RES-001",
-      "confidence": 0.9,
+      "confidence": 0.949999988079071,
       "evidence": {
         "name": "unknown optic `NotDeclared`"
       },
@@ -10,7 +10,7 @@
         "check optic spelling"
       ],
       "next_commands": [
-        "optic dump-hir file.opt"
+        "opticc dump-hir file.opt"
       ],
       "phase": "resolve",
       "primary_span": {

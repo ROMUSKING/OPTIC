@@ -255,31 +255,65 @@ After full M5/M6: the workspace contains a self-contained, runnable, tested real
 
 This plan is derived directly from the book (specific chapter/appendix references above). Implementation will cross-reference the book in code comments and the final `docs/`.
 
-## 8. Current progress (updated 2026-06-17, review pass 5e79ac44 round 6)
+## 8. Current progress (updated 2026-06-19, prelude closure)
 
 | Milestone | Status | Evidence |
 |---|---|---|
-| M0 lexer/parser | **mostly done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative tokens); parser hang regression test |
-| M1 HIR + summaries | **mostly done** | Tuple/`TupleProj`; HIR map-chain fusion + multi-param guard; `Arc<HirExpr>` map bodies shared to CGIR; HIR goldens for all positive examples (`fixtures/hir/`); `cargo test -p optic-hir golden_hir` |
-| M2 types/grades/alias | **mostly done** | ch9.9.3 inference; GRA-110/GRA-104/ALI-201 with `related_spans`; `check` runs CGIR+verify+codegen dry-run |
-| M3 CGIR + verifier | **mostly done** | `resolved_optics` alias map; reachability GC through query→optic spine; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
-| M4 fusions | **partial — OUT OF SCOPE this /implement run** | ch10 order map→compose→product; map fusion + FusedLoop provenance for compose/product. **Next /implement gate:** full compose body rewrite (ch10) + execution equivalence tests. Reviewers: explicit PLAN deferral — not a defect in this delivery. |
-| M5 Rust backend + run | **mostly done** | `is_valid_rust_ident` + keyword denylist + hostile-name emit test; `fixtures/rust/` emit shape tests (all four positives); execution + transpile-compile tests; `fixtures/bench/` baselines |
-| M6 release polish | **mostly done** | Full diagnostic JSON witnesses (GRA/ALI/PAR/CGI/RES) with `ranked_fixes` regression; security regression tests; sandboxed toolchain env; bench + execution for all positives; `--verbose` cargo stderr |
+| M0 lexer/parser | **done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative incl. `unsupported_prism`, `unsupported_traversal`, `host_boundary`, `compose_triple`); `MAX_PARSE_DEPTH=512`; parser hang regression test; prism/traversal/unsafe/extern surface parsed for stable TYP-010 rejection |
+| M1 HIR + summaries | **done** | Tuple/`TupleProj`; HIR map-chain fusion + multi-param guard; `Arc<HirExpr>` map bodies shared to CGIR; **OpticSummary costate/focus from decl**; HIR goldens for all positive examples incl. `compose_triple` (`fixtures/hir/`); `cargo test -p optic-hir golden_hir` |
+| M2 types/grades/alias | **done** | ch9.9.3 inference; GRA-110/GRA-104/ALI-201 with `related_spans`; **TYP-010** for prism/traversal/unsafe/extern; `check` runs CGIR+verify+codegen dry-run |
+| M3 CGIR + verifier | **done** | `resolved_optics` alias map; reachability GC through query→optic spine; **`dump-cgir --node` resolves by `NodeId`**; early **CGI-003** for unsupported optic bodies in compose chains; compose wiring uses **summary** focus/costate; unreachable materialized `FusedLoop` flagged; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
+| M4 fusions | **done** | ch10 order map→compose→product; map fusion; compose body rewrite; nested compose chain fusion; **`ProductFlat` materialization** (nested+leaf products rewritten in-place; provenance `ProductFlattening`; verify invariants); `intermediate_escapes_query`; FUS-501/FUS-502 |
+| M5 Rust backend + run | **done** | `RegionMap` from data decls threaded via `CgirGraph`; nested compose with `FocusField` put spine; `nested_position.opt` end-to-end; `fixtures/rust/` + `fixtures/bench/` incl. nested_position; codegen returns `Err` for unknown regions; `region_bind`/`column_init` derive from `ColumnInfo` (custom record defaults remain fixture-driven for harness init only) |
+| M6 release polish | **done** | Full diagnostic JSON witnesses (GRA/ALI/PAR/CGI/RES/FUS/TYP/EXP) with `ranked_fixes` + agent-repair smoke/policy test; appendix B CLI parity: `explain-grade`, **`explain-focus`**, **`dump-summary --node NAME`**, **`doctor [file]`**, **`bench [file]`**; `docs/v0-executable-spec.md`; `crates/optic` facade; CLI binary `opticc` |
 
 **Diagnostic catalog (aligned to book):**
 - GRA-110: optic-decl CacheGrade tighter than inferred (ch9.9.3)
 - GRA-104: sequential `>>>` composition exceeds bound (ch9.9.4)
 - ALI-201: alias conflict with `conflicting_regions` evidence
-- RES-001 / CGI-*: resolve and CGIR build errors
+- TYP-001: unknown costate/focus type (ch9 type universe)
+- TYP-002: optic body type mismatch vs declared focus
+- TYP-003: invalid grade annotation syntax (OwnershipGrade rational, unknown dim)
+- TYP-004: cannot infer optic body type (v0)
+- TYP-010: prism / traversal / `unsafe optic` / `extern` host boundary syntax rejected in narrow v0 (M7+)
+- EXP-001: explain-grade/focus unknown `--node`
+- PAR-001: parse error (incl. `MAX_PARSE_DEPTH = 512` stack-overflow guard in `optic-syntax`)
+- PAR-010+: reserved for future parse error subcodes (v0 uses PAR-001 for syntax + depth limit)
+- FUS-501: compose fusion blocked — intermediate escapes (non-fatal note in `check`)
+- FUS-502: compose fusion blocked — legality precondition (focus/costate, impurity, non-leaf)
+- CGI-003: unsupported optic body in compose chain (early reject for plain `.field` bodies)
+- RES-001 / other CGI-*: resolve and CGIR build/verify errors
 
 **Positive examples** use `CacheGrade<2>` for single-field get+put lenses (inferred cache = sat_add(1,1) = 2).
 
-**Next iteration priorities (/implement gate):**
-1. **M4:** Full compose fusion body rewrite (ch10) + execution equivalence tests
-2. Broader codegen hardening beyond `is_valid_rust_ident` + keyword denylist
+**Completed gates (2026-06-19):**
+1. **Product flatten materialization** (BUG-001): `ProductFlat` CGIR node; `product_flatten` rewrites nested/leaf products; codegen `collect_regions_from_node` + verify invariants; `health_position` post-fusion golden updated (no provenance-only `FusedLoop`)
+2. **PathLift + nested field paths** (SUG-004): `PathLift.prefix` + `is_subregion` dotted lattice; seq/par summary lift; `HirExpr::FocusField`; `nested_position.opt` + full golden parity (tokens/ast/hir/cgir/rust/bench)
+3. **Region→field mapping** (SUG-003): `RegionMap` from `data` decls on `CgirGraph`; codegen uses structured `lookup_region_*` returning `Err`; record types emitted for nested structs
 
-**Done (round 6):** HIR goldens (decay/get/set/position); PAR-001 `ranked_fixes`; security regression suite; runtime path canonicalization; cargo stderr redaction (`--verbose`); hostile-name codegen pipeline test
+**Completed M6 (2026-06-19):**
+1. `opticc explain-grade file.opt --node NAME [--json]` — declared vs inferred cache/ownership + regions
+2. `docs/v0-executable-spec.md` — executable spec cross-referencing M0–M6, CLI, diagnostics, fixture workflow
+3. `crates/optic` facade — `parse`, `lower`, `check`, `build_cgir`, `optimize`, `emit_rust`, `compile_*`, `Diagnostic`
+4. TYP-001/002/003 catalog + `examples/typ*.opt` + `fixtures/diagnostics/typ*.json`
+5. Property/smoke tests: parse→lower idempotence + summary regions ⊆ declared columns (`crates/optic`)
+
+### Prelude-complete summary (2026-06-19)
+
+Appendix B negative examples now include **`unsupported_prism.opt`** (TYP-010 `feature=prism`), **`unsupported_traversal.opt`** (TYP-010 `feature=traversal`), and **`host_boundary.opt`** (TYP-010 `foreign_decl` + `unsafe_optic`) with `fixtures/diagnostics/*.json` witnesses and `optic-cli` integration tests.
+
+New CLI / facade commands:
+- `opticc explain-focus file.opt --node NAME [--json]` — PathLift prefix, root-path, focus_fields
+- `opticc dump-summary file.opt --node NAME` — optic/let **name** lookup (name before numeric id)
+- `opticc dump-cgir file.opt --node N` — **numeric NodeId only** (use `dump-summary --node NAME` for optic names)
+- `opticc doctor [file.opt]` — toolchain check; optional per-file `check`
+- `opticc bench [file.opt] [--update]` — all examples or single-file harness
+
+**Next iteration priorities:**
+1. **compose_field_access.opt**: Status **wontfix** for PathLift unblock — `s.healths` whole-column access remains CGI-003 by design (distinct from nested `t.position` focus fields)
+2. M7+ prisms / host boundaries (only negative reject in v0)
+
+**Done (prior rounds + gates):** compose body rewrite + equivalence; nested compose chain fusion/codegen; FUS-501/FUS-502; CGI-003 whole-column reject preserved; `original_ids` superset documented in `fixtures/README.md`
 
 ---
 

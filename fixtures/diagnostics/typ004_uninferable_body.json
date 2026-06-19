@@ -1,0 +1,41 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-004",
+      "confidence": 0.8999999761581421,
+      "evidence": {
+        "clause": "get",
+        "optic": "BadInfer"
+      },
+      "minimal_fix_options": [
+        "use indexed SoA access or simple field projection",
+        "simplify the optic body expression"
+      ],
+      "next_commands": [
+        "opticc explain TYP-004",
+        "opticc dump-hir file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 315.0,
+        "source": 1.0,
+        "start": 292.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use indexed SoA access or simple field projection"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "simplify the optic body expression"
+        }
+      ],
+      "related_spans": [],
+      "rule": "get body uses a form the type checker cannot infer in v0",
+      "severity": "error",
+      "title": "cannot infer optic body type"
+    }
+  ],
+  "ok": false
+}

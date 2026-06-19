@@ -1,0 +1,8 @@
+HIR items: 7
+  other
+  other
+  Optic TransformView costate=Entities lift=[] reads=["transforms"] writes=["transforms"]
+  Optic PositionField costate=Transform lift=["position"] reads=["position"] writes=["position"]
+  Let nested lift=["position"] reads=["transforms", "transforms.position"] writes=["transforms", "transforms.position"]
+  Query cursor=cur_0 kind=Discriminant(2)
+  other

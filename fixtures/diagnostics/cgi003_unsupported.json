@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "CGI-003",
-      "confidence": 0.9,
+      "confidence": 0.949999988079071,
       "evidence": {
         "reason": "v0 does not support .map().set() chain"
       },
@@ -10,7 +10,7 @@
         "simplify map/set value expression"
       ],
       "next_commands": [
-        "optic dump-hir file.opt"
+        "opticc dump-hir file.opt"
       ],
       "phase": "type",
       "primary_span": {

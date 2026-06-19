@@ -1,0 +1,15 @@
+-- TYP-002: put writes f32 column but declared focus is Vec2
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic BadPut: GradedOptic<Entities, Vec2, _> {
+    get  s      => s.positions[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BadPut).get();
+}

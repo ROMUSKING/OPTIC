@@ -13,11 +13,11 @@ pub fn run_example(entities: &mut Entities) {
     assert_eq!(n, entities.positions.len());
     for id_0 in 0..n {
         let cursor_0 = Cursor::new(entities, id_0);
-        let _h = cursor_0.arena.healths[cursor_0.id];
-        let _p = cursor_0.arena.positions[cursor_0.id];
-        let (_h_new, _p_new) = ((_h - 1.0), ((_p.0 + 0.1), _p.1));
-        cursor_0.arena.healths[cursor_0.id] = _h_new;
-        cursor_0.arena.positions[cursor_0.id] = _p_new;
+        let _healths = cursor_0.arena.healths[cursor_0.id];
+        let _positions = cursor_0.arena.positions[cursor_0.id];
+        let (_healths_new, _positions_new) = (_healths - 1.0, (_positions.0 + 0.1, _positions.1));
+        cursor_0.arena.healths[cursor_0.id] = _healths_new;
+        cursor_0.arena.positions[cursor_0.id] = _positions_new;
     }
 }
 

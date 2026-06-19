@@ -17,21 +17,74 @@ fn fixture(name: &str) -> PathBuf {
 
 fn normalize_json_floats(s: &str) -> String {
     let v: serde_json::Value = serde_json::from_str(s).expect("parse diagnostic json");
-    fn round_floats(v: &mut serde_json::Value) {
+    fn round_floats(v: &mut serde_json::Value, key: Option<&str>) {
         match v {
             serde_json::Value::Number(n) => {
+                if key == Some("confidence") {
+                    return;
+                }
                 if let Some(f) = n.as_f64() {
                     *v = serde_json::json!((f * 10.0).round() / 10.0);
                 }
             }
-            serde_json::Value::Array(a) => a.iter_mut().for_each(round_floats),
-            serde_json::Value::Object(o) => o.values_mut().for_each(round_floats),
+            serde_json::Value::Array(a) => a.iter_mut().for_each(|x| round_floats(x, None)),
+            serde_json::Value::Object(o) => {
+                for (k, val) in o.iter_mut() {
+                    round_floats(val, Some(k.as_str()));
+                }
+            }
             _ => {}
         }
     }
     let mut copy = v;
-    round_floats(&mut copy);
+    round_floats(&mut copy, None);
     serde_json::to_string_pretty(&copy).expect("serialize normalized json")
+}
+
+fn assert_confidence_exact(actual_json: &str, expected_json: &str) {
+    let actual: serde_json::Value = serde_json::from_str(actual_json).expect("parse actual");
+    let expected: serde_json::Value = serde_json::from_str(expected_json).expect("parse expected");
+    fn walk_confidence(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(c) = o.get("confidence") {
+                    out.push(c.to_string());
+                }
+                o.values().for_each(|x| walk_confidence(x, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk_confidence(x, out)),
+            _ => {}
+        }
+    }
+    let mut a_conf = vec![];
+    let mut e_conf = vec![];
+    walk_confidence(&actual, &mut a_conf);
+    walk_confidence(&expected, &mut e_conf);
+    assert_eq!(a_conf, e_conf, "confidence values must match exactly");
+}
+
+fn assert_json_notes_golden(example_file: &str, json_name: &str, code: &str) {
+    let assert = opticc()
+        .args(["check", "--json", &example(example_file).to_string_lossy()])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stdout.contains(code) || stderr.contains(code));
+    assert!(stdout.contains("notes"));
+    let path = fixture(json_name);
+    let normalized = normalize_json_floats(stdout.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing diagnostic golden {} — run OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
 }
 
 fn assert_json_golden(example_file: &str, json_name: &str, code: &str) {
@@ -46,10 +99,93 @@ fn assert_json_golden(example_file: &str, json_name: &str, code: &str) {
     let normalized = normalize_json_floats(out.trim());
     if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
         std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
-    } else if path.exists() {
+    } else {
+        assert!(
+            path.exists(),
+            "missing diagnostic golden {} — run OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json",
+            path.display()
+        );
         let expected = std::fs::read_to_string(&path).expect("read json golden");
-        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+        let expected_trim = expected.trim();
+        assert_confidence_exact(out.trim(), expected_trim);
+        assert_eq!(normalized, normalize_json_floats(expected_trim));
     }
+}
+
+fn assert_explain_grade_json_golden(example_file: &str, node: &str, json_name: &str, code: &str) {
+    let assert = opticc()
+        .args([
+            "explain-grade",
+            &example(example_file).to_string_lossy(),
+            "--node",
+            node,
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let out = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(out.contains(code));
+    assert!(out.contains("\"ok\": false"));
+    let path = fixture(json_name);
+    let normalized = normalize_json_floats(out.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing explain-grade golden {} — run OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        let expected_trim = expected.trim();
+        assert_confidence_exact(out.trim(), expected_trim);
+        assert_eq!(normalized, normalize_json_floats(expected_trim));
+    }
+}
+
+#[test]
+fn explain_grade_json_unknown_node_matches_fixture() {
+    assert_explain_grade_json_golden(
+        "health_get.opt",
+        "MissingOptic",
+        "explain_grade_unknown_node.json",
+        "EXP-001",
+    );
+}
+
+#[test]
+fn explain_grade_json_typ002_fail_matches_fixture() {
+    assert_explain_grade_json_golden(
+        "typ002_body_mismatch.opt",
+        "BadFocus",
+        "explain_grade_typ002_fail.json",
+        "TYP-002",
+    );
+}
+
+#[test]
+fn explain_grade_json_typ003_fail_matches_fixture() {
+    assert_explain_grade_json_golden(
+        "typ003_grade_syntax.opt",
+        "BadGrade",
+        "explain_grade_typ003_fail.json",
+        "TYP-003",
+    );
+}
+
+#[test]
+fn explain_grade_json_typ004_fail_matches_fixture() {
+    assert_explain_grade_json_golden(
+        "typ004_uninferable_body.opt",
+        "BadInfer",
+        "explain_grade_typ004_fail.json",
+        "TYP-004",
+    );
+}
+
+#[test]
+fn check_json_compose_escape_notes_fus501() {
+    assert_json_notes_golden("compose_escape.opt", "compose_escape.json", "FUS-501");
 }
 
 #[test]
@@ -105,6 +241,175 @@ fn check_json_cgi004_multi_query_matches_fixture() {
 }
 
 #[test]
+fn check_json_typ001_unknown_type_matches_fixture() {
+    assert_json_golden("typ001_unknown_type.opt", "typ001_unknown_type.json", "TYP-001");
+}
+
+#[test]
+fn check_json_typ002_body_mismatch_matches_fixture() {
+    assert_json_golden("typ002_body_mismatch.opt", "typ002_body_mismatch.json", "TYP-002");
+}
+
+#[test]
+fn check_json_typ003_grade_syntax_matches_fixture() {
+    assert_json_golden("typ003_grade_syntax.opt", "typ003_grade_syntax.json", "TYP-003");
+}
+
+#[test]
+fn check_json_typ003_unknown_dim_matches_fixture() {
+    assert_json_golden("typ003_unknown_dim.opt", "typ003_unknown_dim.json", "TYP-003");
+}
+
+#[test]
+fn check_json_typ004_uninferable_matches_fixture() {
+    assert_json_golden("typ004_uninferable_body.opt", "typ004_uninferable_body.json", "TYP-004");
+}
+
+#[test]
+fn check_json_typ001_unknown_focus_matches_fixture() {
+    assert_json_golden("typ001_unknown_focus.opt", "typ001_unknown_focus.json", "TYP-001");
+}
+
+#[test]
+fn check_json_typ002_put_mismatch_matches_fixture() {
+    assert_json_golden("typ002_put_mismatch.opt", "typ002_put_mismatch.json", "TYP-002");
+}
+
+#[test]
+fn explain_focus_json_healthview_matches_fixture() {
+    let assert = opticc()
+        .args([
+            "explain-focus",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "HealthView",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parse json");
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["focus"]["node"], "HealthView");
+    let path = fixture("explain_focus_healthview.json");
+    let normalized = normalize_json_floats(stdout.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write golden");
+    } else {
+        let expected = std::fs::read_to_string(&path).expect("read explain_focus golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
+}
+
+#[test]
+fn explain_focus_json_unknown_node_matches_fixture() {
+    assert_explain_focus_json_golden(
+        "health_get.opt",
+        "MissingOptic",
+        "explain_focus_unknown_node.json",
+        "EXP-001",
+    );
+}
+
+#[test]
+fn explain_focus_json_nested_matches_fixture() {
+    let assert = opticc()
+        .args([
+            "explain-focus",
+            &example("nested_position.opt").to_string_lossy(),
+            "--node",
+            "nested",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parse json");
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["focus"]["node"], "nested");
+    let path = fixture("explain_focus_nested.json");
+    let normalized = normalize_json_floats(stdout.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write golden");
+    } else {
+        let expected = std::fs::read_to_string(&path).expect("read explain_focus_nested golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
+}
+
+#[test]
+fn explain_focus_json_typ002_fail_matches_fixture() {
+    assert_explain_focus_json_golden(
+        "typ002_body_mismatch.opt",
+        "BadFocus",
+        "explain_focus_typ002_fail.json",
+        "TYP-002",
+    );
+}
+
+#[test]
+fn explain_focus_json_typ010_fail_matches_fixture() {
+    assert_explain_focus_json_golden(
+        "unsupported_prism.opt",
+        "AliveFilter",
+        "explain_focus_typ010_fail.json",
+        "TYP-010",
+    );
+}
+
+fn assert_explain_focus_json_golden(example_file: &str, node: &str, json_name: &str, code: &str) {
+    let assert = opticc()
+        .args([
+            "explain-focus",
+            &example(example_file).to_string_lossy(),
+            "--node",
+            node,
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let out = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(out.contains(code));
+    assert!(out.contains("\"ok\": false"));
+    let path = fixture(json_name);
+    let normalized = normalize_json_floats(out.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing explain-focus golden {} — run OPTIC_UPDATE_GOLDEN=1",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
+}
+
+#[test]
+fn check_json_unsupported_prism_matches_fixture() {
+    assert_json_golden(
+        "unsupported_prism.opt",
+        "unsupported_prism.json",
+        "TYP-010",
+    );
+}
+
+#[test]
+fn check_json_unsupported_traversal_matches_fixture() {
+    assert_json_golden(
+        "unsupported_traversal.opt",
+        "unsupported_traversal.json",
+        "TYP-010",
+    );
+}
+
+#[test]
+fn check_json_host_boundary_matches_fixture() {
+    assert_json_golden("host_boundary.opt", "host_boundary.json", "TYP-010");
+}
+
+#[test]
 fn check_json_cgi003_incompatible_map_matches_fixture() {
     assert_json_golden(
         "cgi003_incompatible_map.opt",
@@ -125,6 +430,16 @@ fn check_json_goldens_include_ranked_fixes_for_cataloged_codes() {
         ("cgi004_multi_query.opt", "CGI-004"),
         ("cgi005_arity_mismatch.opt", "CGI-005"),
         ("parse_error.opt", "PAR-001"),
+        ("typ001_unknown_type.opt", "TYP-001"),
+        ("typ001_unknown_focus.opt", "TYP-001"),
+        ("typ002_body_mismatch.opt", "TYP-002"),
+        ("typ002_put_mismatch.opt", "TYP-002"),
+        ("typ003_grade_syntax.opt", "TYP-003"),
+        ("typ003_unknown_dim.opt", "TYP-003"),
+        ("typ004_uninferable_body.opt", "TYP-004"),
+        ("unsupported_prism.opt", "TYP-010"),
+        ("unsupported_traversal.opt", "TYP-010"),
+        ("host_boundary.opt", "TYP-010"),
     ];
     for (example_file, code) in cases {
         let assert = opticc()

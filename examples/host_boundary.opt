@@ -1,0 +1,15 @@
+-- Appendix B negative: host/foreign boundary rejected in narrow v0 (M7+)
+data Entities {
+    healths: SoA<f32>,
+}
+
+extern "C" fn host_helper();
+
+unsafe optic HostCopy: GradedOptic<Entities, f32, LinearGrade> {
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(HostCopy).map(|h| h);
+}

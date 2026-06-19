@@ -56,9 +56,299 @@ fn gcd(a: u64, b: u64) -> u64 {
     }
 }
 
-/// PathLift for nested (ch8): in v0 simple identity for field roots.
-#[derive(Clone, Debug, Default)]
-pub struct PathLift {/* for future nested optics */}
+/// PathLift for nested field paths (ch8.6 / 8.9.5.1).
+/// `prefix` holds focus-relative path segments (e.g. `["position"]` for `t.position`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PathLift {
+    pub prefix: Vec<String>,
+}
+
+impl PathLift {
+    pub fn identity() -> Self {
+        Self { prefix: vec![] }
+    }
+
+    /// Sequential composition: πA ∘ πB (ch8.9.5.1).
+    pub fn seq(parent: &PathLift, child: &PathLift) -> PathLift {
+        let mut prefix = parent.prefix.clone();
+        prefix.extend(child.prefix.iter().cloned());
+        PathLift { prefix }
+    }
+
+    /// Product composition: pair_lift(πA, πB) — v0 tuple focus shares costate; lifts must be identity.
+    pub fn pair(left: &PathLift, right: &PathLift) -> Result<PathLift, String> {
+        if !left.prefix.is_empty() || !right.prefix.is_empty() {
+            return Err(
+                "v0 product composition (*** ) requires identity PathLift on both operands".into(),
+            );
+        }
+        Ok(PathLift::identity())
+    }
+
+    /// Lift focus-relative regions through a parent optic's SoA column + composed prefix (ch8.9.5.1).
+    pub fn lift_regions(
+        lift: &PathLift,
+        parent_column: Option<&str>,
+        regs: &[Region],
+    ) -> Vec<Region> {
+        regs.iter()
+            .map(|r| lift_region(lift, parent_column, r))
+            .collect()
+    }
+}
+
+fn lift_region(lift: &PathLift, parent_column: Option<&str>, region: &str) -> Region {
+    if region.contains('.') {
+        return region.to_string();
+    }
+    let mut parts: Vec<String> = vec![];
+    if let Some(col) = parent_column.filter(|c| !c.is_empty()) {
+        parts.push(col.to_string());
+    }
+    parts.extend(lift.prefix.iter().cloned());
+    if lift.prefix.last().map(|s| s.as_str()) != Some(region) {
+        parts.push(region.to_string());
+    } else if parts.is_empty() {
+        parts.push(region.to_string());
+    }
+    if parts.len() == 1 {
+        parts.into_iter().next().unwrap()
+    } else {
+        parts.join(".")
+    }
+}
+
+/// Minimal subregion lattice for dotted paths (ch9 overlaps).
+pub fn is_subregion(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.starts_with(&format!("{b}.")) || b.starts_with(&format!("{a}.")) {
+        return true;
+    }
+    // Sibling nested fields under the same SoA column (e.g. transforms.position vs transforms.velocity).
+    let a_root = a.split('.').next().unwrap_or(a);
+    let b_root = b.split('.').next().unwrap_or(b);
+    a_root == b_root && a.contains('.') && b.contains('.')
+}
+
+/// Compose-depth cap (security).
+pub const MAX_OPTIC_COMPOSE_DEPTH: usize = 512;
+
+/// Column metadata derived from `data` declarations (SUG-003).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub rust_ty: String,
+    pub element_ty: Option<String>,
+}
+
+/// Region→column/type map threaded into codegen (SUG-003).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegionMap {
+    pub costate_name: String,
+    pub columns: std::collections::BTreeMap<String, ColumnInfo>,
+    /// Nested record types: type name -> field -> Rust type.
+    pub record_fields: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+impl RegionMap {
+    pub fn column_rust_ty(&self, column: &str) -> Option<&str> {
+        self.columns.get(column).map(|c| c.rust_ty.as_str())
+    }
+
+    pub fn top_level_column<'a>(&self, region: &'a str) -> Option<&'a str> {
+        let root = region.split('.').next().unwrap_or(region);
+        if self.columns.contains_key(root) {
+            Some(root)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_top_level_column(&self, region: &str) -> bool {
+        self.columns.contains_key(region)
+    }
+
+    pub fn region_field(&self, region: &str) -> Result<String, String> {
+        let root = region.split('.').next().unwrap_or(region);
+        if self.columns.contains_key(root) {
+            Ok(root.to_string())
+        } else {
+            Err(format!("unknown region `{region}` — not declared in costate/data"))
+        }
+    }
+
+    pub fn region_bind(&self, region: &str) -> Result<String, String> {
+        let root = region.split('.').next().unwrap_or(region);
+        Ok(format!("_{root}"))
+    }
+
+    pub fn region_ty(&self, region: &str) -> Result<String, String> {
+        let root = region.split('.').next().unwrap_or(region);
+        self.columns
+            .get(root)
+            .map(|c| c.rust_ty.clone())
+            .ok_or_else(|| format!("unknown region type for `{region}`"))
+    }
+
+    pub fn nested_field_path(&self, region: &str) -> Vec<String> {
+        let parts: Vec<_> = region.split('.').collect();
+        if parts.len() <= 1 {
+            vec![]
+        } else {
+            parts[1..].iter().map(|s| (*s).to_string()).collect()
+        }
+    }
+}
+
+pub fn validate_rust_type(ty: &str) -> Result<(), String> {
+    validate_rust_type_in_map(ty, None)
+}
+
+pub fn validate_rust_type_in_map(
+    ty: &str,
+    declared_records: Option<&std::collections::HashSet<String>>,
+) -> Result<(), String> {
+    const PRIMITIVES: &[&str] = &["f32", "i32", "u32", "u64", "bool", "usize", "(f32, f32)"];
+    if PRIMITIVES.contains(&ty) {
+        return Ok(());
+    }
+    if ty.starts_with("Vec<") && ty.ends_with('>') {
+        return validate_rust_type(&ty[4..ty.len() - 1]);
+    }
+    if ty.starts_with('(') && ty.ends_with(')') {
+        return Ok(());
+    }
+    if ty.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if let Some(recs) = declared_records {
+            if recs.contains(ty) {
+                return Ok(());
+            }
+            return Err(format!("undeclared record type `{ty}`"));
+        }
+        return Ok(());
+    }
+    Err(format!("disallowed rust type `{ty}`"))
+}
+
+/// Build region map from HIR data declarations (SUG-003).
+pub fn build_region_map(program: &HirProgram) -> Result<RegionMap, String> {
+    let mut map = RegionMap::default();
+    let mut soa_seen = false;
+    // Pass 1a: reserve record type names (forward refs).
+    for item in &program.items {
+        if let HirItem::Data(d) = item {
+            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            if !has_soa {
+                map.record_fields.entry(d.name.node.clone()).or_default();
+            }
+        }
+    }
+    // Pass 1b: fill record field types.
+    for item in &program.items {
+        if let HirItem::Data(d) = item {
+            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            if !has_soa {
+                register_record_type(&mut map, d);
+            }
+        }
+    }
+    // Pass 2: SoA costate columns.
+    for item in &program.items {
+        if let HirItem::Data(d) = item {
+            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            if has_soa {
+                if soa_seen {
+                    return Err(format!(
+                        "v0 supports only one SoA costate data decl; duplicate `{}`",
+                        d.name.node
+                    ));
+                }
+                soa_seen = true;
+                map.costate_name = d.name.node.clone();
+                for field in &d.fields {
+                    let (rust_ty, element_ty) =
+                        lower_field_rust_ty(&field.ty, &mut map.record_fields)?;
+                    map.columns.insert(
+                        field.name.node.clone(),
+                        ColumnInfo {
+                            name: field.name.node.clone(),
+                            rust_ty,
+                            element_ty,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
+fn lower_field_rust_ty(
+    te: &syn::TypeExpr,
+    records: &mut std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+) -> Result<(String, Option<String>), String> {
+    match te {
+        syn::TypeExpr::Soa(inner, _) => {
+            let (elem, _) = lower_type_rust(inner, records)?;
+            Ok((format!("Vec<{elem}>"), Some(elem)))
+        }
+        other => {
+            let (ty, _) = lower_type_rust(other, records)?;
+            Ok((ty, None))
+        }
+    }
+}
+
+fn lower_type_rust(
+    te: &syn::TypeExpr,
+    records: &mut std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+) -> Result<(String, bool), String> {
+    match te {
+        syn::TypeExpr::Named { name, args, .. } => {
+            if name == "Vec2" {
+                return Ok(("(f32, f32)".into(), false));
+            }
+            if name == "f32" || name == "i32" || name == "u32" {
+                return Ok((name.clone(), false));
+            }
+            if args.is_empty() {
+                validate_rust_type_in_map(name, Some(&records.keys().cloned().collect()))?;
+                return Ok((name.clone(), true));
+            }
+            let arg_strs: Vec<_> = args
+                .iter()
+                .map(|a| lower_type_rust(a, records).map(|x| x.0))
+                .collect::<Result<_, _>>()?;
+            Ok((format!("{name}<{}>", arg_strs.join(", ")), true))
+        }
+        syn::TypeExpr::Soa(inner, _) => {
+            let (elem, _) = lower_type_rust(inner, records)?;
+            Ok((format!("Vec<{elem}>"), false))
+        }
+        syn::TypeExpr::Tuple(elems, _) => {
+            let parts: Vec<_> = elems
+                .iter()
+                .map(|e| lower_type_rust(e, records).map(|x| x.0))
+                .collect::<Result<_, _>>()?;
+            Ok((format!("({})", parts.join(", ")), false))
+        }
+        syn::TypeExpr::BitSet(_) => Ok(("u64".into(), false)),
+    }
+}
+
+/// Register nested record field types from a `data` decl (e.g. `Transform { position: Vec2 }`).
+pub fn register_record_type(map: &mut RegionMap, decl: &syn::DataDecl) {
+    let mut fields = std::collections::BTreeMap::new();
+    for field in &decl.fields {
+        if let Ok((ty, _)) = lower_type_rust(&field.ty, &mut map.record_fields) {
+            fields.insert(field.name.node.clone(), ty);
+        }
+    }
+    map.record_fields
+        .insert(decl.name.node.clone(), fields);
+}
 
 /// The central artifact (ch8): OpticSummary.
 #[derive(Clone, Debug)]
@@ -158,6 +448,12 @@ pub enum HirExpr {
         index: u32,
         span: Span,
     },
+    /// Focus-relative field projection in optic bodies, e.g. `t.position` (ch8 PathLift).
+    FocusField {
+        param: String,
+        path: Vec<String>,
+        span: Span,
+    },
     /// Unsupported surface form in map/value lowering (surfaced at codegen).
     Unsupported {
         reason: String,
@@ -179,6 +475,8 @@ pub enum HirItem {
     },
     Let {
         name: String,
+        ty: Option<syn::GradeOpticType>,
+        span: Span,
         optic: HirOptic,
         summary: Arc<OpticSummary>,
     },
@@ -188,58 +486,93 @@ pub enum HirItem {
 
 /// Lowering (M1).
 pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> {
-    // reuse parse err for simplicity; real diags later
-    // Name resolution per ch8.2 + 8.9.1 (order: locals > named optics > data > builtins).
-    // Deterministic: duplicates rejected on insert.
     let mut hir_items = vec![];
     let mut optic_env: HashMap<String, Arc<OpticSummary>> = HashMap::new();
+    let mut soa_costate_seen = false;
 
     for item in program.items {
         match item {
-            syn::Item::Data(d) => hir_items.push(HirItem::Data(d)),
+            syn::Item::Data(d) => {
+                let has_soa = d
+                    .fields
+                    .iter()
+                    .any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+                if has_soa {
+                    if soa_costate_seen {
+                        return Err(vec![syn::ParseError {
+                            message: format!(
+                                "v0 supports only one SoA costate data decl; duplicate `{}`",
+                                d.name.node
+                            ),
+                            span: d.name.span,
+                            kind: Some(syn::ParseErrorKind::DuplicateSoaCostate {
+                                costate: d.name.node.clone(),
+                            }),
+                        }]);
+                    }
+                    soa_costate_seen = true;
+                }
+                hir_items.push(HirItem::Data(d));
+            }
             syn::Item::Optic(decl) => {
                 let decl = *decl;
+                if decl.is_unsupported_v0() {
+                    continue;
+                }
                 let summary = build_summary_from_decl(&decl, &optic_env);
                 let arc = Arc::new(summary);
                 optic_env.insert(decl.name.node.clone(), Arc::clone(&arc));
                 hir_items.push(HirItem::Optic { decl, summary: arc });
             }
             syn::Item::Let(lb) => {
-                let optic = lower_optic_expr(&lb.value, &optic_env);
+                let optic = match lower_optic_expr(&lb.value, &optic_env, 0) {
+                    Ok(o) => o,
+                    Err(e) => return Err(vec![e]),
+                };
                 let summary = if let Some(ty) = &lb.ty {
-                    make_summary_from_ann(&lb.name.node, ty, &optic, &optic_env)
+                    make_summary_from_ann(&lb.name.node, ty, &optic, &optic_env).map_err(|e| {
+                        vec![syn::ParseError {
+                            message: e,
+                            span: lb.span,
+                            kind: None,
+                        }]
+                    })?
                 } else {
-                    compute_summary_for_optic(&optic, &optic_env)
+                    compute_summary_for_optic(&optic, &optic_env).map_err(|e| {
+                        vec![syn::ParseError {
+                            message: e,
+                            span: lb.span,
+                            kind: None,
+                        }]
+                    })?
                 };
                 let arc = Arc::new(summary);
                 hir_items.push(HirItem::Let {
                     name: lb.name.node.clone(),
+                    ty: lb.ty.clone(),
+                    span: lb.span,
                     optic,
                     summary: Arc::clone(&arc),
                 });
                 optic_env.insert(lb.name.node.clone(), arc);
             }
             syn::Item::Fn(f) => {
-                // Also lower queries appearing inside fn bodies (e.g. the .query(...) stmts in main() per examples).
-                // This makes HIR faithful for M1; queries become roots for later CGIR (8.4/8.9.2).
-                for q in lower_queries_from_fn(&f, &optic_env) {
+                for q in lower_queries_from_fn(&f, &optic_env).map_err(|e| vec![e])? {
                     hir_items.push(HirItem::Query(q));
                 }
                 hir_items.push(HirItem::Fn(f));
             }
             syn::Item::Expr(e) => {
-                // top level query expr -> query root (for the demo examples)
                 if let Some(q) = lower_top_query(&e, &optic_env) {
                     hir_items.push(HirItem::Query(q));
                 }
             }
+            syn::Item::Extern(_) => {}
         }
     }
     Ok(HirProgram { items: hir_items })
 }
-
 /// dump_hir: deterministic pretty for M1 goldens / CLI dump-hir (B.7).
-/// Sorts regions for stability; includes names + region sets from summaries.
 pub fn dump_hir(p: &HirProgram) -> String {
     let mut out = String::new();
     out.push_str("HIR items: ");
@@ -249,12 +582,22 @@ pub fn dump_hir(p: &HirProgram) -> String {
         match item {
             HirItem::Optic { decl, summary } => {
                 out.push_str(&format!(
-                    "  Optic {} costate={} reads={:?} writes={:?}\n",
-                    decl.name.node, summary.costate, summary.get_reads, summary.put_writes
+                    "  Optic {} costate={} lift={:?} reads={:?} writes={:?}\n",
+                    decl.name.node,
+                    summary.costate,
+                    summary.lift.prefix,
+                    summary.get_reads,
+                    summary.put_writes
                 ));
             }
             HirItem::Let { name, summary, .. } => {
-                out.push_str(&format!("  Let {} reads={:?}\n", name, summary.get_reads));
+                out.push_str(&format!(
+                    "  Let {} lift={:?} reads={:?} writes={:?}\n",
+                    name,
+                    summary.lift.prefix,
+                    summary.get_reads,
+                    summary.put_writes
+                ));
             }
             HirItem::Query(q) => {
                 out.push_str(&format!(
@@ -268,7 +611,6 @@ pub fn dump_hir(p: &HirProgram) -> String {
     }
     out
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,17 +1034,109 @@ fn main() { entities.query(c).map(|(h1,h2)| h1 + h2); }
     }
 }
 
+fn type_expr_name(te: &syn::TypeExpr) -> String {
+    match te {
+        syn::TypeExpr::Named { name, .. } => name.clone(),
+        syn::TypeExpr::Tuple(_, _) => "(tuple)".into(),
+        syn::TypeExpr::Soa(_, _) => "SoA".into(),
+        syn::TypeExpr::BitSet(_) => "BitSet".into(),
+    }
+}
+
+fn primary_read_clause<'a>(decl: &'a syn::OpticDecl) -> Option<&'a syn::GetClause> {
+    decl.get.as_ref().or(decl.preview.as_ref())
+}
+
+fn focus_relative_lift_from_decl(decl: &syn::OpticDecl) -> PathLift {
+    let Some(read) = primary_read_clause(decl) else {
+        return PathLift::default();
+    };
+    let param = read.param.node.as_str();
+    let mut path = focus_field_path_from_expr(param, &read.body).unwrap_or_default();
+    if let Some(put) = &decl.put {
+        if let Some(mut put_path) = focus_field_path_from_put(&put.state_param.node, &put.body) {
+            for seg in put_path.drain(..) {
+                if !path.contains(&seg) {
+                    path.push(seg);
+                }
+            }
+        }
+    }
+    PathLift { prefix: path }
+}
+
+fn focus_field_path_from_put(state_param: &str, body: &syn::Expr) -> Option<Vec<String>> {
+    match body {
+        syn::Expr::Block { stmts, result, .. } => {
+            for stmt in stmts {
+                if let Some(p) = focus_assign_path(state_param, &stmt.expr) {
+                    return Some(p);
+                }
+            }
+            result
+                .as_ref()
+                .and_then(|r| focus_assign_path(state_param, r))
+        }
+        _ => focus_assign_path(state_param, body),
+    }
+}
+
+fn focus_assign_path(state_param: &str, e: &syn::Expr) -> Option<Vec<String>> {
+    if let syn::Expr::Assign { target, .. } = e {
+        if let syn::Expr::Field(fe) = target.as_ref() {
+            return focus_field_path_from_field_expr(state_param, fe);
+        }
+    }
+    None
+}
+
+fn focus_field_path_from_expr(param: &str, e: &syn::Expr) -> Option<Vec<String>> {
+    match e {
+        syn::Expr::Field(fe) => focus_field_path_from_field_expr(param, fe),
+        syn::Expr::Block { result, .. } => result
+            .as_ref()
+            .and_then(|r| focus_field_path_from_expr(param, r)),
+        _ => None,
+    }
+}
+
+fn focus_field_path_from_field_expr(param: &str, fe: &syn::FieldExpr) -> Option<Vec<String>> {
+    match fe {
+        syn::FieldExpr::FieldAccess { base, field, .. } => {
+            let mut path = focus_field_path_from_field_expr(param, base)?;
+            path.push(field.node.clone());
+            Some(path)
+        }
+        syn::FieldExpr::Index { .. } => None,
+        syn::FieldExpr::Base(syn::AtomExpr::Ident(id), _) if id.node == param => Some(vec![]),
+        _ => None,
+    }
+}
+
+fn seq_parent_column(lhs_reads: &[Region]) -> Result<Option<String>, String> {
+    let mut roots: Vec<String> = lhs_reads
+        .iter()
+        .map(|r| r.split('.').next().unwrap_or(r).to_string())
+        .collect();
+    roots.sort();
+    roots.dedup();
+    if roots.len() > 1 {
+        return Err(format!(
+            "v0 sequential composition requires lhs with one SoA column root; got {roots:?}"
+        ));
+    }
+    Ok(roots.into_iter().next())
+}
+
 fn build_summary_from_decl(
     decl: &syn::OpticDecl,
     _env: &HashMap<String, Arc<OpticSummary>>,
 ) -> OpticSummary {
-    // Extract regions from get/put bodies per ch8.9.5.2 "Summary builder algorithm":
-    //   get_reads  = collect_regions(named_optic.get_body, mode='read')
-    //   put_reads  = collect_regions(named_optic.put_body, mode='read')
-    //   put_writes = collect_regions(named_optic.put_body, mode='write')
-    // Conservative field-root Regions from FieldExpr chains (s.healths[s.id] -> "healths").
-    // Cursor insertion per 8.3/8.9.3 table happens conceptually for HIR exprs (bodies kept in decl for v0; CGIR normalizes).
-    let get_reads = collect_regions(&decl.get.body, "read");
+    let fallback = syn::Expr::Atom(syn::AtomExpr::Int(0, Span::dummy()));
+    let read_body = primary_read_clause(decl)
+        .map(|c| &c.body)
+        .unwrap_or(&fallback);
+    let get_reads = collect_regions(read_body, "read");
     let mut put_reads = vec![];
     let mut put_writes = vec![];
 
@@ -711,14 +1145,13 @@ fn build_summary_from_decl(
         put_writes = collect_regions(&put.body, "write");
     }
 
-    // Grade from ann or default Affine + Cache<1>
     let grade = extract_grade_from_ann(&decl.grade);
 
     OpticSummary {
         name: Some(decl.name.node.clone()),
-        costate: "Entities".into(), // from decl or infer; examples use Entities
-        focus: "f32".into(),
-        lift: PathLift::default(),
+        costate: type_expr_name(&decl.costate),
+        focus: type_expr_name(&decl.focus),
+        lift: focus_relative_lift_from_decl(decl),
         get_reads,
         put_reads,
         put_writes,
@@ -841,68 +1274,88 @@ pub fn annotated_cache_bound(g: &syn::GradeExpr) -> Option<u8> {
     None
 }
 
+/// True when surface grade includes `CacheGrade<_>` (elided cache dimension).
+pub fn cache_grade_elided(g: &syn::GradeExpr) -> bool {
+    g.dims
+        .iter()
+        .any(|d| matches!(d, syn::GradeDim::Cache { n: None, .. }))
+}
+
+/// Named ownership alias from surface grade, if any.
+pub fn ownership_grade_alias(g: &syn::GradeExpr) -> Option<String> {
+    for dim in &g.dims {
+        if let syn::GradeDim::Named { name, .. } = dim {
+            if matches!(name.as_str(), "LinearGrade" | "AffineGrade" | "SharedGrade") {
+                return Some(name.clone());
+            }
+        }
+    }
+    None
+}
+
 fn make_summary_from_ann(
     name: &str,
     ty: &syn::GradeOpticType,
     optic: &HirOptic,
     env: &HashMap<String, Arc<OpticSummary>>,
-) -> OpticSummary {
-    let mut summary = compute_summary_for_optic(optic, env);
+) -> Result<OpticSummary, String> {
+    let mut summary = compute_summary_for_optic(optic, env)?;
     let grade = extract_grade_from_ann(&ty.grade);
     summary.name = Some(name.into());
     summary.get_grade = grade.clone();
     summary.put_grade = grade;
-    summary
+    Ok(summary)
 }
 
 fn compute_summary_for_optic(
     optic: &HirOptic,
     env: &HashMap<String, Arc<OpticSummary>>,
-) -> OpticSummary {
-    // Compose summaries for seq/par per EXACT ch8.7 + 8.9.5.1 sketches (see seq case below; par unions).
+) -> Result<OpticSummary, String> {
     match optic {
-        HirOptic::Named { name, .. } => env
+        HirOptic::Named { name, .. } => Ok(env
             .get(name)
             .map(|a| (**a).clone())
-            .unwrap_or_else(|| default_summary(name)),
+            .unwrap_or_else(|| default_summary(name))),
         HirOptic::Seq { lhs, rhs, .. } => {
-            // EXACT summary(A >>> B) from ch8.7 / 8.9.5.1 :
-            //   get_reads  = A.get_reads ∪ lift(A, B.get_reads)
-            //   put_reads  = A.put_reads ∪ A.get_reads ∪ lift(A, B.put_reads)
-            //   put_writes = A.put_writes ∪ lift(A, B.put_writes)
-            //   (plus lift, grades, det, serializable)
-            let mut s = compute_summary_for_optic(lhs, env);
-            let r = compute_summary_for_optic(rhs, env);
-            s.get_reads = union(&s.get_reads, &lift(&s.lift, &r.get_reads));
-            s.put_reads = union(
-                &s.put_reads,
-                &union(&s.get_reads, &lift(&s.lift, &r.put_reads)),
-            );
-            s.put_writes = union(&s.put_writes, &lift(&s.lift, &r.put_writes));
+            let mut s = compute_summary_for_optic(lhs, env)?;
+            let r = compute_summary_for_optic(rhs, env)?;
+            let a_get_reads = s.get_reads.clone();
+            let a_put_reads = s.put_reads.clone();
+            let parent_col = seq_parent_column(&a_get_reads)?;
+            let parent_col = parent_col.as_deref();
+            let lifted_get = PathLift::lift_regions(&s.lift, parent_col, &r.get_reads);
+            let lifted_put_reads = PathLift::lift_regions(&s.lift, parent_col, &r.put_reads);
+            let lifted_put_writes = PathLift::lift_regions(&s.lift, parent_col, &r.put_writes);
+            s.get_reads = union(&a_get_reads, &lifted_get);
+            s.put_reads = union(&a_put_reads, &union(&a_get_reads, &lifted_put_reads));
+            s.put_writes = union(&s.put_writes, &lifted_put_writes);
+            s.lift = PathLift::seq(&s.lift, &r.lift);
             s.provenance = s.provenance.merge(r.provenance);
-            s
+            Ok(s)
         }
         HirOptic::Par { lhs, rhs, .. } => {
-            let l = compute_summary_for_optic(lhs, env);
-            let r = compute_summary_for_optic(rhs, env);
-            OpticSummary {
+            let l = compute_summary_for_optic(lhs, env)?;
+            let r = compute_summary_for_optic(rhs, env)?;
+            let lift = PathLift::pair(&l.lift, &r.lift)?;
+            Ok(OpticSummary {
                 name: None,
                 costate: l.costate.clone(),
                 focus: "tuple".into(),
-                lift: PathLift::default(), // v0; pair_lift per 8.9.5.1 for real nested
+                lift,
                 get_reads: union(&l.get_reads, &r.get_reads),
                 put_reads: union(&l.put_reads, &r.put_reads),
                 put_writes: union(&l.put_writes, &r.put_writes),
-                get_grade: l.get_grade.clone(), // max etc in real
+                get_grade: l.get_grade.clone(),
                 put_grade: l.put_grade.clone(),
                 get_determinism: Determinism::Pure,
                 put_determinism: Determinism::Pure,
                 serializable: true,
-                provenance: l.provenance, // prefer lhs provenance (union in full)
-            }
+                provenance: l.provenance,
+            })
         }
     }
 }
+
 
 fn default_summary(name: &str) -> OpticSummary {
     OpticSummary {
@@ -956,34 +1409,49 @@ fn union(a: &[Region], b: &[Region]) -> Vec<Region> {
     dedup_regions(out)
 }
 
-fn lift(_l: &PathLift, regs: &[Region]) -> Vec<Region> {
-    regs.to_vec()
-} // v0 identity
-
-fn lower_optic_expr(e: &syn::OpticExpr, env: &HashMap<String, Arc<OpticSummary>>) -> HirOptic {
+fn lower_optic_expr(
+    e: &syn::OpticExpr,
+    env: &HashMap<String, Arc<OpticSummary>>,
+    depth: usize,
+) -> Result<HirOptic, syn::ParseError> {
+    if depth > MAX_OPTIC_COMPOSE_DEPTH {
+        return Err(syn::ParseError {
+            message: "optic compose depth limit exceeded".into(),
+            span: optic_expr_span(e),
+            kind: None,
+        });
+    }
     match e {
         syn::OpticExpr::Atom(syn::OpticAtom::Named(n)) => {
-            // resolve per 8.9.1.2 pseudocode (here: optics env only for v0; full would have local scopes + data + builtin)
-            let _resolved = resolve_ident(&n.node, env); // side-effect free for now; in future attach
-            HirOptic::Named {
+            let _resolved = resolve_ident(&n.node, env);
+            Ok(HirOptic::Named {
                 name: n.node.clone(),
                 span: n.span,
-            }
+            })
         }
-        syn::OpticExpr::Seq { left, right, span } => HirOptic::Seq {
-            lhs: Box::new(lower_optic_expr(left, env)),
-            rhs: Box::new(lower_optic_expr(right, env)),
+        syn::OpticExpr::Seq { left, right, span } => Ok(HirOptic::Seq {
+            lhs: Box::new(lower_optic_expr(left, env, depth + 1)?),
+            rhs: Box::new(lower_optic_expr(right, env, depth + 1)?),
             span: *span,
-        },
-        syn::OpticExpr::Par { left, right, span } => HirOptic::Par {
-            lhs: Box::new(lower_optic_expr(left, env)),
-            rhs: Box::new(lower_optic_expr(right, env)),
+        }),
+        syn::OpticExpr::Par { left, right, span } => Ok(HirOptic::Par {
+            lhs: Box::new(lower_optic_expr(left, env, depth + 1)?),
+            rhs: Box::new(lower_optic_expr(right, env, depth + 1)?),
             span: *span,
-        },
-        _ => HirOptic::Named {
-            name: "unknown".into(),
+        }),
+        _ => Err(syn::ParseError {
+            message: "unsupported optic expression".into(),
             span: Span::dummy(),
-        },
+            kind: None,
+        }),
+    }
+}
+
+fn optic_expr_span(e: &syn::OpticExpr) -> Span {
+    match e {
+        syn::OpticExpr::Atom(syn::OpticAtom::Named(n)) => n.span,
+        syn::OpticExpr::Seq { span, .. } | syn::OpticExpr::Par { span, .. } => *span,
+        _ => Span::dummy(),
     }
 }
 
@@ -1007,7 +1475,10 @@ fn resolve_ident(name: &str, optic_env: &HashMap<String, Arc<OpticSummary>>) -> 
 fn lower_top_query(e: &syn::Expr, env: &HashMap<String, Arc<OpticSummary>>) -> Option<HirQuery> {
     // For the demo examples' top level query expr
     if let syn::Expr::QueryChain(qc) = e {
-        let optic = lower_optic_expr(&qc.optic, env);
+        let optic = lower_optic_expr(&qc.optic, env, 0).unwrap_or_else(|_| HirOptic::Named {
+            name: "?".into(),
+            span: qc.span,
+        });
         Some(HirQuery {
             costate: "entities".into(),
             optic,
@@ -1023,48 +1494,40 @@ fn lower_top_query(e: &syn::Expr, env: &HashMap<String, Arc<OpticSummary>>) -> O
 fn lower_queries_from_fn(
     f: &syn::FnDecl,
     env: &HashMap<String, Arc<OpticSummary>>,
-) -> Vec<HirQuery> {
+) -> Result<Vec<HirQuery>, syn::ParseError> {
     let mut qs = vec![];
     for stmt in &f.body {
-        collect_queries_from_expr(&stmt.expr, env, &mut qs);
+        collect_queries_from_expr(&stmt.expr, env, &mut qs)?;
     }
-    qs
+    Ok(qs)
 }
 
 fn collect_queries_from_expr(
     e: &syn::Expr,
     env: &HashMap<String, Arc<OpticSummary>>,
     qs: &mut Vec<HirQuery>,
-) {
+) -> Result<(), syn::ParseError> {
     if let Some(q) = lower_top_query(e, env) {
         qs.push(q);
     }
     match e {
         syn::Expr::Block { stmts, result, .. } => {
             for s in stmts {
-                collect_queries_from_expr(&s.expr, env, qs);
+                collect_queries_from_expr(&s.expr, env, qs)?;
             }
             if let Some(r) = result {
-                collect_queries_from_expr(r, env, qs);
+                collect_queries_from_expr(r, env, qs)?;
             }
-        }
-        syn::Expr::Assign { target, value, .. } => {
-            collect_queries_from_expr(target, env, qs);
-            collect_queries_from_expr(value, env, qs);
         }
         syn::Expr::Binary { left, right, .. } => {
-            collect_queries_from_expr(left, env, qs);
-            collect_queries_from_expr(right, env, qs);
-        }
-        syn::Expr::Field(fe) => {
-            /* Field base may contain */
-            if let syn::FieldExpr::Index { index, .. } = fe {
-                collect_queries_from_expr(&*index, env, qs);
-            }
+            collect_queries_from_expr(left, env, qs)?;
+            collect_queries_from_expr(right, env, qs)?;
         }
         _ => {}
     }
+    Ok(())
 }
+
 
 fn lower_query_methods_to_kind(methods: &[syn::QueryMethod]) -> QueryKind {
     if methods.is_empty() {
@@ -1230,6 +1693,21 @@ fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
             index: *index,
             span: *span,
         },
+        HirExpr::FocusField { param, path, span } => {
+            let new_param = if param == name {
+                match repl {
+                    HirExpr::Var(v, _) => v.clone(),
+                    _ => param.clone(),
+                }
+            } else {
+                param.clone()
+            };
+            HirExpr::FocusField {
+                param: new_param,
+                path: path.clone(),
+                span: *span,
+            }
+        }
         HirExpr::Unsupported { reason, span } => HirExpr::Unsupported {
             reason: reason.clone(),
             span: *span,

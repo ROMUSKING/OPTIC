@@ -97,6 +97,98 @@ fn run_health_get_prints_values() {
 }
 
 #[test]
+fn run_compose_triple_mutates() {
+    let assert = opticc()
+        .args(["run", &example("compose_triple.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert!((after[0] - 98.333336).abs() < 0.001);
+    assert!((after[1] - 78.333336).abs() < 0.001);
+    assert!((after[2] - 48.333332).abs() < 0.001);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+fn parse_transform_positions_line(out: &str, label: &str) -> Vec<(f32, f32)> {
+    let line = out
+        .lines()
+        .find(|l| l.contains(label) && l.contains("transforms"))
+        .unwrap_or_else(|| panic!("missing transforms in {label}"));
+    let mut pairs = vec![];
+    for chunk in line.split('(').skip(1) {
+        if let Some(end) = chunk.find(')') {
+            let inner = &chunk[..end];
+            let mut nums = inner
+                .split(',')
+                .map(|s| s.trim().parse::<f32>().expect("f32"));
+            pairs.push((nums.next().expect("x"), nums.next().expect("y")));
+        }
+    }
+    pairs
+}
+
+fn parse_tag_values_line(out: &str, label: &str) -> Vec<f32> {
+    let line = out
+        .lines()
+        .find(|l| l.contains(label) && l.contains("tag:"))
+        .unwrap_or_else(|| panic!("missing tag values in {label}"));
+    line.split("tag:")
+        .skip(1)
+        .filter_map(|chunk| {
+            chunk
+                .split(|c: char| !c.is_ascii_digit() && c != '.')
+                .find(|s| !s.is_empty())
+                .and_then(|s| s.parse::<f32>().ok())
+        })
+        .collect()
+}
+
+#[test]
+fn run_nested_field_triple_mutates() {
+    let assert = opticc()
+        .args(["run", &example("nested_field_triple.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_tag_values_line(&out, "before:");
+    let after = parse_tag_values_line(&out, "after:");
+    assert_eq!(before, vec![0.0, 0.0, 0.0]);
+    assert_eq!(after, vec![0.1, 0.1, 0.1]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_nested_position_mutates() {
+    let assert = opticc()
+        .args(["run", &example("nested_position.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_transform_positions_line(&out, "before:");
+    let after = parse_transform_positions_line(&out, "after:");
+    assert_eq!(before, vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)]);
+    assert_eq!(after, vec![(0.1, 0.1), (1.1, 1.1), (2.1, 2.1)]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_compose_decay_mutates() {
+    let assert = opticc()
+        .args(["run", &example("compose_decay.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![95.0, 75.0, 45.0]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
 fn run_health_set_mutates() {
     let assert = opticc()
         .args(["run", &example("health_set.opt").to_string_lossy()])

@@ -73,6 +73,11 @@ impl<'src> Lexer<'src> {
                 continue;
             }
 
+            if ch == '"' {
+                self.scan_string_literal(start);
+                continue;
+            }
+
             if is_ident_start(ch) {
                 self.scan_ident_or_keyword(start);
                 continue;
@@ -130,14 +135,38 @@ impl<'src> Lexer<'src> {
         let kind = match text {
             "data" => TokenKind::KwData,
             "optic" => TokenKind::KwOptic,
+            "unsafe" => TokenKind::KwUnsafe,
+            "extern" => TokenKind::KwExtern,
             "get" => TokenKind::KwGet,
             "put" => TokenKind::KwPut,
+            "preview" => TokenKind::KwPreview,
+            "review" => TokenKind::KwReview,
             "let" => TokenKind::KwLet,
             "fn" => TokenKind::KwFn,
             "query" => TokenKind::KwQuery,
             _ => TokenKind::Ident,
         };
         self.emit(kind, start, end);
+    }
+
+    fn scan_string_literal(&mut self, start: usize) {
+        self.advance(); // opening "
+        while self.pos < self.src.len() {
+            let ch = self.current_char();
+            if ch == '"' {
+                self.advance();
+                break;
+            }
+            if ch == '\\' {
+                self.advance();
+                if self.pos < self.src.len() {
+                    self.advance();
+                }
+                continue;
+            }
+            self.advance();
+        }
+        self.emit(TokenKind::StringLit, start, self.pos);
     }
 
     fn scan_number_literal(&mut self, start: usize) {

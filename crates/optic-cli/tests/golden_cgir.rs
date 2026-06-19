@@ -70,6 +70,16 @@ fn golden_cgir_post_health_position() {
 }
 
 #[test]
+fn golden_cgir_pre_nested_position() {
+    assert_golden("cgir/pre", "nested_position.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_nested_position() {
+    assert_golden("cgir/post", "nested_position.opt", false);
+}
+
+#[test]
 fn golden_cgir_pre_health_get() {
     assert_golden("cgir/pre", "health_get.opt", true);
 }
@@ -87,4 +97,34 @@ fn golden_cgir_pre_health_set() {
 #[test]
 fn golden_cgir_post_health_set() {
     assert_golden("cgir/post", "health_set.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_compose_decay() {
+    assert_golden("cgir/pre", "compose_decay.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_compose_decay() {
+    assert_golden("cgir/post", "compose_decay.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_compose_triple() {
+    assert_golden("cgir/pre", "compose_triple.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_compose_triple() {
+    assert_golden("cgir/post", "compose_triple.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_nested_field_triple() {
+    assert_golden("cgir/pre", "nested_field_triple.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_nested_field_triple() {
+    assert_golden("cgir/post", "nested_field_triple.opt", false);
 }

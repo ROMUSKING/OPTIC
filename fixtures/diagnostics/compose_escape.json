@@ -1,0 +1,39 @@
+{
+  "notes": [
+    {
+      "code": "FUS-501",
+      "confidence": 0.8999999761581421,
+      "evidence": {
+        "map_param": "y",
+        "reason": "escape"
+      },
+      "minimal_fix_options": [
+        "introduce a stage boundary or keep the unfused form"
+      ],
+      "next_commands": [
+        "opticc dump-cgir file.opt --before-fusion"
+      ],
+      "phase": "fusion",
+      "primary_span": {
+        "end": 482.0,
+        "source": 1.0,
+        "start": 441.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "introduce a stage boundary or keep the unfused form"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "opticc dump-cgir file.opt --before-fusion"
+        }
+      ],
+      "related_spans": [],
+      "rule": "compose fusion blocked — intermediate value escapes",
+      "severity": "note",
+      "title": "compose fusion blocked — intermediate escapes"
+    }
+  ],
+  "ok": true
+}

@@ -1,0 +1,41 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-003",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "fragment": "FooGrade",
+        "optic": "BadDim"
+      },
+      "minimal_fix_options": [
+        "use CacheGrade<N>, LinearGrade, AffineGrade, SharedGrade, or OwnershipGrade<num/den>",
+        "use `_` for inferrable dimensions"
+      ],
+      "next_commands": [
+        "opticc explain TYP-003",
+        "fix grade annotation syntax in optic declaration"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 150.0,
+        "source": 1.0,
+        "start": 142.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use CacheGrade<N>, LinearGrade, AffineGrade, SharedGrade, or OwnershipGrade<num/den>"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "use `_` for inferrable dimensions"
+        }
+      ],
+      "related_spans": [],
+      "rule": "unknown grade dimension `FooGrade`",
+      "severity": "error",
+      "title": "invalid grade annotation syntax"
+    }
+  ],
+  "ok": false
+}

@@ -1,0 +1,6 @@
+CGIR (4 nodes, roots [3])
+  [0] OpticLeaf(TransformView)  provenance=Build
+  [1] OpticLeaf(PositionField)  provenance=Build
+  [2] Compose(0,1)  provenance=Build
+  [3] QueryMap(nested)  provenance=Build
+

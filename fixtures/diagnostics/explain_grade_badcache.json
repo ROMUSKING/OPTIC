@@ -1,0 +1,35 @@
+{
+  "grade": {
+    "declared": {
+      "cache": 1,
+      "cache_source": "annotation",
+      "must_use": false,
+      "ownership_alias": "AffineGrade",
+      "ownership_share": "1/1",
+      "read_only": false
+    },
+    "inferred": {
+      "cache": 3,
+      "cache_source": "inferred",
+      "must_use": false,
+      "ownership_alias": "AffineGrade",
+      "ownership_share": "1/1",
+      "read_only": false
+    },
+    "optic": "BadCache",
+    "regions": {
+      "get_reads": [
+        "healths"
+      ],
+      "put_reads": [
+        "healths",
+        "positions"
+      ],
+      "put_writes": [
+        "healths",
+        "positions"
+      ]
+    }
+  },
+  "ok": true
+}

@@ -1,0 +1,19 @@
+-- TYP-004: get body uses a form the v0 type checker cannot infer
+
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, _> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic BadInfer: GradedOptic<Entities, f32, _> {
+    get  s      => entities.query(HealthView).get()
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BadInfer).get();
+}

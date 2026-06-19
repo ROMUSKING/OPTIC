@@ -2,8 +2,11 @@
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use optic_cgir::CgirGraph;
-use optic_syntax::{parse, SourceId};
+use optic::{
+    compile_check, compile_cgir, compile_emit, dump_ast_src, dump_hir_src, explain_focus_from_src,
+    explain_grade_from_src, lower_src, SourceId,
+};
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -55,18 +58,37 @@ enum Commands {
     },
     /// Transpile + verified execution harness (M5/M6)
     Run { file: PathBuf },
-    /// Explain a diagnostic code (appendix B stub)
+    /// Explain a diagnostic code (appendix B)
     Explain { code: String },
-    /// Environment / toolchain sanity check (appendix B stub)
-    Doctor,
-    /// Dump OpticSummary for an optic or CGIR node (appendix B stub)
+    /// Show normalized grade after inference for a named optic (appendix B)
+    ExplainGrade {
+        file: PathBuf,
+        #[arg(long)]
+        node: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show PathLift / root-path form for a named optic or let binding (appendix B)
+    ExplainFocus {
+        file: PathBuf,
+        #[arg(long)]
+        node: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Environment / toolchain sanity check; optional file runs `check` (appendix B)
+    Doctor {
+        file: Option<PathBuf>,
+    },
+    /// Dump OpticSummary for an optic/let name or CGIR node id (appendix B)
     DumpSummary {
         file: PathBuf,
         #[arg(long)]
-        node: Option<u32>,
+        node: Option<String>,
     },
-    /// Run acceptance harnesses and compare to baselines (appendix B stub)
+    /// Run acceptance harnesses and compare to baselines (appendix B)
     Bench {
+        file: Option<PathBuf>,
         #[arg(long)]
         update: bool,
     },
@@ -88,9 +110,15 @@ fn main() -> anyhow::Result<()> {
         Commands::Check { file, json } => {
             let src = read_source(&file)?;
             match compile_check(&src) {
-                Ok(()) => {
+                Ok(outcome) => {
+                    for note in &outcome.fusion_notes {
+                        eprintln!("{}", optic_diagnostics::emit_human(note));
+                    }
                     if json {
-                        println!("{{\"ok\":true}}");
+                        println!(
+                            "{}",
+                            optic_diagnostics::check_ok_json(&outcome.fusion_notes)
+                        );
                     } else {
                         println!("OK (full check): {}", file.display());
                     }
@@ -109,7 +137,7 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Transpile { file, out } => {
             let src = read_source(&file)?;
-            let emitted = compile_emit(&src)?;
+            let emitted = compile_emit_or_exit(&src)?;
             let out_path = safe_output_path(&file, out)?;
             fs::write(&out_path, &emitted)?;
             println!("transpiled -> {}", out_path.display());
@@ -120,13 +148,17 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::DumpAst { file } => {
             let src = read_source(&file)?;
-            let prog = parse_or_exit(&src)?;
-            println!("{}", optic_syntax::dump_ast(&prog));
+            match dump_ast_src(&src) {
+                Ok(out) => println!("{out}"),
+                Err(diags) => return Err(emit_pipeline_errors(&diags)),
+            }
         }
         Commands::DumpHir { file } => {
             let src = read_source(&file)?;
-            let hir = lower_or_exit(&src)?;
-            println!("{}", optic_hir::dump_hir(&hir));
+            match dump_hir_src(&src) {
+                Ok(out) => println!("{out}"),
+                Err(diags) => return Err(emit_pipeline_errors(&diags)),
+            }
         }
         Commands::DumpCgir {
             file,
@@ -135,19 +167,20 @@ fn main() -> anyhow::Result<()> {
             node,
         } => {
             let src = read_source(&file)?;
-            let graph = compile_cgir(&src, before_fusion)?;
+            let outcome = compile_cgir_or_exit(&src, before_fusion)?;
+            let graph = outcome.graph;
             if check {
                 optic_cgir::verify(&graph).map_err(|e| anyhow::anyhow!(e))?;
                 println!("CGIR verify: OK");
             }
             if let Some(n) = node {
-                if let Some(nd) = graph.nodes.get(n as usize) {
+                if let Some(nd) = optic_cgir::find_node_by_id(&graph, n) {
                     println!("{nd:#?}");
                     if let Some(p) = graph.provenance_index.get(&n) {
                         println!("provenance: {p:#?}");
                     }
                 } else {
-                    anyhow::bail!("node {n} not found");
+                    anyhow::bail!("node id {n} not found");
                 }
             } else {
                 println!("{}", optic_cgir::dump_pretty(&graph));
@@ -155,21 +188,33 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Run { file } => {
             let src = read_source(&file)?;
-            let emitted = compile_emit(&src)?;
+            let emitted = compile_emit_or_exit(&src)?;
             run_verification_harness(&emitted, &file, cli.verbose)?;
         }
         Commands::Explain { code } => {
             println!("{}", explain_code(&code));
         }
-        Commands::Doctor => {
-            doctor_check()?;
+        Commands::ExplainGrade { file, node, json } => {
+            let src = read_source(&file)?;
+            explain_grade_cmd(&src, &node, json)?;
+        }
+        Commands::ExplainFocus { file, node, json } => {
+            let src = read_source(&file)?;
+            explain_focus_cmd(&src, &node, json)?;
+        }
+        Commands::Doctor { file } => {
+            doctor_check(file.as_deref())?;
         }
         Commands::DumpSummary { file, node } => {
             let src = read_source(&file)?;
-            dump_summary(&src, node)?;
+            dump_summary(&src, node.as_deref())?;
         }
-        Commands::Bench { update } => {
-            bench_examples(update, cli.verbose)?;
+        Commands::Bench { file, update } => {
+            if let Some(path) = file {
+                bench_single_file(&path, update, cli.verbose)?;
+            } else {
+                bench_examples(update, cli.verbose)?;
+            }
         }
         Commands::SnapshotUpdate { confirm } => {
             if !confirm {
@@ -182,7 +227,11 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn safe_output_path(file: &Path, out: Option<PathBuf>) -> anyhow::Result<PathBuf> {
-    let out_path = out.unwrap_or_else(|| file.with_extension("rs"));
+    let out_path = out.unwrap_or_else(|| {
+        file.file_name()
+            .map(|n| PathBuf::from(n).with_extension("rs"))
+            .unwrap_or_else(|| PathBuf::from("out.rs"))
+    });
     if out_path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -225,8 +274,9 @@ fn locate_tool_bin(program: &str) -> Option<PathBuf> {
             return Some(candidate);
         }
     }
-    if let Ok(rustup_home) = std::env::var("RUSTUP_HOME") {
-        let toolchains = Path::new(&rustup_home).join("toolchains");
+    // Pin to build-time RUSTUP_HOME only — never caller-controlled env at runtime.
+    if let Some(rustup_home) = option_env!("RUSTUP_HOME") {
+        let toolchains = Path::new(rustup_home).join("toolchains");
         if let Ok(entries) = fs::read_dir(&toolchains) {
             for entry in entries.flatten() {
                 let candidate = entry.path().join("bin").join(program);
@@ -261,15 +311,6 @@ fn sandbox_command(program: &str, work_home: &Path) -> Command {
     let _ = fs::create_dir_all(&cargo_home);
     let _ = fs::create_dir_all(&rustup_home);
     let mut cmd = Command::new(resolve_tool_bin(program));
-    if let Ok(rustup_home_env) = std::env::var("RUSTUP_HOME") {
-        let parent_toolchains = Path::new(&rustup_home_env).join("toolchains");
-        let link = rustup_home.join("toolchains");
-        if parent_toolchains.exists() {
-            let _ = std::fs::remove_dir_all(&link);
-            #[cfg(unix)]
-            let _ = std::os::unix::fs::symlink(&parent_toolchains, &link);
-        }
-    }
     cmd.env_clear()
         .env("PATH", trusted_tool_path())
         .env("HOME", work_home)
@@ -321,6 +362,21 @@ fn snapshot_update_goldens() -> anyhow::Result<()> {
     if !status.success() {
         anyhow::bail!("optic-hir golden update failed");
     }
+    let status = sandbox_command("cargo", work.path())
+        .env("OPTIC_UPDATE_GOLDEN", "1")
+        .args([
+            "test",
+            "-p",
+            "optic-codegen-rust",
+            "golden_rust",
+            "--",
+            "--quiet",
+        ])
+        .status()
+        .context("optic-codegen-rust golden update")?;
+    if !status.success() {
+        anyhow::bail!("optic-codegen-rust golden update failed");
+    }
     bench_examples(true, false)?;
     println!("Goldens updated. Review diffs before commit.");
     Ok(())
@@ -345,7 +401,7 @@ fn explain_code(code: &str) -> String {
         ),
         "PAR-001" => (
             "parse error",
-            "surface syntax does not match appendix D EBNF",
+            "surface syntax does not match appendix D EBNF (includes MAX_PARSE_DEPTH=512 recursion cap)",
             "parse",
         ),
         "CGI-001" | "CGI-002" => (
@@ -373,18 +429,69 @@ fn explain_code(code: &str) -> String {
             "unknown optic or unresolved binding (ch8)",
             "resolve",
         ),
+        "HIR-101" => (
+            "duplicate SoA costate data declaration",
+            "v0 supports only one data decl with SoA<> columns (ch8)",
+            "resolve",
+        ),
+        "FUS-501" => (
+            "compose fusion blocked — intermediate escapes",
+            "map body captures an intermediate outside map_param (ch10); keep unfused form",
+            "fusion",
+        ),
+        "FUS-502" => (
+            "compose fusion blocked — legality precondition",
+            "focus/costate mismatch, impurity, or non-leaf compose child (ch10); keep unfused form",
+            "fusion",
+        ),
+        "TYP-001" => (
+            "unknown type",
+            "costate or focus type not declared in program (ch9 type universe)",
+            "type",
+        ),
+        "TYP-002" => (
+            "type mismatch in optic body",
+            "get/put body type does not match declared focus (ch9)",
+            "type",
+        ),
+        "TYP-003" => (
+            "invalid grade annotation syntax",
+            "malformed OwnershipGrade rational or unknown grade dimension (ch6/9)",
+            "type",
+        ),
+        "TYP-004" => (
+            "cannot infer optic body type",
+            "get/put body uses a form the v0 type checker cannot infer",
+            "type",
+        ),
+        "EXP-001" => (
+            "explain-grade/focus: unknown optic name",
+            "no optic or let binding matches --node",
+            "type",
+        ),
+        "TYP-010" => (
+            "unsupported in narrow v0",
+            "prisms and host/foreign boundaries are deferred to M7+",
+            "type",
+        ),
         _ => (
             "unknown code",
             "no catalog entry yet; see optic-diagnostics",
             "unknown",
         ),
     };
-    format!("{code}: {title}\nphase: {phase}\nrule: {rule}\nnext: optic check <file.opt> --json")
+    format!("{code}: {title}\nphase: {phase}\nrule: {rule}\nnext: opticc check <file.opt> --json")
 }
 
-fn doctor_check() -> anyhow::Result<()> {
-    let rustc = Command::new("rustc").arg("--version").output();
-    let cargo = Command::new("cargo").arg("--version").output();
+fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
+    let rustc = Command::new(resolve_tool_bin("rustc"))
+        .env("PATH", trusted_tool_path())
+        .arg("--version")
+        .output();
+    let cargo = Command::new(resolve_tool_bin("cargo"))
+        .env("PATH", trusted_tool_path())
+        .arg("--version")
+        .output();
     match (&rustc, &cargo) {
         (Ok(r), Ok(c)) if r.status.success() && c.status.success() => {
             println!("rustc: {}", String::from_utf8_lossy(&r.stdout).trim());
@@ -394,29 +501,248 @@ fn doctor_check() -> anyhow::Result<()> {
     }
     let runtime = validated_runtime_crate_path()?;
     println!("optic-runtime: OK ({})", runtime.display());
+    if let Some(path) = file {
+        let src = read_source(path)?;
+        match compile_check(&src) {
+            Ok(outcome) => {
+                for note in &outcome.fusion_notes {
+                    eprintln!("{}", optic_diagnostics::emit_human(note));
+                }
+                println!("check: OK ({})", path.display());
+                if !outcome.fusion_notes.is_empty() {
+                    println!("notes: {} fusion diagnostic(s) on stderr", outcome.fusion_notes.len());
+                }
+                println!(
+                    "next: opticc explain-grade {} --node <optic>",
+                    path.display()
+                );
+                println!(
+                    "next: opticc explain-focus {} --node <optic>",
+                    path.display()
+                );
+            }
+            Err(diags) => {
+                for d in &diags {
+                    eprintln!("{}", optic_diagnostics::emit_human(d));
+                }
+                if let Some(first) = diags.first() {
+                    println!("suggest: opticc explain {}", first.code);
+                    if let Some(fix) = first.ranked_fixes.first() {
+                        println!("fix: {}", fix.description);
+                    }
+                    let optic_name = first
+                        .evidence
+                        .get("optic")
+                        .or_else(|| first.evidence.get("name"))
+                        .or_else(|| first.evidence.get("binding"))
+                        .and_then(|v| v.as_str());
+                    if let Some(name) = optic_name {
+                        println!(
+                            "suggest: opticc explain-grade {} --node {} --json",
+                            path.display(),
+                            name
+                        );
+                        println!(
+                            "suggest: opticc explain-focus {} --node {} --json",
+                            path.display(),
+                            name
+                        );
+                    } else if first.code.starts_with("GRA-") || first.code.starts_with("TYP-") {
+                        println!(
+                            "suggest: opticc explain-grade {} --node <optic> --json",
+                            path.display()
+                        );
+                        println!(
+                            "suggest: opticc explain-focus {} --node <optic> --json",
+                            path.display()
+                        );
+                    }
+                }
+                anyhow::bail!(
+                    "doctor: check failed for {} ({} diagnostics)",
+                    path.display(),
+                    diags.len()
+                );
+            }
+        }
+    }
     println!("doctor: OK");
     Ok(())
 }
 
-fn dump_summary(src: &str, node: Option<u32>) -> anyhow::Result<()> {
-    let graph = compile_cgir(src, false)?;
-    if let Some(n) = node {
-        if let Some(nd) = graph.nodes.get(n as usize) {
-            if let optic_cgir::CgirNode::OpticLeaf { summary, name, .. } = nd {
-                println!("summary for node {n} ({name}): {summary:#?}");
+fn explain_grade_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
+    match explain_grade_from_src(src, node) {
+        Ok(report) => {
+            if json {
+                let value = serde_json::to_value(&report).context("serialize grade report")?;
+                println!("{}", optic_diagnostics::explain_grade_ok_json(&value));
             } else {
-                println!("node {n}: {nd:#?}");
+                println!("optic: {}", report.optic);
+                let decl_alias = report
+                    .declared
+                    .ownership_alias
+                    .as_deref()
+                    .unwrap_or("-");
+                println!(
+                    "declared: cache={} ({}) ownership={} alias={} read_only={} must_use={}",
+                    report.declared.cache,
+                    report.declared.cache_source,
+                    report.declared.ownership_share,
+                    decl_alias,
+                    report.declared.read_only,
+                    report.declared.must_use
+                );
+                println!(
+                    "inferred: cache={} ({}) ownership={} read_only={} must_use={}",
+                    report.inferred.cache,
+                    report.inferred.cache_source,
+                    report.inferred.ownership_share,
+                    report.inferred.read_only,
+                    report.inferred.must_use
+                );
+                println!("regions:");
+                println!("  get_reads: {:?}", report.regions.get_reads);
+                println!("  put_reads: {:?}", report.regions.put_reads);
+                println!("  put_writes: {:?}", report.regions.put_writes);
             }
-        } else {
-            anyhow::bail!("node {n} not found");
+            Ok(())
         }
-    } else {
-        let hir = lower_or_exit(src)?;
+        Err(diags) => {
+            if json {
+                eprintln!("{}", optic_diagnostics::diagnostics_to_json(&diags));
+                std::process::exit(1);
+            } else {
+                for d in &diags {
+                    eprintln!("{}", optic_diagnostics::emit_human(d));
+                }
+                anyhow::bail!("explain-grade failed ({} diagnostics)", diags.len());
+            }
+        }
+    }
+}
+
+fn explain_focus_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
+    match explain_focus_from_src(src, node) {
+        Ok(report) => {
+            if json {
+                let value = serde_json::to_value(&report).context("serialize focus report")?;
+                println!("{}", optic_diagnostics::explain_focus_ok_json(&value));
+            } else {
+                println!("node: {}", report.node);
+                println!("costate: {}", report.costate);
+                println!("focus: {}", report.focus);
+                println!("path_lift.prefix: {:?}", report.path_lift_prefix);
+                println!("root_path: {}", report.root_path);
+                if !report.focus_fields.is_empty() {
+                    println!("focus_fields:");
+                    for ff in &report.focus_fields {
+                        println!("  {ff}");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(diags) => {
+            if json {
+                eprintln!("{}", optic_diagnostics::diagnostics_to_json(&diags));
+                std::process::exit(1);
+            } else {
+                for d in &diags {
+                    eprintln!("{}", optic_diagnostics::emit_human(d));
+                }
+                anyhow::bail!("explain-focus failed ({} diagnostics)", diags.len());
+            }
+        }
+    }
+}
+
+fn dump_summary(src: &str, node: Option<&str>) -> anyhow::Result<()> {
+    if let Some(n) = node {
+        // Name lookup first so optic names like "42" are not mistaken for CGIR node ids.
+        let hir = lower_src(src).map_err(|diags| emit_pipeline_errors(&diags))?;
         for item in &hir.items {
-            if let optic_hir::HirItem::Optic { decl, summary } = item {
+            match item {
+                optic_hir::HirItem::Optic { decl, summary } if decl.name.node == n => {
+                    println!("{}: {summary:#?}", decl.name.node);
+                    return Ok(());
+                }
+                optic_hir::HirItem::Let { name, summary, .. } if name == n => {
+                    println!("{name}: {summary:#?}");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+        if let Ok(id) = n.parse::<u32>() {
+            let outcome = compile_cgir_or_exit(src, false)?;
+            let graph = outcome.graph;
+            if let Some(nd) = optic_cgir::find_node_by_id(&graph, id) {
+                if let optic_cgir::CgirNode::OpticLeaf { summary, name, .. } = nd {
+                    println!("summary for node {id} ({name}): {summary:#?}");
+                } else {
+                    println!("node {id}: {nd:#?}");
+                }
+                if let Some(p) = graph.provenance_index.get(&id) {
+                    println!("provenance: {p:#?}");
+                }
+            } else {
+                anyhow::bail!("node id {id} not found");
+            }
+            return Ok(());
+        }
+        anyhow::bail!("optic or let binding `{n}` not found (use numeric id for CGIR nodes)");
+    }
+    let hir = lower_src(src).map_err(|diags| emit_pipeline_errors(&diags))?;
+    for item in &hir.items {
+        match item {
+            optic_hir::HirItem::Optic { decl, summary } => {
                 println!("{}: {summary:#?}", decl.name.node);
             }
+            optic_hir::HirItem::Let { name, summary, .. } => {
+                println!("{name}: {summary:#?}");
+            }
+            _ => {}
         }
+    }
+    Ok(())
+}
+
+fn bench_single_file(file: &Path, update: bool, verbose: bool) -> anyhow::Result<()> {
+    let src = read_source(file)?;
+    let ex = file
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("example.opt");
+    let start = std::time::Instant::now();
+    let emitted = compile_emit_or_exit(&src)?;
+    let compile_ms = start.elapsed().as_millis().max(1);
+    let run_start = std::time::Instant::now();
+    run_verification_harness(&emitted, file, verbose)?;
+    let run_ms = run_start.elapsed().as_millis().max(1);
+    let line = format!("{ex}: compile_ms={compile_ms} run_ms={run_ms} ok=1\n");
+    let bench_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bench");
+    let baseline = bench_dir.join(ex.replace(".opt", ".txt"));
+    if update {
+        fs::create_dir_all(&bench_dir)?;
+        fs::write(&baseline, &line)?;
+        println!("updated {}", baseline.display());
+    } else if baseline.exists() {
+        let expected = fs::read_to_string(&baseline)?;
+        if let (Some((ec, er)), Some((nc, nr))) =
+            (parse_bench_line(&expected), parse_bench_line(&line))
+        {
+            let compile_limit = ec * BENCH_TOLERANCE_MULT;
+            let run_limit = er * BENCH_TOLERANCE_MULT;
+            if nc > compile_limit || nr > run_limit {
+                anyhow::bail!(
+                    "bench regression for {ex} (tolerance {BENCH_TOLERANCE_MULT}x): \
+                     baseline compile_ms={ec} run_ms={er}, got compile_ms={nc} run_ms={nr}"
+                );
+            }
+        }
+        println!("{line}within tolerance ({BENCH_TOLERANCE_MULT}x baseline; compile/run ms)");
+    } else {
+        println!("{line}(no baseline; use --update)");
     }
     Ok(())
 }
@@ -499,6 +825,10 @@ fn bench_examples(update: bool, verbose: bool) -> anyhow::Result<()> {
         "health_position.opt",
         "health_get.opt",
         "health_set.opt",
+        "compose_decay.opt",
+        "compose_triple.opt",
+        "nested_position.opt",
+        "nested_field_triple.opt",
     ];
     let bench_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bench");
     if update {
@@ -510,7 +840,7 @@ fn bench_examples(update: bool, verbose: bool) -> anyhow::Result<()> {
             .join(ex);
         let src = read_source(&path)?;
         let start = std::time::Instant::now();
-        let emitted = compile_emit(&src)?;
+        let emitted = compile_emit_or_exit(&src)?;
         let compile_ms = start.elapsed().as_millis().max(1);
         let run_start = std::time::Instant::now();
         run_verification_harness(&emitted, &path, verbose)?;
@@ -565,91 +895,59 @@ fn parse_bench_line(s: &str) -> Option<(u128, u128)> {
 }
 
 fn read_source(file: &Path) -> anyhow::Result<String> {
-    let meta = fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
-    if meta.len() > MAX_SOURCE_BYTES {
+    use std::io::Read;
+    let f = fs::File::open(file).with_context(|| format!("open {}", file.display()))?;
+    let mut buf = Vec::new();
+    f.take(MAX_SOURCE_BYTES.saturating_add(1))
+        .read_to_end(&mut buf)
+        .with_context(|| format!("read {}", file.display()))?;
+    if buf.len() as u64 > MAX_SOURCE_BYTES {
         anyhow::bail!(
             "source {} exceeds {} byte limit",
             file.display(),
             MAX_SOURCE_BYTES
         );
     }
-    fs::read_to_string(file).with_context(|| format!("read {}", file.display()))
+    String::from_utf8(buf).with_context(|| format!("utf8 decode {}", file.display()))
 }
 
-fn parse_or_exit(src: &str) -> anyhow::Result<optic_syntax::Program> {
-    let sid = SourceId(1);
-    parse(src, sid).map_err(|errs| {
-        for e in &errs {
-            eprintln!("parse: {}", e.message);
-        }
-        anyhow::anyhow!("parse failed ({} errors)", errs.len())
-    })
-}
-
-fn lower_or_exit(src: &str) -> anyhow::Result<optic_hir::HirProgram> {
-    let prog = parse_or_exit(src)?;
-    optic_hir::lower(prog).map_err(|errs| {
-        for e in &errs {
-            eprintln!("resolve: {}", e.message);
-        }
-        anyhow::anyhow!("hir lower failed")
-    })
-}
-
-fn lower_to_diags(errs: Vec<optic_syntax::ParseError>) -> Vec<optic_diagnostics::Diagnostic> {
-    errs.into_iter()
-        .map(|e| optic_diagnostics::resolve_diag(e.span, e.message))
-        .collect()
-}
-
-fn compile_check(src: &str) -> Result<(), Vec<optic_diagnostics::Diagnostic>> {
-    let prog = parse(src, SourceId(1)).map_err(|errs| {
-        errs.into_iter()
-            .map(|e| optic_diagnostics::parse_diag(e.span, e.message))
-            .collect::<Vec<_>>()
-    })?;
-    let hir = optic_hir::lower(prog).map_err(lower_to_diags)?;
-    let typed = optic_typeck::check(hir)?;
-    let cg = optic_cgir::build(&typed).map_err(|diags| diags)?;
-    let graph =
-        optic_opt::optimize(cg).map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
-    optic_cgir::verify(&graph).map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
-    optic_codegen_rust::emit(&graph, "optic_runtime")
-        .map_err(|e| vec![optic_diagnostics::codegen_failed_diag(&e)])?;
-    Ok(())
-}
-
-fn compile_cgir(src: &str, before_fusion: bool) -> anyhow::Result<CgirGraph> {
-    let prog = parse_or_exit(src)?;
-    let hir = optic_hir::lower(prog).map_err(|errs| {
-        for e in &errs {
-            eprintln!("resolve: {}", e.message);
-        }
-        anyhow::anyhow!("hir lower failed")
-    })?;
-    let typed = optic_typeck::check(hir).map_err(|diags| {
-        for d in &diags {
-            eprintln!("{}", optic_diagnostics::emit_human(d));
-        }
-        anyhow::anyhow!("type check failed ({} diagnostics)", diags.len())
-    })?;
-    let cg = optic_cgir::build(&typed).map_err(|diags| {
-        for d in &diags {
-            eprintln!("{}", optic_diagnostics::emit_human(d));
-        }
-        anyhow::anyhow!("cgir build failed")
-    })?;
-    if before_fusion {
-        Ok(cg)
-    } else {
-        optic_opt::optimize(cg).map_err(|e| anyhow::anyhow!("fusion verify failed: {e}"))
+fn emit_pipeline_errors(diags: &[optic_diagnostics::Diagnostic]) -> anyhow::Error {
+    for d in diags {
+        eprintln!("{}", optic_diagnostics::emit_human(d));
     }
+    anyhow::anyhow!("compile pipeline failed ({} diagnostics)", diags.len())
 }
 
-fn compile_emit(src: &str) -> anyhow::Result<String> {
-    let graph = compile_cgir(src, false)?;
-    optic_codegen_rust::emit(&graph, "optic_runtime")
-        .map_err(|e| anyhow::anyhow!("codegen failed: {e}"))
+fn compile_cgir_or_exit(src: &str, before_fusion: bool) -> anyhow::Result<optic::CgirOutcome> {
+    compile_cgir(src, before_fusion).map_err(|diags| emit_pipeline_errors(&diags))
+}
+
+fn compile_emit_or_exit(src: &str) -> anyhow::Result<String> {
+    compile_emit(src).map_err(|diags| emit_pipeline_errors(&diags))
+}
+
+fn verify_example_stdout(filename: &str, stdout: &str) -> bool {
+    match filename {
+        "health_position.opt" => stdout.contains("99.0") && stdout.contains("0.1"),
+        "compose_triple.opt" => {
+            stdout.contains("98.333") && stdout.contains("78.333") && stdout.contains("48.333")
+        }
+        "compose_decay.opt" => {
+            stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("45.0")
+        }
+        "health_decay.opt" => stdout.contains("90.0") && stdout.contains("70.0"),
+        "health_set.opt" => stdout.contains("42.0"),
+        "health_get.opt" => stdout.contains("get:"),
+        "nested_position.opt" => {
+            stdout.contains("(0.1, 0.1)")
+                && stdout.contains("(1.1, 1.1)")
+                && stdout.contains("(2.1, 2.1)")
+        }
+        "nested_field_triple.opt" => {
+            stdout.contains("tag: 0.1") && stdout.contains("before:") && stdout.contains("after:")
+        }
+        _ => false,
+    }
 }
 
 fn run_verification_harness(emitted: &str, file: &Path, verbose: bool) -> anyhow::Result<()> {
@@ -679,18 +977,11 @@ fn run_verification_harness(emitted: &str, file: &Path, verbose: bool) -> anyhow
     let stdout = String::from_utf8_lossy(&out.stdout);
     println!("{stdout}");
 
-    let path = file.to_string_lossy();
-    let verified = if path.contains("health_position") {
-        stdout.contains("99.0") && stdout.contains("0.1")
-    } else if path.contains("health_decay") {
-        stdout.contains("90.0") && stdout.contains("70.0")
-    } else if path.contains("health_set") {
-        stdout.contains("42.0")
-    } else if path.contains("health_get") {
-        stdout.contains("get:")
-    } else {
-        false
-    };
+    let filename = file
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let verified = verify_example_stdout(filename, &stdout);
 
     if verified {
         println!(

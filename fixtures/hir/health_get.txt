@@ -1,5 +1,5 @@
 HIR items: 4
   other
-  Optic HealthView costate=Entities reads=["healths"] writes=["healths"]
+  Optic HealthView costate=Entities lift=[] reads=["healths"] writes=["healths"]
   Query cursor=cur_0 kind=Discriminant(0)
   other

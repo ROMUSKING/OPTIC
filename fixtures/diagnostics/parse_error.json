@@ -9,7 +9,7 @@
         "compare with appendix D EBNF"
       ],
       "next_commands": [
-        "optic dump-tokens file.opt"
+        "opticc dump-tokens file.opt"
       ],
       "phase": "parse",
       "primary_span": {
@@ -23,7 +23,7 @@
           "description": "fix syntax near primary span"
         },
         {
-          "confidence": 0.9,
+          "confidence": 0.8999999761581421,
           "description": "compare with appendix D EBNF"
         }
       ],

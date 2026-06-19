@@ -1,0 +1,20 @@
+-- Compose chain with unsupported plain field access in optic get body.
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic ColumnView: GradedOptic<Entities, f32, CacheGrade<4> + AffineGrade> {
+    get  s      => s.healths
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+let pipeline: GradedOptic<Entities, f32, CacheGrade<4> + AffineGrade> = HealthView >>> ColumnView;
+
+fn main() {
+    entities.query(pipeline).map(|y| y);
+}

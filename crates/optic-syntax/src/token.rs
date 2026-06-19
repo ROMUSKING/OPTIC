@@ -11,11 +11,16 @@ pub enum TokenKind {
     // Keywords (priority over ident)
     KwData,
     KwOptic,
+    KwUnsafe,
+    KwExtern,
     KwGet,
     KwPut,
+    KwPreview,
+    KwReview,
     KwLet,
     KwFn,
     KwQuery, // for the .query( form; not strictly needed
+    StringLit,
     // methods in chains are recognized in parser
 
     // Operators (indivisible)

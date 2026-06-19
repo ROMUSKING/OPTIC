@@ -15,7 +15,7 @@ pub mod token;
 
 pub use ast::*;
 pub use lexer::Lexer;
-pub use parser::{parse, ParseError};
+pub use parser::{parse, ParseError, ParseErrorKind};
 pub use span::{SourceId, Span, Spanned};
 pub use token::{Token, TokenKind};
 
@@ -96,6 +96,40 @@ mod golden_tests {
         assert_golden("ast", "health_position", &actual);
     }
 
+    #[test]
+    fn golden_tokens_nested_position() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("nested_position.opt")).expect("read");
+        assert_golden("tokens", "nested_position", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_nested_position() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("nested_position.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "nested_position", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_nested_field_triple() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("nested_field_triple.opt")).expect("read");
+        assert_golden(
+            "tokens",
+            "nested_field_triple",
+            &dump_tokens(&src, SourceId(1)),
+        );
+    }
+
+    #[test]
+    fn golden_ast_nested_field_triple() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("nested_field_triple.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "nested_field_triple", &dump_ast(&prog));
+    }
+
     /// Full positive suite; one example per test keeps memory bounded (PLAN §5).
     #[test]
     fn golden_tokens_health_get() {
@@ -160,5 +194,74 @@ mod golden_tests {
         let src = std::fs::read_to_string(examples_dir().join("grade_mismatch.opt")).expect("read");
         let prog = parse(&src, SourceId(1)).expect("parse");
         assert_golden("ast", "grade_mismatch", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_compose_decay() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_decay.opt")).expect("read");
+        assert_golden("tokens", "compose_decay", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_compose_decay() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_decay.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "compose_decay", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_compose_triple() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_triple.opt")).expect("read");
+        assert_golden("tokens", "compose_triple", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_compose_triple() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_triple.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "compose_triple", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_unsupported_prism() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_prism.opt")).expect("read");
+        assert_golden("tokens", "unsupported_prism", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_unsupported_prism() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_prism.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "unsupported_prism", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_host_boundary() {
+        let src = std::fs::read_to_string(examples_dir().join("host_boundary.opt")).expect("read");
+        assert_golden("tokens", "host_boundary", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_tokens_unsupported_traversal() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt")).expect("read");
+        assert_golden("tokens", "unsupported_traversal", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_unsupported_traversal() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "unsupported_traversal", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_ast_host_boundary() {
+        let src = std::fs::read_to_string(examples_dir().join("host_boundary.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "host_boundary", &dump_ast(&prog));
     }
 }

@@ -1,28 +1,75 @@
 //! optic-opt — the 3 fusions (ch. 10, M4).
 //! Fixed-point driver (≤8 iters): map fusion, compose fusion, product flatten (ch10 order).
 
-use optic_cgir::{verify, CgirGraph, CgirNode, FusionProvenance, FusionReason, NodeId};
+use optic_cgir::{
+    compose_leaf_chain, compose_tree_node_ids, verify, CgirGraph, CgirNode, ComposeFusedBody,
+    FusionProvenance, FusionReason, NodeId,
+};
+use optic_diagnostics::Diagnostic;
 use optic_hir as hir;
 use optic_syntax::Span;
 
 const MAX_FUSION_ITERS: usize = 8;
 
-/// Run fusion passes until fixed point. Aborts on verify violation (ch10 post-fusion check).
-pub fn optimize(mut g: CgirGraph) -> Result<CgirGraph, String> {
+/// Post-fusion graph plus non-fatal fusion notes (FUS-501 escape, FUS-502 legality skips).
+#[derive(Clone, Debug)]
+pub struct OptimizeResult {
+    pub graph: CgirGraph,
+    pub fusion_notes: Vec<Diagnostic>,
+}
+
+/// Run fusion passes until fixed point, skipping compose body rewrite (for equivalence tests).
+pub fn optimize_without_compose_fusion(g: CgirGraph) -> Result<CgirGraph, String> {
+    optimize_without_compose_fusion_reporting(g).map(|r| r.graph)
+}
+
+pub fn optimize_without_compose_fusion_reporting(
+    mut g: CgirGraph,
+) -> Result<OptimizeResult, String> {
+    let mut fusion_notes = vec![];
     for _ in 0..MAX_FUSION_ITERS {
         let n_before = g.nodes.len();
         g = map_fusion(g);
         verify(&g)?;
-        g = compose_fusion(g);
-        verify(&g)?;
-        g = product_flatten(g);
+        let (g2, flat_notes) = product_flatten(g);
+        g = g2;
+        fusion_notes.extend(flat_notes);
         verify(&g)?;
         if g.nodes.len() == n_before {
             break;
         }
     }
     verify(&g)?;
-    Ok(g)
+    Ok(OptimizeResult {
+        graph: g,
+        fusion_notes,
+    })
+}
+
+/// Run fusion passes until fixed point. Aborts on verify violation (ch10 post-fusion check).
+pub fn optimize(mut g: CgirGraph) -> Result<OptimizeResult, String> {
+    let mut fusion_notes = vec![];
+    for _ in 0..MAX_FUSION_ITERS {
+        let n_before = g.nodes.len();
+        g = map_fusion(g);
+        verify(&g)?;
+        let (g2, notes) = compose_fusion(g);
+        g = g2;
+        fusion_notes.extend(notes);
+        verify(&g)?;
+        let (g3, flat_notes) = product_flatten(g);
+        g = g3;
+        fusion_notes.extend(flat_notes);
+        verify(&g)?;
+        if g.nodes.len() == n_before {
+            break;
+        }
+    }
+    verify(&g)?;
+    Ok(OptimizeResult {
+        graph: g,
+        fusion_notes,
+    })
 }
 
 /// Map fusion: collapse chained QueryMap over same costate (CGIR infrastructure; HIR fuses surface chains).
@@ -170,6 +217,17 @@ fn substitute_map_body(e: &hir::HirExpr, name: &str, repl: &hir::HirExpr) -> hir
             index: *index,
             span: *span,
         },
+        hir::HirExpr::FocusField { param, path, span } => {
+            if param == name {
+                repl.clone()
+            } else {
+                hir::HirExpr::FocusField {
+                    param: param.clone(),
+                    path: path.clone(),
+                    span: *span,
+                }
+            }
+        }
         hir::HirExpr::Unsupported { reason, span } => hir::HirExpr::Unsupported {
             reason: reason.clone(),
             span: *span,
@@ -177,52 +235,84 @@ fn substitute_map_body(e: &hir::HirExpr, name: &str, repl: &hir::HirExpr) -> hir
     }
 }
 
-/// Compose fusion: annotate sequential compose+map queries with FusedLoop (ch10).
-fn compose_fusion(mut g: CgirGraph) -> CgirGraph {
-    let has_map_root = g
+/// Compose fusion: merge QueryMap(Compose(A,B), f) into a single FusedLoop body (ch10).
+fn compose_fusion(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
+    let map_root = g
         .roots
         .iter()
-        .any(|&r| matches!(g.nodes.get(r as usize), Some(CgirNode::QueryMap { .. })));
-    if !has_map_root {
-        return g;
+        .find(|&&r| matches!(g.nodes.get(r as usize), Some(CgirNode::QueryMap { .. })));
+    let Some(&map_root) = map_root else {
+        return (g, vec![]);
+    };
+
+    let Some(CgirNode::QueryMap {
+        optic_name,
+        costate,
+        map_param,
+        map_body,
+        provenance: map_span,
+        ..
+    }) = g.nodes.get(map_root as usize).cloned()
+    else {
+        return (g, vec![]);
+    };
+
+    let Some(&compose_id) = g.resolved_optics.get(&optic_name) else {
+        return (g, vec![]);
+    };
+    if !matches!(
+        g.nodes.get(compose_id as usize),
+        Some(CgirNode::Compose { .. })
+    ) {
+        return (g, vec![]);
+    };
+
+    let Some(compose_node) = g.nodes.get(compose_id as usize) else {
+        return (g, vec![]);
+    };
+    let compose_span = node_provenance(compose_node);
+    let span = map_span.merge(compose_span);
+
+    if let Some(note) =
+        compose_fusion_block_note(&g, compose_id, map_body.as_ref(), &map_param, span)
+    {
+        return (g, vec![note]);
     }
 
-    let compose_ids: Vec<NodeId> = g
-        .nodes
-        .iter()
-        .enumerate()
-        .filter_map(|(i, n)| {
-            if matches!(n, CgirNode::Compose { .. }) {
-                Some(i as NodeId)
-            } else {
-                None
-            }
-        })
-        .collect();
-    if compose_ids.is_empty() {
-        return g;
+    let Some(chain) = compose_leaf_chain(&g, compose_id) else {
+        return (g, vec![]);
+    };
+    if chain.len() < 2 {
+        return (g, vec![]);
     }
+    let entry = chain[0];
+    let exit = *chain.last().unwrap();
 
-    let already_compose_fused = g.provenance_index.values().any(|p| {
-        p.reason == FusionReason::ComposeFusion
-            && compose_ids.iter().any(|id| p.original_ids.contains(id))
-    });
-    if already_compose_fused {
-        return g;
+    let already = g
+        .provenance_index
+        .values()
+        .any(|p| p.reason == FusionReason::ComposeFusion && p.original_ids.contains(&compose_id));
+    if already {
+        return (g, vec![]);
     }
 
     let fid: NodeId = g.nodes.len() as u32;
-    let span = g
-        .nodes
-        .get(compose_ids[0] as usize)
-        .map(node_provenance)
-        .unwrap_or_else(Span::dummy);
-    let orig = compose_ids.clone();
+    let mut orig = compose_tree_node_ids(&g, compose_id);
+    if !orig.contains(&map_root) {
+        orig.push(map_root);
+    }
     g.nodes.push(CgirNode::FusedLoop {
         id: fid,
         original_ids: orig.clone(),
-        costate: "Entities".into(),
+        costate: costate.clone(),
         provenance: span,
+        compose_body: Some(ComposeFusedBody {
+            compose_id,
+            lhs: entry,
+            rhs: exit,
+            map_param: map_param.clone(),
+            map_body: std::sync::Arc::clone(&map_body),
+        }),
     });
     g.provenance_index.insert(
         fid,
@@ -232,66 +322,320 @@ fn compose_fusion(mut g: CgirGraph) -> CgirGraph {
             reason: FusionReason::ComposeFusion,
         },
     );
-    g
+    g.roots = vec![fid];
+    (g, vec![])
 }
 
-/// Product flattening: attach FusedLoop for map+product queries (ch10).
-fn product_flatten(mut g: CgirGraph) -> CgirGraph {
-    let map_root = g
-        .roots
-        .iter()
-        .find(|&&r| matches!(g.nodes.get(r as usize), Some(CgirNode::QueryMap { .. })));
-    let Some(&map_root) = map_root else {
-        return g;
+fn compose_fusion_block_note(
+    g: &CgirGraph,
+    compose_id: NodeId,
+    map_body: &hir::HirExpr,
+    map_param: &str,
+    span: Span,
+) -> Option<Diagnostic> {
+    let chain = compose_leaf_chain(g, compose_id)?;
+    if chain.len() < 2 {
+        return Some(optic_diagnostics::fusion_compose_legality_diag(
+            span,
+            "compose fusion blocked — compose chain must contain at least two optic leaves",
+            serde_json::json!({
+                "reason": "non_leaf_chain",
+                "compose_id": compose_id,
+                "leaves": chain.len()
+            }),
+        ));
+    }
+    for w in chain.windows(2) {
+        let (Some(lhs_sum), Some(rhs_sum)) = (
+            g.nodes.get(w[0] as usize).and_then(leaf_summary),
+            g.nodes.get(w[1] as usize).and_then(leaf_summary),
+        ) else {
+            return Some(optic_diagnostics::fusion_compose_legality_diag(
+                span,
+                "compose fusion blocked — compose chain must be optic leaves",
+                serde_json::json!({
+                    "reason": "non_leaf_child",
+                    "lhs": w[0],
+                    "rhs": w[1]
+                }),
+            ));
+        };
+        if !types_compatible(lhs_sum, rhs_sum) {
+            return Some(optic_diagnostics::fusion_compose_legality_diag(
+                span,
+                "compose fusion blocked — intermediate focus/costate mismatch",
+                serde_json::json!({
+                    "reason": "focus_costate_mismatch",
+                    "lhs_focus": lhs_sum.focus,
+                    "rhs_costate": rhs_sum.costate,
+                }),
+            ));
+        }
+    }
+    for &lid in &chain {
+        let Some(sum) = g.nodes.get(lid as usize).and_then(leaf_summary) else {
+            return Some(optic_diagnostics::fusion_compose_legality_diag(
+                span,
+                "compose fusion blocked — compose chain must be optic leaves",
+                serde_json::json!({ "reason": "non_leaf_child", "leaf": lid }),
+            ));
+        };
+        if sum.get_determinism != hir::Determinism::Pure
+            || sum.put_determinism != hir::Determinism::Pure
+        {
+            return Some(optic_diagnostics::fusion_compose_legality_diag(
+                span,
+                "compose fusion blocked — optic determinism must be Pure",
+                serde_json::json!({
+                    "reason": "impurity",
+                    "leaf": lid,
+                    "get_det": format!("{:?}", sum.get_determinism),
+                    "put_det": format!("{:?}", sum.put_determinism),
+                }),
+            ));
+        }
+    }
+    let entry = chain[0];
+    let exit = *chain.last().expect("len >= 2");
+    if intermediate_escapes_query(g, entry, exit, map_body, map_param) {
+        return Some(optic_diagnostics::fusion_compose_blocked_diag(
+            span,
+            "compose fusion blocked — intermediate value escapes",
+            serde_json::json!({
+                "reason": "escape",
+                "map_param": map_param,
+            }),
+        ));
+    }
+    None
+}
+
+/// Canonical type-name equality for compose wiring (OpticSummary focus/costate).
+fn types_compatible(lhs: &hir::OpticSummary, rhs: &hir::OpticSummary) -> bool {
+    lhs.focus.eq_ignore_ascii_case(&rhs.costate)
+}
+
+/// Basic escape check (ch10): map body references the compose intermediate outside map_param.
+fn intermediate_escapes_query(
+    g: &CgirGraph,
+    _lhs: NodeId,
+    rhs: NodeId,
+    map_body: &hir::HirExpr,
+    map_param: &str,
+) -> bool {
+    let Some(CgirNode::OpticLeaf {
+        get_param, focus, ..
+    }) = g.nodes.get(rhs as usize)
+    else {
+        return false;
     };
+    // Rhs get_param names the intermediate flowing through compose (e.g. `x` in `get x => ...`).
+    if get_param != map_param && hir_expr_refs_var(map_body, get_param) {
+        return true;
+    }
+    // Conservative: reject map bodies that reference the declared focus type name as an ident.
+    if focus != map_param && hir_expr_refs_var(map_body, focus) {
+        return true;
+    }
+    false
+}
 
-    let product_ids: Vec<NodeId> = g
-        .nodes
-        .iter()
-        .enumerate()
-        .filter_map(|(i, n)| {
-            if matches!(n, CgirNode::Product { .. }) {
-                Some(i as NodeId)
-            } else {
+fn hir_expr_refs_var(e: &hir::HirExpr, name: &str) -> bool {
+    match e {
+        hir::HirExpr::Var(v, _) => v == name,
+        hir::HirExpr::Bin { left, right, .. } => {
+            hir_expr_refs_var(left, name) || hir_expr_refs_var(right, name)
+        }
+        hir::HirExpr::Paren(inner, _) => hir_expr_refs_var(inner, name),
+        hir::HirExpr::Tuple(elems, _) => elems.iter().any(|el| hir_expr_refs_var(el, name)),
+        hir::HirExpr::TupleProj { base, .. } => hir_expr_refs_var(base, name),
+        hir::HirExpr::FocusField { param, .. } => param == name,
+        _ => false,
+    }
+}
+
+fn leaf_summary(n: &CgirNode) -> Option<&hir::OpticSummary> {
+    if let CgirNode::OpticLeaf { summary, .. } = n {
+        Some(summary.as_ref())
+    } else {
+        None
+    }
+}
+
+/// Collect leaf ids from a (possibly nested) Product tree in left-to-right order.
+fn flatten_product_children(g: &CgirGraph, id: NodeId) -> Result<Vec<NodeId>, String> {
+    match g.nodes.get(id as usize) {
+        Some(CgirNode::Product { lhs, rhs, .. }) => {
+            let mut out = flatten_product_children(g, *lhs)?;
+            out.extend(flatten_product_children(g, *rhs)?);
+            Ok(out)
+        }
+        Some(CgirNode::ProductFlat { children, .. }) => Ok(children.clone()),
+        Some(CgirNode::OpticLeaf { .. }) => Ok(vec![id]),
+        Some(_) => Err(format!(
+            "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf"
+        )),
+        None => Err(format!("flatten_product_children: node {id} out of bounds")),
+    }
+}
+
+fn product_is_nested(g: &CgirGraph, lhs: NodeId, rhs: NodeId) -> bool {
+    matches!(
+        g.nodes.get(lhs as usize),
+        Some(CgirNode::Product { .. } | CgirNode::ProductFlat { .. })
+    ) || matches!(
+        g.nodes.get(rhs as usize),
+        Some(CgirNode::Product { .. } | CgirNode::ProductFlat { .. })
+    )
+}
+
+/// Product flattening: rewrite nested Product chains to ProductFlat (ch10.10.4).
+fn product_flatten(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
+    let mut notes = vec![];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let candidates: Vec<(
+            usize,
+            NodeId,
+            NodeId,
+            NodeId,
+            hir::ConcreteGrade,
+            bool,
+            Span,
+        )> = g
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| {
+                if let CgirNode::Product {
+                    id,
+                    lhs,
+                    rhs,
+                    grade,
+                    alias_safe,
+                    provenance,
+                } = n
+                {
+                    // Two-pass loop: rewrite nested Product chains, then leaf-level products.
+                    if product_is_nested(&g, *lhs, *rhs) {
+                        return Some((i, *id, *lhs, *rhs, grade.clone(), *alias_safe, *provenance));
+                    }
+                }
                 None
+            })
+            .collect();
+
+        for (idx, id, lhs, rhs, grade, alias_safe, provenance) in candidates {
+            if matches!(g.nodes.get(idx), Some(CgirNode::ProductFlat { .. })) {
+                continue;
             }
-        })
+            let children = match flatten_product_children(&g, lhs) {
+                Ok(mut out) => match flatten_product_children(&g, rhs) {
+                    Ok(rhs_children) => {
+                        out.extend(rhs_children);
+                        out
+                    }
+                    Err(e) => {
+                        notes.push(optic_diagnostics::fusion_verify_diag(&format!(
+                            "product flatten skipped for node {id}: {e}"
+                        )));
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    notes.push(optic_diagnostics::fusion_verify_diag(&format!(
+                        "product flatten skipped for node {id}: {e}"
+                    )));
+                    continue;
+                }
+            };
+            if children.len() < 2 {
+                continue;
+            }
+            let mut original_ids = children.clone();
+            original_ids.push(id);
+            g.nodes[idx] = CgirNode::ProductFlat {
+                id,
+                children,
+                grade,
+                alias_safe,
+                provenance,
+            };
+            g.provenance_index.insert(
+                id,
+                FusionProvenance {
+                    original_ids,
+                    spans: vec![provenance],
+                    reason: FusionReason::ProductFlattening,
+                },
+            );
+            changed = true;
+        }
+    }
+
+    // Normalize leaf-level Product nodes used by query optics to ProductFlat.
+    let optic_products: Vec<NodeId> = g
+        .resolved_optics
+        .values()
+        .copied()
+        .filter(|&nid| matches!(g.nodes.get(nid as usize), Some(CgirNode::Product { .. })))
         .collect();
-    if product_ids.is_empty() {
-        return g;
+    for pid in optic_products {
+        let idx = pid as usize;
+        let Some(CgirNode::Product {
+            id,
+            lhs,
+            rhs,
+            grade,
+            alias_safe,
+            provenance,
+        }) = g.nodes.get(idx).cloned()
+        else {
+            continue;
+        };
+        let children = match flatten_product_children(&g, lhs) {
+            Ok(mut out) => match flatten_product_children(&g, rhs) {
+                Ok(rhs_children) => {
+                    out.extend(rhs_children);
+                    out
+                }
+                Err(e) => {
+                    notes.push(optic_diagnostics::fusion_verify_diag(&format!(
+                        "product flatten skipped for optic product {id}: {e}"
+                    )));
+                    continue;
+                }
+            },
+            Err(e) => {
+                notes.push(optic_diagnostics::fusion_verify_diag(&format!(
+                    "product flatten skipped for optic product {id}: {e}"
+                )));
+                continue;
+            }
+        };
+        if children.len() < 2 {
+            continue;
+        }
+        let mut original_ids = children.clone();
+        original_ids.push(id);
+        g.nodes[idx] = CgirNode::ProductFlat {
+            id,
+            children,
+            grade,
+            alias_safe,
+            provenance,
+        };
+        g.provenance_index.insert(
+            id,
+            FusionProvenance {
+                original_ids,
+                spans: vec![provenance],
+                reason: FusionReason::ProductFlattening,
+            },
+        );
     }
-
-    let already = g.provenance_index.values().any(|p| {
-        p.reason == FusionReason::ProductFlattening
-            && product_ids.iter().any(|id| p.original_ids.contains(id))
-    });
-    if already {
-        return g;
-    }
-
-    let fid: NodeId = g.nodes.len() as u32;
-    let span = g
-        .nodes
-        .get(product_ids[0] as usize)
-        .map(node_provenance)
-        .unwrap_or_else(Span::dummy);
-    let orig = product_ids.clone();
-    g.nodes.push(CgirNode::FusedLoop {
-        id: fid,
-        original_ids: orig.clone(),
-        costate: "Entities".into(),
-        provenance: span,
-    });
-    g.provenance_index.insert(
-        fid,
-        FusionProvenance {
-            original_ids: orig,
-            spans: vec![span],
-            reason: FusionReason::ProductFlattening,
-        },
-    );
-    g.roots = vec![map_root];
-    g
+    (g, notes)
 }
 
 fn node_provenance(n: &CgirNode) -> Span {
@@ -299,6 +643,7 @@ fn node_provenance(n: &CgirNode) -> Span {
         CgirNode::OpticLeaf { provenance, .. }
         | CgirNode::Compose { provenance, .. }
         | CgirNode::Product { provenance, .. }
+        | CgirNode::ProductFlat { provenance, .. }
         | CgirNode::QueryGet { provenance, .. }
         | CgirNode::QuerySet { provenance, .. }
         | CgirNode::QueryMap { provenance, .. }
@@ -316,6 +661,31 @@ mod tests {
 
     fn empty_resolved() -> std::collections::HashMap<String, NodeId> {
         std::collections::HashMap::new()
+    }
+
+    fn mk_leaf(
+        id: NodeId,
+        name: &str,
+        costate: &str,
+        focus: &str,
+        sum: Arc<hir::OpticSummary>,
+    ) -> CgirNode {
+        CgirNode::OpticLeaf {
+            id,
+            name: name.into(),
+            costate: costate.into(),
+            focus: focus.into(),
+            grade: sum.get_grade.clone(),
+            get_fn: "".into(),
+            put_fn: "".into(),
+            get_param: "s".into(),
+            get_body: Arc::new(HirExpr::Var("s".into(), Span::dummy())),
+            put_state_param: None,
+            put_value_param: None,
+            put_value_body: None,
+            summary: sum,
+            provenance: Span::dummy(),
+        }
     }
 
     #[test]
@@ -365,17 +735,7 @@ mod tests {
         resolved.insert("H".into(), 0);
         let g = CgirGraph {
             nodes: vec![
-                CgirNode::OpticLeaf {
-                    id: 0,
-                    name: "H".into(),
-                    costate: "E".into(),
-                    focus: "f32".into(),
-                    grade: sum.get_grade.clone(),
-                    get_fn: "".into(),
-                    put_fn: "".into(),
-                    summary: Arc::clone(&sum),
-                    provenance: Span::dummy(),
-                },
+                mk_leaf(0, "H", "E", "f32", Arc::clone(&sum)),
                 CgirNode::QueryMap {
                     id: 1,
                     optic_name: "H".into(),
@@ -398,10 +758,11 @@ mod tests {
             roots: vec![1, 2],
             provenance_index: BTreeMap::new(),
             resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
         };
         let out = optimize(g).expect("optimize should verify");
-        assert_eq!(out.roots, vec![1]);
-        if let Some(CgirNode::QueryMap { map_body, .. }) = out.nodes.get(1) {
+        assert_eq!(out.graph.roots, vec![1]);
+        if let Some(CgirNode::QueryMap { map_body, .. }) = out.graph.nodes.get(1) {
             match map_body.as_ref() {
                 HirExpr::Bin {
                     op: BinOp::Mul,
@@ -425,12 +786,436 @@ mod tests {
             roots: vec![0],
             provenance_index: BTreeMap::new(),
             resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
         };
         assert!(optimize(g).is_err());
     }
 
     #[test]
+    fn compose_fusion_fuses_nested_compose_chain() {
+        let sum = Arc::new(hir::OpticSummary {
+            name: Some("X".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("pipe".into(), 4);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "Entities", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "B", "f32", "f32", Arc::clone(&sum)),
+                mk_leaf(2, "C", "f32", "f32", Arc::clone(&sum)),
+                CgirNode::Compose {
+                    id: 3,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::Compose {
+                    id: 4,
+                    lhs: 3,
+                    rhs: 2,
+                    grade: sum.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 5,
+                    optic_name: "pipe".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "x".into(),
+                    map_body: Arc::new(HirExpr::Var("x".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![5],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("nested compose fusion");
+        let fused = out
+            .graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                CgirNode::FusedLoop { compose_body, .. } => compose_body.as_ref(),
+                _ => None,
+            })
+            .expect("fused body");
+        assert_eq!(fused.lhs, 0, "entry leaf");
+        assert_eq!(fused.rhs, 2, "exit leaf");
+        assert_eq!(fused.compose_id, 4, "root compose");
+        assert!(out.fusion_notes.is_empty());
+    }
+
+    #[test]
     fn compose_fusion_adds_fused_loop_provenance() {
+        let sum_a = Arc::new(hir::OpticSummary {
+            name: Some("A".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_b = Arc::new(hir::OpticSummary {
+            name: Some("B".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec![],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: sum_a.get_grade.clone(),
+            put_grade: sum_a.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("seq".into(), 2);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "Entities", "f32", Arc::clone(&sum_a)),
+                mk_leaf(1, "B", "f32", "f32", Arc::clone(&sum_b)),
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_a.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 3,
+                    optic_name: "seq".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "x".into(),
+                    map_body: Arc::new(HirExpr::Var("x".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![3],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("compose fusion should verify");
+        assert_eq!(out.graph.roots, vec![4]);
+        let fused = out.graph.nodes.iter().find_map(|n| {
+            if let CgirNode::FusedLoop { compose_body, .. } = n {
+                compose_body.as_ref()
+            } else {
+                None
+            }
+        });
+        assert!(fused.is_some(), "compose fusion must materialize body");
+        assert!(out
+            .graph
+            .provenance_index
+            .values()
+            .any(|p| { p.reason == FusionReason::ComposeFusion }));
+    }
+
+    #[test]
+    fn compose_fusion_blocked_on_impurity() {
+        let sum_rhs = Arc::new(hir::OpticSummary {
+            name: Some("B".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec![],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Opaque,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_lhs = Arc::new(hir::OpticSummary {
+            name: Some("A".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: sum_rhs.get_grade.clone(),
+            put_grade: sum_rhs.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("seq".into(), 2);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "Entities", "f32", Arc::clone(&sum_lhs)),
+                mk_leaf(1, "B", "f32", "f32", Arc::clone(&sum_rhs)),
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_lhs.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 3,
+                    optic_name: "seq".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "x".into(),
+                    map_body: Arc::new(HirExpr::Var("x".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![3],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("optimize should still verify unfused compose");
+        assert_eq!(out.graph.roots, vec![3]);
+        assert!(
+            out.fusion_notes
+                .iter()
+                .any(|d| d.code == optic_diagnostics::FUS_COMPOSE_LEGALITY_BLOCKED),
+            "impurity must emit FUS-502"
+        );
+    }
+
+    #[test]
+    fn compose_fusion_blocked_on_intermediate_escape() {
+        let sum_rhs = Arc::new(hir::OpticSummary {
+            name: Some("B".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec![],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_lhs = Arc::new(hir::OpticSummary {
+            name: Some("A".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: sum_rhs.get_grade.clone(),
+            put_grade: sum_rhs.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("seq".into(), 2);
+        let mut b_leaf = mk_leaf(1, "B", "f32", "f32", Arc::clone(&sum_rhs));
+        if let CgirNode::OpticLeaf { get_param, .. } = &mut b_leaf {
+            *get_param = "x".into();
+        }
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "Entities", "f32", Arc::clone(&sum_lhs)),
+                b_leaf,
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_lhs.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 3,
+                    optic_name: "seq".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "y".into(),
+                    map_body: Arc::new(HirExpr::Bin {
+                        op: BinOp::Add,
+                        left: Box::new(HirExpr::Var("y".into(), Span::dummy())),
+                        right: Box::new(HirExpr::Var("x".into(), Span::dummy())),
+                        span: Span::dummy(),
+                    }),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![3],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("optimize should still verify unfused compose");
+        assert_eq!(out.graph.roots, vec![3]);
+        assert!(
+            out.fusion_notes
+                .iter()
+                .any(|d| d.code == optic_diagnostics::FUS_COMPOSE_BLOCKED),
+            "intermediate escape must emit FUS-501"
+        );
+    }
+
+    #[test]
+    fn compose_types_compatible_uses_summary_not_display_strings() {
+        let sum_a = Arc::new(hir::OpticSummary {
+            name: Some("A".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_b = Arc::new(hir::OpticSummary {
+            name: Some("B".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec![],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: sum_a.get_grade.clone(),
+            put_grade: sum_a.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut lhs = mk_leaf(0, "A", "Entities", "FLOAT", Arc::clone(&sum_a));
+        let mut rhs = mk_leaf(1, "B", "f32_alias", "f32", Arc::clone(&sum_b));
+        if let CgirNode::OpticLeaf { focus, costate, .. } = &mut lhs {
+            *focus = "FLOAT".into();
+            *costate = "Entities".into();
+        }
+        if let CgirNode::OpticLeaf { costate, .. } = &mut rhs {
+            *costate = "f32_alias".into();
+        }
+        assert!(types_compatible(
+            lhs_summary(&lhs).expect("lhs summary"),
+            lhs_summary(&rhs).expect("rhs summary")
+        ));
+        let mut bad_rhs_sum = (*sum_b).clone();
+        bad_rhs_sum.costate = "Entities".into();
+        let bad_rhs = mk_leaf(2, "C", "Entities", "f32", Arc::new(bad_rhs_sum));
+        assert!(!types_compatible(
+            lhs_summary(&lhs).expect("lhs summary"),
+            lhs_summary(&bad_rhs).expect("bad summary")
+        ));
+    }
+
+    fn lhs_summary(n: &CgirNode) -> Option<&hir::OpticSummary> {
+        leaf_summary(n)
+    }
+
+    #[test]
+    fn compose_fusion_blocked_on_focus_mismatch() {
         let sum = Arc::new(hir::OpticSummary {
             name: Some("A".into()),
             costate: "E".into(),
@@ -461,29 +1246,20 @@ mod tests {
             provenance: Span::dummy(),
         });
         let mut resolved = std::collections::HashMap::new();
-        resolved.insert("seq".into(), 1);
+        resolved.insert("seq".into(), 2);
         let g = CgirGraph {
             nodes: vec![
-                CgirNode::OpticLeaf {
-                    id: 0,
-                    name: "A".into(),
-                    costate: "E".into(),
-                    focus: "f32".into(),
-                    grade: sum.get_grade.clone(),
-                    get_fn: "".into(),
-                    put_fn: "".into(),
-                    summary: Arc::clone(&sum),
-                    provenance: Span::dummy(),
-                },
+                mk_leaf(0, "A", "Entities", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "B", "Entities", "f32", Arc::clone(&sum)),
                 CgirNode::Compose {
-                    id: 1,
+                    id: 2,
                     lhs: 0,
-                    rhs: 0,
+                    rhs: 1,
                     grade: sum.get_grade.clone(),
                     provenance: Span::dummy(),
                 },
                 CgirNode::QueryMap {
-                    id: 2,
+                    id: 3,
                     optic_name: "seq".into(),
                     costate: "entities".into(),
                     cursor: "c".into(),
@@ -492,22 +1268,20 @@ mod tests {
                     provenance: Span::dummy(),
                 },
             ],
-            roots: vec![2],
+            roots: vec![3],
             provenance_index: BTreeMap::new(),
             resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
         };
-        let out = optimize(g).expect("compose fusion should verify");
-        assert!(out
-            .nodes
-            .iter()
-            .any(|n| matches!(n, CgirNode::FusedLoop { .. })));
-        assert!(out.provenance_index.values().any(|p| {
-            p.reason == FusionReason::ComposeFusion || p.reason == FusionReason::ProductFlattening
-        }));
+        let err = optimize(g).expect_err("invalid compose wiring must fail verify");
+        assert!(
+            err.contains("compose type wiring invalid"),
+            "focus mismatch caught by CGIR verify: {err}"
+        );
     }
 
     #[test]
-    fn product_flatten_adds_fused_loop_for_product_map() {
+    fn product_flatten_materializes_product_flat_children() {
         let sum = Arc::new(hir::OpticSummary {
             name: Some("H".into()),
             costate: "E".into(),
@@ -541,28 +1315,8 @@ mod tests {
         resolved.insert("par".into(), 2);
         let g = CgirGraph {
             nodes: vec![
-                CgirNode::OpticLeaf {
-                    id: 0,
-                    name: "H".into(),
-                    costate: "E".into(),
-                    focus: "f32".into(),
-                    grade: sum.get_grade.clone(),
-                    get_fn: "".into(),
-                    put_fn: "".into(),
-                    summary: Arc::clone(&sum),
-                    provenance: Span::dummy(),
-                },
-                CgirNode::OpticLeaf {
-                    id: 1,
-                    name: "H2".into(),
-                    costate: "E".into(),
-                    focus: "f32".into(),
-                    grade: sum.get_grade.clone(),
-                    get_fn: "".into(),
-                    put_fn: "".into(),
-                    summary: Arc::clone(&sum),
-                    provenance: Span::dummy(),
-                },
+                mk_leaf(0, "H", "E", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "H2", "E", "f32", Arc::clone(&sum)),
                 CgirNode::Product {
                     id: 2,
                     lhs: 0,
@@ -590,16 +1344,27 @@ mod tests {
             roots: vec![3],
             provenance_index: BTreeMap::new(),
             resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
         };
         let out = optimize(g).expect("product flatten should verify");
-        assert!(out
+        let flat = out
+            .graph
             .nodes
             .iter()
-            .any(|n| matches!(n, CgirNode::FusedLoop { .. })));
+            .find_map(|n| {
+                if let CgirNode::ProductFlat { children, .. } = n {
+                    Some(children.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("ProductFlat node");
+        assert_eq!(flat, vec![0, 1]);
         assert!(out
+            .graph
             .provenance_index
             .values()
-            .any(|p| { p.reason == FusionReason::ProductFlattening }));
+            .any(|p| p.reason == FusionReason::ProductFlattening));
     }
 
     #[test]
@@ -609,22 +1374,12 @@ mod tests {
         resolved.insert("H".into(), 0);
         let g = CgirGraph {
             nodes: vec![
-                CgirNode::OpticLeaf {
-                    id: 0,
-                    name: "H".into(),
-                    costate: "E".into(),
-                    focus: "f32".into(),
-                    grade: hir::ConcreteGrade {
-                        cache: 1,
-                        ownership: OwnershipDim {
-                            share: Rational::one(),
-                            read_only: false,
-                            must_use: false,
-                        },
-                    },
-                    get_fn: "".into(),
-                    put_fn: "".into(),
-                    summary: Arc::new(hir::OpticSummary {
+                mk_leaf(
+                    0,
+                    "H",
+                    "E",
+                    "f32",
+                    Arc::new(hir::OpticSummary {
                         name: Some("H".into()),
                         costate: "E".into(),
                         focus: "f32".into(),
@@ -653,8 +1408,7 @@ mod tests {
                         serializable: true,
                         provenance: Span::dummy(),
                     }),
-                    provenance: Span::dummy(),
-                },
+                ),
                 CgirNode::QueryMap {
                     id: 1,
                     optic_name: "H".into(),
@@ -677,7 +1431,236 @@ mod tests {
             roots: vec![1],
             provenance_index: BTreeMap::new(),
             resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
         };
         assert!(verify(&g).is_err(), "orphan QueryMap must fail verify");
+    }
+
+    #[test]
+    fn flatten_product_children_rejects_invalid_child_kind() {
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::Product {
+                    id: 0,
+                    lhs: 1,
+                    rhs: 2,
+                    grade: hir::ConcreteGrade {
+                        cache: 1,
+                        ownership: OwnershipDim {
+                            share: Rational::one(),
+                            read_only: false,
+                            must_use: false,
+                        },
+                    },
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 1,
+                    optic_name: "H".into(),
+                    costate: "e".into(),
+                    cursor: "c".into(),
+                    map_param: "x".into(),
+                    map_body: Arc::new(HirExpr::Var("x".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+                mk_leaf(
+                    2,
+                    "H",
+                    "E",
+                    "f32",
+                    Arc::new(hir::OpticSummary {
+                        name: Some("H".into()),
+                        costate: "E".into(),
+                        focus: "f32".into(),
+                        lift: hir::PathLift::default(),
+                        get_reads: vec!["healths".into()],
+                        put_reads: vec![],
+                        put_writes: vec!["healths".into()],
+                        get_grade: hir::ConcreteGrade {
+                            cache: 1,
+                            ownership: OwnershipDim {
+                                share: Rational::one(),
+                                read_only: false,
+                                must_use: false,
+                            },
+                        },
+                        put_grade: hir::ConcreteGrade {
+                            cache: 1,
+                            ownership: OwnershipDim {
+                                share: Rational::one(),
+                                read_only: false,
+                                must_use: false,
+                            },
+                        },
+                        get_determinism: hir::Determinism::Pure,
+                        put_determinism: hir::Determinism::Pure,
+                        serializable: true,
+                        provenance: Span::dummy(),
+                    }),
+                ),
+            ],
+            roots: vec![0],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
+        };
+        let err = flatten_product_children(&g, 0).expect_err("invalid child");
+        assert!(err.contains("not Product/ProductFlat/OpticLeaf"));
+    }
+
+    #[test]
+    fn flatten_product_children_collects_three_leaf_chain() {
+        let sum = Arc::new(hir::OpticSummary {
+            name: Some("L".into()),
+            costate: "E".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "E", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "B", "E", "f32", Arc::clone(&sum)),
+                mk_leaf(2, "C", "E", "f32", Arc::clone(&sum)),
+                CgirNode::Product {
+                    id: 3,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum.get_grade.clone(),
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+                CgirNode::Product {
+                    id: 4,
+                    lhs: 3,
+                    rhs: 2,
+                    grade: sum.get_grade.clone(),
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![4],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
+        };
+        let children = flatten_product_children(&g, 4).expect("three leaves");
+        assert_eq!(children, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn product_flatten_records_note_on_invalid_child() {
+        let sum_a = Arc::new(hir::OpticSummary {
+            name: Some("A".into()),
+            costate: "E".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_b = Arc::new(hir::OpticSummary {
+            name: Some("B".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: sum_a.get_grade.clone(),
+            put_grade: sum_a.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "A", "E", "f32", Arc::clone(&sum_a)),
+                mk_leaf(1, "B", "E", "f32", Arc::clone(&sum_a)),
+                mk_leaf(2, "C", "f32", "f32", Arc::clone(&sum_b)),
+                mk_leaf(3, "D", "f32", "f32", sum_b),
+                CgirNode::Product {
+                    id: 4,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_a.get_grade.clone(),
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+                CgirNode::Compose {
+                    id: 5,
+                    lhs: 2,
+                    rhs: 3,
+                    grade: sum_a.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::Product {
+                    id: 6,
+                    lhs: 4,
+                    rhs: 5,
+                    grade: sum_a.get_grade.clone(),
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![6],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
+        };
+        let out =
+            optimize_without_compose_fusion_reporting(g).expect("optimize with skipped flatten");
+        assert!(
+            out.fusion_notes
+                .iter()
+                .any(|n| n.rule.contains("product flatten skipped")),
+            "expected fusion note on flatten skip, got {:?}",
+            out.fusion_notes
+        );
+        assert!(matches!(out.graph.nodes[6], CgirNode::Product { .. }));
     }
 }

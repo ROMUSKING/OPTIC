@@ -1,0 +1,118 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-001",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "optic": "BadFocus",
+        "role": "focus",
+        "type_name": "GhostScalar"
+      },
+      "minimal_fix_options": [
+        "declare a data type with this name",
+        "use a primitive type (f32, i32, u32, Vec2)"
+      ],
+      "next_commands": [
+        "opticc explain TYP-001",
+        "opticc dump-hir file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 147.0,
+        "source": 1.0,
+        "start": 136.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "declare a data type with this name"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "use a primitive type (f32, i32, u32, Vec2)"
+        }
+      ],
+      "related_spans": [],
+      "rule": "type `GhostScalar` is not declared in this program",
+      "severity": "error",
+      "title": "unknown type"
+    },
+    {
+      "code": "TYP-002",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "actual_type": "f32",
+        "clause": "get",
+        "expected_type": "GhostScalar",
+        "optic": "BadFocus"
+      },
+      "minimal_fix_options": [
+        "change declared focus type to match the body",
+        "adjust get/put body to return the declared focus type"
+      ],
+      "next_commands": [
+        "opticc explain TYP-002",
+        "edit declared focus type or get/put body in source"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 161.0,
+        "source": 1.0,
+        "start": 158.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "change declared focus type to match the body"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "adjust get/put body to return the declared focus type"
+        }
+      ],
+      "related_spans": [],
+      "rule": "get body type `f32` does not match declared focus `GhostScalar`",
+      "severity": "error",
+      "title": "type mismatch in optic body"
+    },
+    {
+      "code": "TYP-002",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "actual_type": "f32",
+        "clause": "put",
+        "expected_type": "GhostScalar",
+        "optic": "BadFocus"
+      },
+      "minimal_fix_options": [
+        "change declared focus type to match the body",
+        "adjust get/put body to return the declared focus type"
+      ],
+      "next_commands": [
+        "opticc explain TYP-002",
+        "edit declared focus type or get/put body in source"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 196.0,
+        "source": 1.0,
+        "start": 193.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "change declared focus type to match the body"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "adjust get/put body to return the declared focus type"
+        }
+      ],
+      "related_spans": [],
+      "rule": "put body type `f32` does not match declared focus `GhostScalar`",
+      "severity": "error",
+      "title": "type mismatch in optic body"
+    }
+  ],
+  "ok": false
+}

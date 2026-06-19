@@ -1,0 +1,42 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-010",
+      "confidence": 1.0,
+      "evidence": {
+        "detail": "prism syntax (`GradedPrism`, `preview`/`review`) is not supported in narrow v0 (M7+)",
+        "feature": "prism",
+        "name": "AliveFilter"
+      },
+      "minimal_fix_options": [
+        "use lens-like GradedOptic forms supported in v0",
+        "defer prisms and host boundaries to M7+"
+      ],
+      "next_commands": [
+        "opticc explain TYP-010",
+        "opticc check file.opt --json"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 268.0,
+        "source": 1.0,
+        "start": 126.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use lens-like GradedOptic forms supported in v0"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer prisms and host boundaries to M7+"
+        }
+      ],
+      "related_spans": [],
+      "rule": "prism syntax (`GradedPrism`, `preview`/`review`) is not supported in narrow v0 (M7+)",
+      "severity": "error",
+      "title": "unsupported in narrow v0"
+    }
+  ],
+  "ok": false
+}

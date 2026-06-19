@@ -1,0 +1,25 @@
+-- Chained sequential compose: A >>> B >>> C lowers to nested Compose tree.
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic DoubleView: GradedOptic<f32, f32, CacheGrade<1> + AffineGrade> {
+    get  x      => x * 2.0
+    put  (x, v) => v / 2.0
+}
+
+optic TripleView: GradedOptic<f32, f32, CacheGrade<1> + AffineGrade> {
+    get  x      => x * 3.0
+    put  (x, v) => v / 3.0
+}
+
+let pipeline = HealthView >>> DoubleView >>> TripleView;
+
+fn main() {
+    entities.query(pipeline).map(|y| y - 10.0);
+}

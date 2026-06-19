@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "ALI-201",
-      "confidence": 0.9,
+      "confidence": 0.949999988079071,
       "evidence": {
         "conflicting_regions": [
           "healths",
@@ -14,8 +14,8 @@
         "use read-only grades if possible"
       ],
       "next_commands": [
-        "optic explain ALI-201",
-        "optic dump-summary --node ..."
+        "opticc explain ALI-201",
+        "opticc dump-summary --node ..."
       ],
       "phase": "alias",
       "primary_span": {
@@ -29,7 +29,7 @@
           "description": "split product into sequential passes"
         },
         {
-          "confidence": 0.9,
+          "confidence": 0.8999999761581421,
           "description": "use read-only grades if possible"
         }
       ],

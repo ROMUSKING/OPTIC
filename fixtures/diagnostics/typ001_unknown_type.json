@@ -1,0 +1,42 @@
+{
+  "diagnostics": [
+    {
+      "code": "TYP-001",
+      "confidence": 0.949999988079071,
+      "evidence": {
+        "optic": "GhostView",
+        "role": "costate",
+        "type_name": "GhostWorld"
+      },
+      "minimal_fix_options": [
+        "declare a data type with this name",
+        "use a primitive type (f32, i32, u32, Vec2)"
+      ],
+      "next_commands": [
+        "opticc explain TYP-001",
+        "opticc dump-hir file.opt"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 139.0,
+        "source": 1.0,
+        "start": 129.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "declare a data type with this name"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "use a primitive type (f32, i32, u32, Vec2)"
+        }
+      ],
+      "related_spans": [],
+      "rule": "type `GhostWorld` is not declared in this program",
+      "severity": "error",
+      "title": "unknown type"
+    }
+  ],
+  "ok": false
+}

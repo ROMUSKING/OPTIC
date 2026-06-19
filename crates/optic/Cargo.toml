@@ -1,0 +1,19 @@
+[package]
+name = "optic"
+version.workspace = true
+edition.workspace = true
+description = "Stable narrow-v0 compiler facade (parse → emit)"
+
+[dependencies]
+optic-syntax = { path = "../optic-syntax" }
+optic-hir = { path = "../optic-hir" }
+optic-typeck = { path = "../optic-typeck" }
+optic-cgir = { path = "../optic-cgir" }
+optic-opt = { path = "../optic-opt" }
+optic-codegen-rust = { path = "../optic-codegen-rust" }
+optic-diagnostics = { path = "../optic-diagnostics" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+optic-syntax = { path = "../optic-syntax" }

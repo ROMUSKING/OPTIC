@@ -1,0 +1,108 @@
+# Optic Narrow v0 — Executable Spec
+
+Concise reference for the working compiler in this repository. Normative semantics live in `book-sources/` (assembled in `book-sources/assembled.md`).
+
+## Milestone gates (M0–M6)
+
+| Milestone | Book | Implementation evidence |
+|-----------|------|-------------------------|
+| M0 | ch.7, app. D | `optic-syntax` lexer/parser; `fixtures/tokens/`, `fixtures/ast/` |
+| M1 | ch.8 | `optic-hir` summaries + cursors; `fixtures/hir/` |
+| M2 | ch.9 | `optic-typeck` grades/alias/types; `fixtures/diagnostics/` |
+| M3 | ch.10 | `optic-cgir` + verifier; `fixtures/cgir/pre|post/` |
+| M4 | ch.10 | `optic-opt` three fusions; FUS-501/FUS-502 notes |
+| M5 | ch.11 | `optic-codegen-rust` + `optic-runtime`; `fixtures/rust/`, `fixtures/bench/` |
+| M6 | ch.11, app. B | Stable diagnostics, frozen fixtures, library API (`crates/optic`) |
+
+## Pipeline
+
+```
+.opt → parse → lower → check → build_cgir → optimize → verify → emit_rust
+```
+
+Library entrypoints (`crates/optic`):
+
+| API | Purpose |
+|-----|---------|
+| `parse`, `lower`, `check`, `typeck_pass` | Front-end + M2 typeck |
+| `build_cgir`, `optimize`, `emit_rust` | CGIR through Rust emission |
+| `compile_check`, `compile_check_from_path`, `compile_cgir`, `compile_emit` | Full pipeline helpers (post-fusion verify) |
+| `compile_*_with_limit` | Same with explicit source byte cap |
+| `explain_grade_from_src` | Declared vs inferred grade (fails on target TYP-*; lenient for other items) |
+| `explain_focus_from_src` | PathLift / root-path report (per-node lenience for sibling errors) |
+| `collect_unsupported_surface` | Early TYP-010 rejection for prism/traversal/unsafe/extern |
+| `parse_src`, `lower_src`, `dump_ast_src`, `dump_hir_src` | Front-end helpers returning `Diagnostic` |
+| `Diagnostic` | Structured diagnostic from `optic-diagnostics` |
+| `DEFAULT_MAX_SOURCE_BYTES` | 4 MiB cap (matches CLI) |
+| `CheckOutcome.typed_hir` | Typed HIR retained on successful `compile_check` |
+| `source_id_from_path` | Stable `SourceId` for file-based parsing |
+
+Appendix B names the binary `optic`; this repo ships **`opticc`** as the CLI crate binary.
+
+## CLI (`opticc`)
+
+| Command | Purpose |
+|---------|---------|
+| `check file.opt [--json]` | Full pipeline through codegen dry-run |
+| `transpile file.opt [-o out.rs]` | Emit Rust |
+| `dump-tokens` / `dump-ast` / `dump-hir` | M0–M1 snapshots |
+| `dump-cgir [--before-fusion] [--check] [--node N]` | CGIR inspection (**numeric NodeId only**) |
+| `dump-summary [--node NAME\|N]` | OpticSummary: **name lookup first**, then numeric CGIR node id fallback |
+| `explain-grade file.opt --node NAME [--json]` | Declared vs inferred grade + regions |
+| `explain-focus file.opt --node NAME [--json]` | PathLift prefix + root-path for optic/let |
+| `explain CODE` | Diagnostic catalog entry |
+| `run file.opt` | Transpile + sandboxed `cargo run` harness |
+| `bench [file.opt] [--update]` | Compare timing baselines (all examples or one file) |
+| `doctor [file.opt]` | Toolchain + runtime path; optional file runs `check` |
+| `snapshot-update --confirm` | Regenerate goldens |
+
+## Diagnostic catalog (v0 core)
+
+| Code | Phase | Meaning |
+|------|-------|---------|
+| PAR-001 | parse | Surface syntax error (includes `MAX_PARSE_DEPTH = 512` recursion cap) |
+| PAR-010+ | parse | Reserved for future parse subcodes (v0 uses PAR-001 for syntax + depth) |
+| RES-001 | resolve | Unknown binding/optic |
+| HIR-101 | resolve | Duplicate SoA costate |
+| EXP-001 | type | `explain-grade` / `explain-focus`: unknown `--node` |
+| TYP-001 | type | Unknown costate/focus type |
+| TYP-002 | type | Optic body type ≠ declared focus |
+| TYP-003 | type | Invalid grade annotation syntax |
+| TYP-004 | type | Cannot infer optic body type (v0) |
+| TYP-010 | type | Prism / traversal / host / foreign boundary syntax deferred to M7+ |
+| GRA-110 | grade | Declared CacheGrade tighter than inferred |
+| GRA-104 | grade | Sequential `>>>` exceeds cache bound |
+| ALI-201 | alias | Product alias conflict |
+| CGI-001–005 | cgir/codegen | Graph/build/codegen failures |
+| FUS-501 | fusion | Compose blocked — intermediate escapes |
+| FUS-502 | fusion | Compose blocked — legality precondition |
+
+**Book remap:** appendix A `TYP-201` (compose focus/costate mismatch) is not a separate v0 code; optic **body** type mismatches map to **`TYP-002`** with `evidence.expected_type` / `evidence.actual_type`.
+
+Witness JSON: `fixtures/diagnostics/*.json` from `opticc check --json` (includes `typ*.json`, `unsupported_*.json`, `explain_grade_*.json`, `explain_focus_*.json`).
+
+Agent-repair smoke: `cargo test -p optic agent_repair_smoke` validates `ranked_fixes` + evidence fields on frozen GRA/ALI/TYP witnesses. Policy simulation: `cargo test -p optic-cli agent_repair_policy`.
+
+## Fixture update process
+
+```bash
+cargo run -p optic-cli -- snapshot-update --confirm
+# or per-layer:
+OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-syntax golden_
+OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-hir golden_hir
+OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli golden_cgir
+OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json
+OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-codegen-rust golden_rust
+cargo run -p optic-cli -- bench --update
+```
+
+Review diffs before commit. See `fixtures/README.md`.
+
+## Verification
+
+```bash
+cargo test --workspace --no-fail-fast
+cargo run -p optic-cli -- check examples/*.opt
+```
+
+Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`.

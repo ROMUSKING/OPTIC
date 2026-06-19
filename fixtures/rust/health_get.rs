@@ -4,6 +4,7 @@ use optic_runtime::Cursor;
 #[derive(Debug)]
 pub struct Entities {
     pub healths: Vec<f32>,
+    pub positions: Vec<(f32, f32)>,
 }
 
 pub fn run_example(entities: &mut Entities) {
@@ -16,7 +17,7 @@ pub fn run_example(entities: &mut Entities) {
 }
 
 fn main() {
-    let mut world = Entities { healths: vec![100.0, 80.0, 50.0] };
+    let mut world = Entities { healths: vec![100.0, 80.0, 50.0], positions: vec![(0.0,0.0), (1.0,1.0), (2.0,2.0)] };
     println!("before: {:?}", world);
     run_example(&mut world);
     println!("after:  {:?}", world);

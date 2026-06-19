@@ -1,0 +1,8 @@
+HIR items: 7
+  other
+  Optic HealthView costate=Entities lift=[] reads=["healths"] writes=["healths"]
+  Optic DoubleView costate=f32 lift=[] reads=[] writes=[]
+  Optic TripleView costate=f32 lift=[] reads=[] writes=[]
+  Let pipeline lift=[] reads=["healths"] writes=["healths"]
+  Query cursor=cur_0 kind=Discriminant(2)
+  other

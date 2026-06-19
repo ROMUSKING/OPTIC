@@ -1,0 +1,14 @@
+-- TYP-003: unknown named grade dimension
+
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic BadDim: GradedOptic<Entities, f32, CacheGrade<2> + FooGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BadDim).get();
+}

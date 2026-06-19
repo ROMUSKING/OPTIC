@@ -322,6 +322,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "optic"
+version = "0.1.0"
+dependencies = [
+ "optic-cgir",
+ "optic-codegen-rust",
+ "optic-diagnostics",
+ "optic-hir",
+ "optic-opt",
+ "optic-syntax",
+ "optic-typeck",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "optic-cgir"
 version = "0.1.0"
 dependencies = [
@@ -339,6 +354,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "optic",
  "optic-cgir",
  "optic-codegen-rust",
  "optic-diagnostics",
@@ -363,6 +379,7 @@ dependencies = [
  "optic-runtime",
  "optic-syntax",
  "optic-typeck",
+ "tempfile",
 ]
 
 [[package]]
@@ -388,8 +405,10 @@ name = "optic-opt"
 version = "0.1.0"
 dependencies = [
  "optic-cgir",
+ "optic-diagnostics",
  "optic-hir",
  "optic-syntax",
+ "serde_json",
 ]
 
 [[package]]
@@ -411,6 +430,7 @@ dependencies = [
  "optic-diagnostics",
  "optic-hir",
  "optic-syntax",
+ "serde",
  "serde_json",
 ]
 

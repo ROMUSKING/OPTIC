@@ -1,0 +1,35 @@
+-- Triple nested-field compose: TransformView >>> MetaField >>> TagField (ch8 PathLift)
+data Entities {
+    transforms: SoA<Transform>,
+}
+
+data Transform {
+    meta: Meta,
+    position: Vec2,
+}
+
+data Meta {
+    tag: f32,
+}
+
+optic TransformView: GradedOptic<Entities, Transform, CacheGrade<2> + AffineGrade> {
+    get  s => s.transforms[s.id]
+    put  (s, v) => { s.transforms[s.id] = v }
+}
+
+optic MetaField: GradedOptic<Transform, Meta, CacheGrade<2> + AffineGrade> {
+    get  t => t.meta
+    put  (t, v) => { t.meta = v }
+}
+
+optic TagField: GradedOptic<Meta, f32, CacheGrade<2> + AffineGrade> {
+    get  m => m.tag
+    put  (m, v) => { m.tag = v }
+}
+
+let triple: GradedOptic<Entities, f32, CacheGrade<6> + AffineGrade> =
+    TransformView >>> MetaField >>> TagField;
+
+fn main() {
+    entities.query(triple).map(|t| t + 0.1);
+}

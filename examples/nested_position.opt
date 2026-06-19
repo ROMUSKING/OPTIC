@@ -1,0 +1,24 @@
+-- Nested composition: TransformView >>> PositionField (book ch11 / appendix B)
+data Entities {
+    transforms: SoA<Transform>,
+}
+
+data Transform {
+    position: Vec2,
+}
+
+optic TransformView: GradedOptic<Entities, Transform, CacheGrade<2> + AffineGrade> {
+    get  s => s.transforms[s.id]
+    put  (s, v) => { s.transforms[s.id] = v }
+}
+
+optic PositionField: GradedOptic<Transform, Vec2, CacheGrade<2> + AffineGrade> {
+    get  t => t.position
+    put  (t, v) => { t.position = v }
+}
+
+let nested: GradedOptic<Entities, Vec2, CacheGrade<4> + AffineGrade> = TransformView >>> PositionField;
+
+fn main() {
+    entities.query(nested).map(|p| (p.0 + 0.1, p.1 + 0.1));
+}

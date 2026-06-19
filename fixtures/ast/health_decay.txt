@@ -113,6 +113,8 @@ Program {
                         end: 181,
                     },
                 },
+                type_ctor: GradedOptic,
+                unsafe_boundary: false,
                 costate: Named {
                     name: "Entities",
                     args: [],
@@ -168,61 +170,21 @@ Program {
                         end: 237,
                     },
                 },
-                get: GetClause {
-                    param: Spanned {
-                        node: "s",
-                        span: Span {
-                            source: SourceId(
-                                1,
-                            ),
-                            start: 250,
-                            end: 251,
-                        },
-                    },
-                    body: Field(
-                        Index {
-                            base: FieldAccess {
-                                base: Base(
-                                    Ident(
-                                        Spanned {
-                                            node: "s",
-                                            span: Span {
-                                                source: SourceId(
-                                                    1,
-                                                ),
-                                                start: 260,
-                                                end: 261,
-                                            },
-                                        },
-                                    ),
-                                    Span {
-                                        source: SourceId(
-                                            1,
-                                        ),
-                                        start: 260,
-                                        end: 261,
-                                    },
+                get: Some(
+                    GetClause {
+                        param: Spanned {
+                            node: "s",
+                            span: Span {
+                                source: SourceId(
+                                    1,
                                 ),
-                                field: Spanned {
-                                    node: "healths",
-                                    span: Span {
-                                        source: SourceId(
-                                            1,
-                                        ),
-                                        start: 262,
-                                        end: 269,
-                                    },
-                                },
-                                span: Span {
-                                    source: SourceId(
-                                        1,
-                                    ),
-                                    start: 260,
-                                    end: 269,
-                                },
+                                start: 250,
+                                end: 251,
                             },
-                            index: Field(
-                                FieldAccess {
+                        },
+                        body: Field(
+                            Index {
+                                base: FieldAccess {
                                     base: Base(
                                         Ident(
                                             Spanned {
@@ -231,8 +193,8 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 270,
-                                                    end: 271,
+                                                    start: 260,
+                                                    end: 261,
                                                 },
                                             },
                                         ),
@@ -240,46 +202,88 @@ Program {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 270,
-                                            end: 271,
+                                            start: 260,
+                                            end: 261,
                                         },
                                     ),
                                     field: Spanned {
-                                        node: "id",
+                                        node: "healths",
                                         span: Span {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 272,
-                                            end: 274,
+                                            start: 262,
+                                            end: 269,
                                         },
                                     },
                                     span: Span {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 270,
-                                        end: 274,
+                                        start: 260,
+                                        end: 269,
                                     },
                                 },
-                            ),
-                            span: Span {
-                                source: SourceId(
-                                    1,
+                                index: Field(
+                                    FieldAccess {
+                                        base: Base(
+                                            Ident(
+                                                Spanned {
+                                                    node: "s",
+                                                    span: Span {
+                                                        source: SourceId(
+                                                            1,
+                                                        ),
+                                                        start: 270,
+                                                        end: 271,
+                                                    },
+                                                },
+                                            ),
+                                            Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 270,
+                                                end: 271,
+                                            },
+                                        ),
+                                        field: Spanned {
+                                            node: "id",
+                                            span: Span {
+                                                source: SourceId(
+                                                    1,
+                                                ),
+                                                start: 272,
+                                                end: 274,
+                                            },
+                                        },
+                                        span: Span {
+                                            source: SourceId(
+                                                1,
+                                            ),
+                                            start: 270,
+                                            end: 274,
+                                        },
+                                    },
                                 ),
-                                start: 260,
-                                end: 275,
+                                span: Span {
+                                    source: SourceId(
+                                        1,
+                                    ),
+                                    start: 260,
+                                    end: 275,
+                                },
                             },
-                        },
-                    ),
-                    span: Span {
-                        source: SourceId(
-                            1,
                         ),
-                        start: 245,
-                        end: 248,
+                        span: Span {
+                            source: SourceId(
+                                1,
+                            ),
+                            start: 245,
+                            end: 248,
+                        },
                     },
-                },
+                ),
                 put: Some(
                     PutClause {
                         state_param: Spanned {
@@ -439,6 +443,8 @@ Program {
                         },
                     },
                 ),
+                preview: None,
+                review: None,
                 span: Span {
                     source: SourceId(
                         1,

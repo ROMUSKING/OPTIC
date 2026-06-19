@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "GRA-110",
-      "confidence": 0.9,
+      "confidence": 0.8999999761581421,
       "evidence": {
         "annotated": 1.0,
         "inferred": 3.0,
@@ -13,8 +13,8 @@
         "reduce read/write regions in optic body"
       ],
       "next_commands": [
-        "optic explain GRA-110",
-        "optic dump-summary --node ..."
+        "opticc explain GRA-110",
+        "opticc dump-summary --node ..."
       ],
       "phase": "grade",
       "primary_span": {
@@ -28,7 +28,7 @@
           "description": "raise CacheGrade annotation"
         },
         {
-          "confidence": 0.9,
+          "confidence": 0.8999999761581421,
           "description": "reduce read/write regions in optic body"
         }
       ],
