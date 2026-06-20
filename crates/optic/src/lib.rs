@@ -79,6 +79,11 @@ pub fn reject_unsupported_surface(prog: &Program) -> Result<(), Vec<Diagnostic>>
     }
 }
 
+/// True when diagnostics include OBS-701/OBS-702 observability surface rejections.
+pub fn has_unsupported_observability(diags: &[Diagnostic]) -> bool {
+    optic_typeck::has_unsupported_observability(diags)
+}
+
 /// Parse → lower; returns structured diagnostics on failure.
 pub fn lower_src(src: &str) -> Result<HirProgram, Vec<Diagnostic>> {
     let prog = parse_src(src)?;
@@ -522,15 +527,81 @@ mod tests {
     }
 
     #[test]
-    fn facade_rejects_typ010_on_compile_check() {
-        for name in ["unsupported_traversal.opt", "host_boundary.opt"] {
+    fn facade_rejects_obs701_on_compile_check() {
+        for (name, method) in [
+            ("unsupported_profile.opt", "profile"),
+            ("unsupported_replay.opt", "replay"),
+        ] {
             let src = example_src(name);
             let err = compile_check(&src).unwrap_err();
             assert!(
-                err.iter().any(|d| d.code == "TYP-010"),
-                "{name}: compile_check must reject TYP-010"
+                err.iter().any(|d| d.code == "OBS-701"),
+                "{name}: compile_check must reject OBS-701"
+            );
+            assert!(
+                err.iter()
+                    .any(|d| d.evidence["method"].as_str() == Some(method)),
+                "{name}: evidence.method must be {method}"
+            );
+            assert!(has_unsupported_observability(&err));
+        }
+    }
+
+    #[test]
+    fn facade_rejects_obs702_on_compile_check() {
+        for name in ["trailing_tap.opt", "trailing_record.opt"] {
+            let src = example_src(name);
+            let err = compile_check(&src).unwrap_err();
+            assert!(
+                err.iter().any(|d| d.code == "OBS-702"),
+                "{name}: compile_check must reject OBS-702"
+            );
+            assert!(has_unsupported_observability(&err));
+        }
+    }
+
+    #[test]
+    fn facade_rejects_obs701_on_dump_hir_and_ast() {
+        for name in ["unsupported_profile.opt", "unsupported_replay.opt"] {
+            let src = example_src(name);
+            let hir_err = dump_hir_src(&src).unwrap_err();
+            assert!(
+                hir_err.iter().any(|d| d.code == "OBS-701"),
+                "{name}: dump_hir must reject OBS-701"
+            );
+            let ast_err = dump_ast_src(&src).unwrap_err();
+            assert!(
+                ast_err.iter().any(|d| d.code == "OBS-701"),
+                "{name}: dump_ast must reject OBS-701"
             );
         }
+    }
+
+    #[test]
+    fn facade_rejects_obs702_on_dump_hir_and_ast() {
+        for name in ["trailing_tap.opt", "trailing_record.opt"] {
+            let src = example_src(name);
+            let hir_err = dump_hir_src(&src).unwrap_err();
+            assert!(
+                hir_err.iter().any(|d| d.code == "OBS-702"),
+                "{name}: dump_hir must reject OBS-702"
+            );
+            let ast_err = dump_ast_src(&src).unwrap_err();
+            assert!(
+                ast_err.iter().any(|d| d.code == "OBS-702"),
+                "{name}: dump_ast must reject OBS-702"
+            );
+        }
+    }
+
+    #[test]
+    fn facade_rejects_typ010_on_compile_check() {
+        let src = example_src("host_boundary.opt");
+        let err = compile_check(&src).unwrap_err();
+        assert!(
+            err.iter().any(|d| d.code == "TYP-010"),
+            "host_boundary: compile_check must reject TYP-010"
+        );
     }
 
     #[test]
@@ -562,6 +633,23 @@ mod tests {
                 .any(|i| matches!(i, optic_hir::HirItem::Optic { decl, .. } if decl.name.node == "AliveFilter")),
             "AliveFilter prism must be in typed HIR"
         );
+    }
+
+    #[test]
+    fn facade_compile_check_all_healths_traversal() {
+        let src = example_src("all_healths.opt");
+        let outcome = compile_check(&src).expect("all_healths must compile");
+        assert!(
+            outcome
+                .typed_hir
+                .items
+                .iter()
+                .any(|i| matches!(i, optic_hir::HirItem::Optic { decl, .. } if decl.name.node == "AllHealths" && decl.is_traversal())),
+            "AllHealths traversal must be in typed HIR"
+        );
+        let emitted = compile_emit(&src).expect("emit traversal example");
+        assert!(emitted.contains("// optic(traversal): AllHealths"));
+        assert!(emitted.contains("// simd-eligible"));
     }
 
     #[test]
@@ -638,14 +726,55 @@ mod tests {
             ),
             (
                 "unsupported_traversal.json",
-                "TYP-010",
-                &["feature", "detail", "name"][..],
+                "GRA-110",
+                &["annotated", "inferred", "optic"][..],
             ),
             ("host_boundary.json", "TYP-010", &["feature", "detail"][..]),
+            (
+                "unsupported_profile.json",
+                "OBS-701",
+                &["method", "milestone"][..],
+            ),
+            (
+                "unsupported_replay.json",
+                "OBS-701",
+                &["method", "milestone"][..],
+            ),
+            ("trailing_tap.json", "OBS-702", &["method", "milestone"][..]),
+            (
+                "trailing_record.json",
+                "OBS-702",
+                &["method", "milestone"][..],
+            ),
+            (
+                "cgi006_tap_stub.json",
+                "CGI-006",
+                &["kind", "node_id", "reason", "milestone"][..],
+            ),
+            (
+                "cgi006_record_stub.json",
+                "CGI-006",
+                &["kind", "node_id", "reason", "milestone"][..],
+            ),
             (
                 "cgi006_prism_leaf.json",
                 "CGI-006",
                 &["kind", "node_id", "reason", "milestone"][..],
+            ),
+            (
+                "cgi006_traversal_leaf.json",
+                "CGI-006",
+                &["kind", "node_id", "reason", "milestone"][..],
+            ),
+            (
+                "cgi003_prism_compose.json",
+                "CGI-003",
+                &["compose_id", "leaf_id", "reason"][..],
+            ),
+            (
+                "cgi003_traversal_compose.json",
+                "CGI-003",
+                &["compose_id", "leaf_id", "reason"][..],
             ),
         ];
         for (file, code, evidence_keys) in check_cases {
@@ -691,6 +820,7 @@ mod tests {
             ("explain_focus_healthview.json", true),
             ("explain_focus_nested.json", true),
             ("explain_focus_alive_filter.json", true),
+            ("explain_focus_all_healths.json", true),
             ("explain_focus_unknown_node.json", false),
             ("explain_focus_typ002_fail.json", false),
             ("explain_focus_typ010_fail.json", false),

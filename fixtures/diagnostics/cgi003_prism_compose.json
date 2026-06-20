@@ -8,8 +8,12 @@
         "leaf_id": 1.0,
         "reason": "prism_in_compose"
       },
-      "minimal_fix_options": [],
+      "minimal_fix_options": [
+        "use entities.query(PrismOptic).get()/.set() without >>> compose",
+        "split prism optics into separate queries"
+      ],
       "next_commands": [
+        "opticc explain CGI-003",
         "opticc dump-cgir file.opt --check"
       ],
       "phase": "cgir",
@@ -18,7 +22,16 @@
         "source": 1.0,
         "start": 285.0
       },
-      "ranked_fixes": [],
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use entities.query(PrismOptic).get()/.set() without >>> compose"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "split prism optics into separate queries"
+        }
+      ],
       "related_spans": [],
       "rule": "compose chain with PrismLeaf is not supported in narrow v0",
       "severity": "error",

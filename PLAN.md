@@ -259,9 +259,9 @@ This plan is derived directly from the book (specific chapter/appendix reference
 
 | Milestone | Status | Evidence |
 |---|---|---|
-| M0 lexer/parser | **done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative incl. `unsupported_prism`, `unsupported_traversal`, `host_boundary`, `compose_triple`); `MAX_PARSE_DEPTH=512`; parser hang regression test; prism/traversal/unsafe/extern surface parsed (`GradedPrism` lowered in M7; TYP-010 for traversal/unsafe/extern only) |
+| M0 lexer/parser | **done** | Recovery fixed; goldens `fixtures/tokens/`, `fixtures/ast/` (positive + negative incl. `unsupported_prism`, `unsupported_traversal`, `host_boundary`, `compose_triple`); `MAX_PARSE_DEPTH=512`; parser hang regression test; prism/traversal/unsafe/extern surface parsed (`GradedPrism` + `GradedTraversal` lowered in M7; TYP-010 for unsafe/extern only) |
 | M1 HIR + summaries | **done** | Tuple/`TupleProj`; HIR map-chain fusion + multi-param guard; `Arc<HirExpr>` map bodies shared to CGIR; **OpticSummary costate/focus from decl**; HIR goldens for all positive examples incl. `compose_triple` (`fixtures/hir/`); `cargo test -p optic-hir golden_hir` |
-| M2 types/grades/alias | **done** | ch9.9.3 inference; GRA-110/GRA-104/ALI-201 with `related_spans`; **TYP-010** for traversal/unsafe/extern; prism typeck via preview/review; `check` runs CGIR+verify+codegen dry-run |
+| M2 types/grades/alias | **done** | ch9.9.3 inference; GRA-110/GRA-104/ALI-201 with `related_spans`; **TYP-010** for unsafe/extern; prism/traversal typeck via preview/review or get/put; `check` runs CGIR+verify+codegen dry-run |
 | M3 CGIR + verifier | **done** | `resolved_optics` alias map; reachability GC through query→optic spine; **`dump-cgir --node NAME\|N`** (name via `resolved_optics`, then numeric id); early **CGI-003** for unsupported optic bodies in compose chains; compose wiring uses **summary** focus/costate; unreachable materialized `FusedLoop` flagged; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
 | M4 fusions | **done** | ch10 order map→compose→product; map fusion; compose body rewrite; nested compose chain fusion; **`ProductFlat` materialization** (nested+leaf products rewritten in-place; provenance `ProductFlattening`; verify invariants); `intermediate_escapes_query`; FUS-501/FUS-502 |
 | M5 Rust backend + run | **done** | `RegionMap` from data decls threaded via `CgirGraph`; nested compose with `FocusField` put spine; `nested_position.opt` end-to-end; `fixtures/rust/` + `fixtures/bench/` incl. nested_position; codegen returns `Err` for unknown regions; `region_bind`/`column_init` derive from `ColumnInfo` (custom record defaults remain fixture-driven for harness init only) |
@@ -275,14 +275,16 @@ This plan is derived directly from the book (specific chapter/appendix reference
 - TYP-002: optic body type mismatch vs declared focus
 - TYP-003: invalid grade annotation syntax (OwnershipGrade rational, unknown dim)
 - TYP-004: cannot infer optic body type (v0)
-- TYP-010: traversal / `unsafe optic` / `extern` host boundary syntax rejected in narrow v0 (prism supported M7)
+- TYP-010: `unsafe optic` / `extern` host boundary syntax rejected in narrow v0 (prism + traversal supported M7)
 - EXP-001: unknown `--node` (explain-grade/focus, dump-summary, dump-cgir name misses)
 - PAR-001: parse error (incl. `MAX_PARSE_DEPTH = 512` stack-overflow guard in `optic-syntax`)
 - PAR-010+: reserved for future parse error subcodes (v0 uses PAR-001 for syntax + depth limit)
 - FUS-501: compose fusion blocked — intermediate escapes (non-fatal note in `check`)
 - FUS-502: compose fusion blocked — legality precondition (focus/costate, impurity, non-leaf)
-- CGI-003: unsupported optic body in compose chain (early reject for plain `.field` bodies)
+- CGI-003: unsupported optic body / compose+prism (`prism_in_compose`) / compose+traversal (`traversal_in_compose`)
 - CGI-006: M7/M8 reserved CGIR node materialized in narrow v0 graph (structured diag via `cgir_m7_reserved_diag` / `verify_to_diagnostic`)
+- OBS-701: unsupported observability query method (`.profile`/`.replay` deferred; `unsupported_profile.opt`, `unsupported_replay.opt`)
+- OBS-702: observability hook must precede query methods (trailing `.tap`/`.record` rejected; `trailing_tap.opt`, `trailing_record.opt`)
 - RES-001 / other CGI-*: resolve and CGIR build/verify errors
 
 **Positive examples** use `CacheGrade<2>` for single-field get+put lenses (inferred cache = sat_add(1,1) = 2).
@@ -301,7 +303,7 @@ This plan is derived directly from the book (specific chapter/appendix reference
 
 ### Prelude-complete summary (2026-06-19)
 
-Appendix B: **`alive_filter.opt`** (positive M7 prism e2e), **`unsupported_prism.opt`** (parse fixture), **`unsupported_traversal.opt`** (TYP-010 `feature=traversal`), and **`host_boundary.opt`** (TYP-010 `foreign_decl` + `unsafe_optic`) with `fixtures/diagnostics/*.json` witnesses and `optic-cli` integration tests.
+Appendix B: **`alive_filter.opt`** (positive M7 prism e2e), **`all_healths.opt`** (positive M7 traversal e2e), **`tap_health.opt`** / **`record_health.opt`** / **`tap_record_chain.opt`** / **`compose_tap.opt`** (positive M8 observability e2e), **`unsupported_prism.opt`** / **`unsupported_traversal.opt`** (GRA-110 parse fixtures), **`unsupported_profile.opt`** / **`unsupported_replay.opt`** (OBS-701), **`trailing_tap.opt`** / **`trailing_record.opt`** (OBS-702), **`compose_traversal.opt`** (CGI-003 `traversal_in_compose`), and **`host_boundary.opt`** (TYP-010 `foreign_decl` + `unsafe_optic`) with `fixtures/diagnostics/*.json` witnesses and `optic-cli` integration tests.
 
 New CLI / facade commands:
 - `opticc explain-focus file.opt --node NAME [--json]` — PathLift prefix, root-path, focus_fields
@@ -314,37 +316,67 @@ New CLI / facade commands:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| CGIR M7/M8 reserved variants | **done** | `PrismLeaf`, `TraversalLeaf` (M7); `Tap`, `Record` (M8 stubs); **CGI-006** structured diag + `verify_to_diagnostic` |
+| CGIR M7/M8 reserved variants | **done** | `PrismLeaf`, `TraversalLeaf` (M7); `Tap`, `Record` (M8 lowered when `m7_reserved=false`); **CGI-006** for stubs; **OBS-701** for profile/replay |
 | `dump-cgir --node NAME\|N` | **done** | `resolve_cgir_node`; name-before-numeric; unknown name → EXP-001; unknown id → `node id N not found` |
 | Appendix B doc stubs | **done** | `docs/observability-v0.md`, `docs/effect-coeffect-v0.md` |
 | `opticc explain TYP-010` / `CGI-006` | **done** | Enriched catalogs; prism no longer TYP-010 |
 | Structured CGI-006 wiring | **done** | `verify_to_diagnostic` on optimize + verify + `dump-cgir --check`; stub `PrismLeaf` still CGI-006 |
 | GradedPrism HIR → CGIR → codegen | **done** | `alive_filter.opt` e2e; `PrismLeaf` with `m7_reserved=false` passes verify |
-| GradedTraversal lowering | **deferred** | TYP-010 still gates traversal surface |
+| GradedTraversal lowering | **done** | `all_healths.opt` e2e; v0 surface uses get/put (book traverse/update deferred); `TraversalLeaf` with `m7_reserved=false` passes verify; `// simd-eligible` metadata bridge |
 | `compose_field_access.opt` | **wontfix** | whole-column `s.healths` get body rejected at typeck (**TYP-004**); CGI-003 preserved for CGIR compose-chain bodies |
 
 **Next iteration priorities:**
-1. M7 traversal summaries + lowering (`TraversalLeaf` + SIMD bridge)
-2. M8 observability (`Tap`/`Record` lowering, `OBS-*` diagnostics)
+1. traverse/update surface syntax + full AVX intrinsics bridge (beyond v0 metadata comment)
+2. profile/replay observability CLI + grade-controlled erasure passes
+
+### M8 observability scaffolding (status: **done**)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| `.tap("label")` / `.record("event")` surface | **done** | Query-chain methods; parser + AST `QueryMethod` variants |
+| HIR → CGIR lowering | **done** | `ObsHook` on `HirQuery` → `Tap`/`Record` with `m7_reserved=false` |
+| `verify` / `is_allowed_m7_node` | **done** | Lowered Tap/Record pass verify; stubs still **CGI-006** |
+| Codegen comment hooks | **done** | `// optic(tap):` / `// optic(record):`; inner optic still runs |
+| **OBS-701** diagnostics | **done** | `.profile`/`.replay` rejected; `unsupported_profile.opt` / `unsupported_replay.opt` + JSON witnesses |
+| **OBS-702** diagnostics | **done** | Trailing `.tap`/`.record` rejected; `trailing_tap.opt` / `trailing_record.opt` + JSON witnesses |
+| Hook-string policy | **done** | Single-line ASCII labels; parse-time validation — see `docs/observability-v0.md` §Hook string policy |
+| Structural limitations | **done** | Prefix-only hooks, orphan CGIR nodes, FusedLoop skip — see `docs/observability-v0.md` §v0 structural limitations |
+| Examples + goldens | **done** | Per-example inventory: `tap_health.opt` + `record_health.opt` (tokens/ast/hir/cgir/rust/bench); `tap_record_chain.opt` (tokens/ast/hir/cgir/rust, no bench); `compose_tap.opt` (cgir/rust only) |
 
 **Done (prior rounds + gates):** compose body rewrite + equivalence; nested compose chain fusion/codegen; FUS-501/FUS-502; whole-column reject preserved (TYP-004 at typeck for `compose_field_access.opt`, CGI-003 at CGIR for compose-chain bodies); `original_ids` superset documented in `fixtures/README.md`
 
-## 9. M7+ roadmap
+## 9. Post-M7 roadmap
 
 - ~~Lower `GradedPrism` from typed HIR into `PrismLeaf` + Rust codegen~~ (**done** — `alive_filter.opt`)
-- Lower `GradedTraversal` from typed HIR into `TraversalLeaf` + traversal SIMD bridge (book ch13)
+- ~~Lower `GradedTraversal` from typed HIR into `TraversalLeaf` + entity-loop codegen~~ (**done** — `all_healths.opt`; v0 emits `// optic(traversal):` + optional `// simd-eligible` metadata comment only — not AVX intrinsics)
 - Host/foreign boundary lowering for `unsafe optic` / `extern`
-- Observability passes (M8): tap/record/profile/replay — see `docs/observability-v0.md`
+- traverse/update surface syntax + full SIMD intrinsics bridge (beyond v0 comment metadata)
+- ~~Observability tap/record scaffolding (M8)~~ (**done** — `tap_health.opt`, `record_health.opt`; profile/replay **OBS-701**)
+- profile/replay CLI + runtime hooks — see `docs/observability-v0.md`
 
-### M7 codegen touch list (`optic-codegen-rust`)
+### M7 codegen touch list (`optic-codegen-rust`) — **done**
 
-When prism/traversal lowering starts, update at minimum:
-- `collect_regions_from_node` — recurse `PrismLeaf` / `TraversalLeaf` summaries
-- `detect_query_mode` — handle M7 leaf roots if query-wrapped
-- `emit_leaf_get` / `emit_leaf_put_value` / `emit_leaf_put_stores` — prism preview/review or traversal bulk get/set
-- `emit_compose_chain_loop` / `emit_fused_compose_loop` — M7 leaves in compose spines
-- `emit_map_body` / `emit_hir_expr_rust` — any new HIR forms lowered from preview/review
-- `emit()` root driver — reject or route `Tap` / `Record` until M8
+- `collect_regions_from_node` — `PrismLeaf` / `TraversalLeaf` summaries
+- `detect_query_mode` — query-wrapped M7 leaves (map/get/set)
+- `emit_leaf_get` / `emit_leaf_put_value` / `emit_leaf_put_stores` — prism preview/review + traversal get/set
+- `emit_prism_query_*` / `emit_traversal_query_*` / `emit_traversal_map_decay`
+- `emit_compose_chain_loop` — rejects prism/traversal in compose spines
+- `emit()` root driver — emits `// optic(tap|record):` hooks for lowered Tap/Record
+
+### M7 structural debt (intentional until M8)
+
+Round-3 dedup review — items fixed where trivial; remainder documented here:
+
+| Item | Status | Rationale |
+|------|--------|-----------|
+| OpticLeaf / TraversalLeaf CGIR lowering | **fixed** | Shared `lower_get_put_leaf` + `build_region_fn` in `optic-cgir` |
+| Region `*_fn` builders (3×) | **fixed** | `build_region_fn` with `Read` / `Write` / `PreviewOption` styles |
+| `emit_prism_map_decay` / `emit_traversal_map_decay` scaffold | **fixed** | `leaf_map_decay_region` + `emit_entity_loop_prelude/postlude` |
+| Triplicate leaf `match` arms in codegen emit paths | **wontfix** | Prism preview/review vs optic/traversal get/put field names differ; a `LeafKind` enum dispatch pays off when M8 adds `Tap`/`Record` — premature before observability variants land |
+| Compose probe `CgirGraph` clone during incremental build | **wontfix** | `compose_build_probe` documents intent; full clone is acceptable under v0 N caps (≤512 parse depth, appendix-B-sized examples). Sharing a borrowed probe would thread lifetimes through `build()` with no measurable win at current scale |
+| `seq_parent_column` sort+dedup vs `dedup_regions` | **fixed** | `region_column_roots` helper + doc: column-identity (sorted) vs region-path collection (first-seen order) |
+
+**Hardware / scale note:** compose-chain checks clone the in-progress `nodes` vec plus small side maps (`provenance_index`, `resolved_optics`, `region_map`). At M0–M7 example sizes this is microseconds; revisit only if CGIR graphs exceed low thousands of nodes per compilation unit.
 
 ---
 

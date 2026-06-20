@@ -41,7 +41,7 @@ Embedding helpers: `compile_check`, `compile_check_from_path`, `compile_emit`, `
 
 `dump-summary --node` and `dump-cgir --node` both resolve optic/let **names first** (via HIR summaries / `resolved_optics`), then fall back to numeric CGIR node ids.
 
-M7 prep: CGIR reserves `PrismLeaf`/`TraversalLeaf`/`Tap`/`Record` stubs; see `docs/observability-v0.md` and `docs/effect-coeffect-v0.md`.
+M7 done: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M8 scaffolding: `.tap`/`.record` query methods → `Tap`/`Record` CGIR (`m7_reserved=false`) + `// optic(tap|record):` comment hooks; profile/replay → **OBS-701**; trailing hooks → **OBS-702**. See `docs/observability-v0.md`, `examples/tap_health.opt`, `examples/record_health.opt`, `examples/tap_record_chain.opt`, `examples/compose_tap.opt`, `examples/unsupported_replay.opt`, `examples/trailing_tap.opt`, `examples/trailing_record.opt`.
 
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 

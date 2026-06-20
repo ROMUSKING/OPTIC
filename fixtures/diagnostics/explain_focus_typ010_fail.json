@@ -4,13 +4,13 @@
       "code": "TYP-010",
       "confidence": 1.0,
       "evidence": {
-        "detail": "traversal syntax (`GradedTraversal`) is not supported in narrow v0 (M7+)",
-        "feature": "traversal",
-        "name": "AllHealths"
+        "detail": "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
+        "feature": "unsafe_optic",
+        "name": "HostCopy"
       },
       "minimal_fix_options": [
-        "use lens-like GradedOptic or GradedPrism forms supported in v0",
-        "defer traversal and host boundaries until M7+"
+        "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0",
+        "defer host/foreign boundaries until M7+"
       ],
       "next_commands": [
         "opticc explain TYP-010",
@@ -18,22 +18,22 @@
       ],
       "phase": "type",
       "primary_span": {
-        "end": 207.0,
+        "end": 283.0,
         "source": 1.0,
-        "start": 111.0
+        "start": 146.0
       },
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "use lens-like GradedOptic or GradedPrism forms supported in v0"
+          "description": "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0"
         },
         {
           "confidence": 0.8999999761581421,
-          "description": "defer traversal and host boundaries until M7+"
+          "description": "defer host/foreign boundaries until M7+"
         }
       ],
       "related_spans": [],
-      "rule": "traversal syntax (`GradedTraversal`) is not supported in narrow v0 (M7+)",
+      "rule": "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
       "severity": "error",
       "title": "unsupported in narrow v0"
     }

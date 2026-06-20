@@ -1,0 +1,4 @@
+CGIR (2 nodes, roots [1])
+  [0] TraversalLeaf(AllHealths,m7_reserved=false)  provenance=Build
+  [1] QueryGet(AllHealths)  provenance=Build
+

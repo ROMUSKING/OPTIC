@@ -87,6 +87,27 @@ fn assert_json_notes_golden(example_file: &str, json_name: &str, code: &str) {
     }
 }
 
+fn assert_json_diag_matches_fixture(diag: &optic_diagnostics::Diagnostic, json_name: &str) {
+    let out = optic_diagnostics::diagnostics_to_json(&[diag.clone()]);
+    let path = fixture(json_name);
+    let normalized = normalize_json_floats(out.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing diagnostic golden {} — run OPTIC_UPDATE_GOLDEN=1",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(
+            normalized,
+            expected.trim(),
+            "json golden mismatch for {json_name}"
+        );
+    }
+}
+
 fn assert_json_golden(example_file: &str, json_name: &str, code: &str) {
     let assert = opticc()
         .args(["check", "--json", &example(example_file).to_string_lossy()])
@@ -376,6 +397,34 @@ fn explain_focus_json_typ002_fail_matches_fixture() {
 }
 
 #[test]
+fn explain_focus_json_all_healths_matches_fixture() {
+    let assert = opticc()
+        .args([
+            "explain-focus",
+            &example("all_healths.opt").to_string_lossy(),
+            "--node",
+            "AllHealths",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let path = fixture("explain_focus_all_healths.json");
+    let normalized = normalize_json_floats(stdout.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing explain-focus golden {} — run OPTIC_UPDATE_GOLDEN=1",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
+}
+
+#[test]
 fn explain_focus_json_alive_filter_matches_fixture() {
     let assert = opticc()
         .args([
@@ -440,8 +489,8 @@ fn check_json_compose_prism_cgi003_matches_fixture() {
 #[test]
 fn explain_focus_json_typ010_fail_matches_fixture() {
     assert_explain_focus_json_golden(
-        "unsupported_traversal.opt",
-        "AllHealths",
+        "host_boundary.opt",
+        "HostCopy",
         "explain_focus_typ010_fail.json",
         "TYP-010",
     );
@@ -457,13 +506,94 @@ fn check_json_unsupported_traversal_matches_fixture() {
     assert_json_golden(
         "unsupported_traversal.opt",
         "unsupported_traversal.json",
-        "TYP-010",
+        "GRA-110",
+    );
+}
+
+#[test]
+fn check_json_compose_traversal_cgi003_matches_fixture() {
+    assert_json_golden(
+        "compose_traversal.opt",
+        "cgi003_traversal_compose.json",
+        "CGI-003",
     );
 }
 
 #[test]
 fn check_json_host_boundary_matches_fixture() {
     assert_json_golden("host_boundary.opt", "host_boundary.json", "TYP-010");
+}
+
+#[test]
+fn check_json_unsupported_profile_obs701_matches_fixture() {
+    assert_json_golden(
+        "unsupported_profile.opt",
+        "unsupported_profile.json",
+        "OBS-701",
+    );
+}
+
+#[test]
+fn check_json_unsupported_replay_obs701_matches_fixture() {
+    assert_json_golden(
+        "unsupported_replay.opt",
+        "unsupported_replay.json",
+        "OBS-701",
+    );
+}
+
+#[test]
+fn check_json_trailing_tap_obs702_matches_fixture() {
+    assert_json_golden("trailing_tap.opt", "trailing_tap.json", "OBS-702");
+}
+
+#[test]
+fn check_json_trailing_record_obs702_matches_fixture() {
+    assert_json_golden("trailing_record.opt", "trailing_record.json", "OBS-702");
+}
+
+#[test]
+fn cgi006_tap_stub_structured_diag_matches_fixture() {
+    use optic_cgir::{verify_to_diagnostic, CgirGraph, CgirNode};
+
+    let g = CgirGraph {
+        nodes: vec![CgirNode::Tap {
+            id: 0,
+            optic_name: "HealthView".into(),
+            label: "tap".into(),
+            provenance: optic_syntax::Span::dummy(),
+            m7_reserved: true,
+        }],
+        roots: vec![0],
+        provenance_index: Default::default(),
+        resolved_optics: Default::default(),
+        region_map: Default::default(),
+    };
+    let diag = verify_to_diagnostic(&g).expect_err("stub Tap must fail");
+    assert_eq!(diag.code, "CGI-006");
+    assert_json_diag_matches_fixture(&diag, "cgi006_tap_stub.json");
+}
+
+#[test]
+fn cgi006_record_stub_structured_diag_matches_fixture() {
+    use optic_cgir::{verify_to_diagnostic, CgirGraph, CgirNode};
+
+    let g = CgirGraph {
+        nodes: vec![CgirNode::Record {
+            id: 0,
+            optic_name: "HealthView".into(),
+            event: "evt".into(),
+            provenance: optic_syntax::Span::dummy(),
+            m7_reserved: true,
+        }],
+        roots: vec![0],
+        provenance_index: Default::default(),
+        resolved_optics: Default::default(),
+        region_map: Default::default(),
+    };
+    let diag = verify_to_diagnostic(&g).expect_err("stub Record must fail");
+    assert_eq!(diag.code, "CGI-006");
+    assert_json_diag_matches_fixture(&diag, "cgi006_record_stub.json");
 }
 
 #[test]
@@ -544,6 +674,82 @@ fn cgi006_m7_reserved_structured_diag_matches_fixture() {
 }
 
 #[test]
+fn cgi006_traversal_leaf_structured_diag_matches_fixture() {
+    use optic_cgir::{verify_to_diagnostic, CgirGraph, CgirNode};
+    use std::sync::Arc;
+
+    let summary = Arc::new(optic_hir::OpticSummary {
+        name: Some("AllHealths".into()),
+        costate: "Entities".into(),
+        focus: "f32".into(),
+        lift: optic_hir::PathLift::default(),
+        get_reads: vec!["healths".into()],
+        put_reads: vec![],
+        put_writes: vec!["healths".into()],
+        get_grade: optic_hir::ConcreteGrade {
+            cache: 1,
+            ownership: optic_hir::OwnershipDim {
+                share: optic_hir::Rational::one(),
+                read_only: false,
+                must_use: false,
+            },
+        },
+        put_grade: optic_hir::ConcreteGrade {
+            cache: 1,
+            ownership: optic_hir::OwnershipDim {
+                share: optic_hir::Rational::one(),
+                read_only: false,
+                must_use: false,
+            },
+        },
+        get_determinism: optic_hir::Determinism::Pure,
+        put_determinism: optic_hir::Determinism::Pure,
+        serializable: true,
+        provenance: optic_syntax::Span::dummy(),
+    });
+    let g = CgirGraph {
+        nodes: vec![CgirNode::TraversalLeaf {
+            id: 0,
+            name: "AllHealths".into(),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            grade: summary.get_grade.clone(),
+            get_fn: String::new(),
+            set_fn: String::new(),
+            get_param: "s".into(),
+            get_body: Arc::new(optic_hir::HirExpr::LitInt(1, optic_syntax::Span::dummy())),
+            set_state_param: None,
+            set_value_param: None,
+            set_value_body: None,
+            summary,
+            provenance: optic_syntax::Span::dummy(),
+            m7_reserved: true,
+        }],
+        roots: vec![0],
+        provenance_index: Default::default(),
+        resolved_optics: Default::default(),
+        region_map: Default::default(),
+    };
+    let diag = verify_to_diagnostic(&g).expect_err("TraversalLeaf stub must fail verify");
+    assert_eq!(diag.code, "CGI-006");
+    assert_eq!(diag.evidence["kind"].as_str(), Some("TraversalLeaf"));
+    let out = optic_diagnostics::diagnostics_to_json(&[diag]);
+    let path = fixture("cgi006_traversal_leaf.json");
+    let normalized = normalize_json_floats(out.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing diagnostic golden {} — run OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
+}
+
+#[test]
 fn check_json_cgi003_incompatible_map_matches_fixture() {
     assert_json_golden(
         "cgi003_incompatible_map.opt",
@@ -571,8 +777,12 @@ fn check_json_goldens_include_ranked_fixes_for_cataloged_codes() {
         ("typ003_grade_syntax.opt", "TYP-003"),
         ("typ003_unknown_dim.opt", "TYP-003"),
         ("typ004_uninferable_body.opt", "TYP-004"),
-        ("unsupported_traversal.opt", "TYP-010"),
+        ("unsupported_traversal.opt", "GRA-110"),
         ("host_boundary.opt", "TYP-010"),
+        ("unsupported_profile.opt", "OBS-701"),
+        ("unsupported_replay.opt", "OBS-701"),
+        ("trailing_tap.opt", "OBS-702"),
+        ("trailing_record.opt", "OBS-702"),
     ];
     for (example_file, code) in cases {
         let assert = opticc()

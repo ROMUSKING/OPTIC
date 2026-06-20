@@ -1,0 +1,13 @@
+-- Appendix B negative: OBS-701 witness (profile query method deferred in v0; see tap_health.opt)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(HealthView).profile("run").map(|h| h);
+}

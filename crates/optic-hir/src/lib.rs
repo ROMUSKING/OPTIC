@@ -412,12 +412,21 @@ pub enum HirOptic {
     },
 }
 
+/// Observability hook on a query chain (M8 scaffolding).
+#[derive(Clone, Debug)]
+pub enum ObsHook {
+    Tap(String, Span),
+    Record(String, Span),
+}
+
 #[derive(Clone, Debug)]
 pub struct HirQuery {
     pub costate: String,
     pub optic: HirOptic,
     pub cursor: String, // e.g. "cur_0"
     pub kind: QueryKind,
+    /// Tap/record hooks in chain order (book ch14.5).
+    pub observability: Vec<ObsHook>,
     pub span: Span,
 }
 
@@ -574,7 +583,7 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
                 hir_items.push(HirItem::Fn(f));
             }
             syn::Item::Expr(e) => {
-                if let Some(q) = lower_top_query(&e, &optic_env) {
+                if let Some(q) = lower_top_query(&e, &optic_env).map_err(|e| vec![e])? {
                     hir_items.push(HirItem::Query(q));
                 }
             }
@@ -592,9 +601,17 @@ pub fn dump_hir(p: &HirProgram) -> String {
     for item in &p.items {
         match item {
             HirItem::Optic { decl, summary } => {
+                let kind = if decl.is_traversal() {
+                    "Traversal"
+                } else if decl.is_prism() {
+                    "Prism"
+                } else {
+                    "Optic"
+                };
                 out.push_str(&format!(
-                    "  Optic {} costate={} lift={:?} reads={:?} writes={:?}\n",
+                    "  Optic {} kind={} costate={} lift={:?} reads={:?} writes={:?}\n",
                     decl.name.node,
+                    kind,
                     summary.costate,
                     summary.lift.prefix,
                     summary.get_reads,
@@ -608,11 +625,24 @@ pub fn dump_hir(p: &HirProgram) -> String {
                 ));
             }
             HirItem::Query(q) => {
-                out.push_str(&format!(
-                    "  Query cursor={} kind={:?}\n",
+                let mut line = format!(
+                    "  Query cursor={} kind={:?}",
                     q.cursor,
                     std::mem::discriminant(&q.kind)
-                ));
+                );
+                if !q.observability.is_empty() {
+                    let hooks: Vec<String> = q
+                        .observability
+                        .iter()
+                        .map(|h| match h {
+                            ObsHook::Tap(l, _) => format!("tap:{l}"),
+                            ObsHook::Record(e, _) => format!("record:{e}"),
+                        })
+                        .collect();
+                    line.push_str(&format!(" obs={hooks:?}"));
+                }
+                line.push('\n');
+                out.push_str(&line);
             }
             _ => out.push_str("  other\n"),
         }
@@ -737,6 +767,62 @@ fn main() { entities.query(H).get().map(|h| h); }
     #[test]
     fn golden_hir_partial_prism() {
         assert_hir_golden("partial_prism.opt");
+    }
+
+    #[test]
+    fn golden_hir_all_healths() {
+        assert_hir_golden("all_healths.opt");
+    }
+
+    #[test]
+    fn golden_hir_traversal_get() {
+        assert_hir_golden("traversal_get.opt");
+    }
+
+    #[test]
+    fn golden_hir_traversal_set() {
+        assert_hir_golden("traversal_set.opt");
+    }
+
+    #[test]
+    fn golden_hir_tap_health() {
+        assert_hir_golden("tap_health.opt");
+    }
+
+    #[test]
+    fn golden_hir_record_health() {
+        assert_hir_golden("record_health.opt");
+    }
+
+    #[test]
+    fn golden_hir_tap_record_chain() {
+        assert_hir_golden("tap_record_chain.opt");
+    }
+
+    #[test]
+    fn lower_rejects_profile_replay_and_trailing_hooks_without_surface_gate() {
+        for (src, needle) in [
+            (
+                include_str!("../../../examples/unsupported_profile.opt"),
+                "profile",
+            ),
+            (
+                include_str!("../../../examples/unsupported_replay.opt"),
+                "replay",
+            ),
+            (include_str!("../../../examples/trailing_tap.opt"), ".tap"),
+            (
+                include_str!("../../../examples/trailing_record.opt"),
+                ".record",
+            ),
+        ] {
+            let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+            let err = super::lower(prog).expect_err("lower must reject unsupported obs hooks");
+            assert!(
+                err.iter().any(|e| e.message.contains(needle)),
+                "expected `{needle}` rejection: {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -1175,13 +1261,21 @@ fn focus_field_path_from_field_expr(param: &str, fe: &syn::FieldExpr) -> Option<
     }
 }
 
-fn seq_parent_column(lhs_reads: &[Region]) -> Result<Option<String>, String> {
-    let mut roots: Vec<String> = lhs_reads
+/// SoA column roots extracted from region paths (sorted for stable arity checks).
+/// Distinct from [`dedup_regions`]: that helper preserves first-seen order on full region
+/// strings during summary collection; this collapses to column identity for seq compose rules.
+fn region_column_roots(reads: &[Region]) -> Vec<String> {
+    let mut roots: Vec<String> = reads
         .iter()
         .map(|r| r.split('.').next().unwrap_or(r).to_string())
         .collect();
     roots.sort();
     roots.dedup();
+    roots
+}
+
+fn seq_parent_column(lhs_reads: &[Region]) -> Result<Option<String>, String> {
+    let roots = region_column_roots(lhs_reads);
     if roots.len() > 1 {
         return Err(format!(
             "v0 sequential composition requires lhs with one SoA column root; got {roots:?}"
@@ -1536,22 +1630,92 @@ fn resolve_ident(name: &str, optic_env: &HashMap<String, Arc<OpticSummary>>) -> 
     None
 }
 
-fn lower_top_query(e: &syn::Expr, env: &HashMap<String, Arc<OpticSummary>>) -> Option<HirQuery> {
+fn is_query_operation(m: &syn::QueryMethod) -> bool {
+    matches!(
+        m,
+        syn::QueryMethod::Get(_) | syn::QueryMethod::Set(_, _) | syn::QueryMethod::Map(_, _)
+    )
+}
+
+/// Prefix-only observability hooks (v0 narrow); defense-in-depth when surface gate bypassed.
+fn partition_observability(
+    methods: &[syn::QueryMethod],
+) -> Result<(Vec<ObsHook>, Vec<syn::QueryMethod>), syn::ParseError> {
+    let mut hooks = vec![];
+    let mut query_methods = vec![];
+    let mut seen_query_op = false;
+    for m in methods {
+        match m {
+            syn::QueryMethod::Profile(mode, sp) => {
+                return Err(syn::ParseError {
+                    message: format!(
+                        "query method `profile` is not supported in narrow v0 (mode: {mode})"
+                    ),
+                    span: *sp,
+                    kind: None,
+                });
+            }
+            syn::QueryMethod::Replay(checkpoint, sp) => {
+                return Err(syn::ParseError {
+                    message: format!(
+                        "query method `replay` is not supported in narrow v0 (checkpoint: {checkpoint})"
+                    ),
+                    span: *sp,
+                    kind: None,
+                });
+            }
+            syn::QueryMethod::Tap(_, sp) if seen_query_op => {
+                return Err(syn::ParseError {
+                    message: "`.tap(...)` must appear before .get/.set/.map in narrow v0".into(),
+                    span: *sp,
+                    kind: None,
+                });
+            }
+            syn::QueryMethod::Record(_, sp) if seen_query_op => {
+                return Err(syn::ParseError {
+                    message: "`.record(...)` must appear before .get/.set/.map in narrow v0".into(),
+                    span: *sp,
+                    kind: None,
+                });
+            }
+            syn::QueryMethod::Tap(label, sp) => {
+                hooks.push(ObsHook::Tap(label.clone(), *sp));
+            }
+            syn::QueryMethod::Record(event, sp) => {
+                hooks.push(ObsHook::Record(event.clone(), *sp));
+            }
+            other => {
+                if is_query_operation(other) {
+                    seen_query_op = true;
+                }
+                query_methods.push(other.clone());
+            }
+        }
+    }
+    Ok((hooks, query_methods))
+}
+
+fn lower_top_query(
+    e: &syn::Expr,
+    env: &HashMap<String, Arc<OpticSummary>>,
+) -> Result<Option<HirQuery>, syn::ParseError> {
     // For the demo examples' top level query expr
     if let syn::Expr::QueryChain(qc) = e {
         let optic = lower_optic_expr(&qc.optic, env, 0).unwrap_or_else(|_| HirOptic::Named {
             name: "?".into(),
             span: qc.span,
         });
-        Some(HirQuery {
+        let (observability, query_methods) = partition_observability(&qc.methods)?;
+        Ok(Some(HirQuery {
             costate: "entities".into(),
             optic,
             cursor: "cur_0".into(),
-            kind: lower_query_methods_to_kind(&qc.methods),
+            kind: lower_query_methods_to_kind(&query_methods),
+            observability,
             span: qc.span,
-        })
+        }))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -1571,7 +1735,7 @@ fn collect_queries_from_expr(
     env: &HashMap<String, Arc<OpticSummary>>,
     qs: &mut Vec<HirQuery>,
 ) -> Result<(), syn::ParseError> {
-    if let Some(q) = lower_top_query(e, env) {
+    if let Some(q) = lower_top_query(e, env)? {
         qs.push(q);
     }
     match e {
@@ -1719,9 +1883,7 @@ pub fn hir_expr_refs_var(e: &HirExpr, name: &str) -> bool {
         HirExpr::Tuple(elems, _) => elems.iter().any(|el| hir_expr_refs_var(el, name)),
         HirExpr::TupleProj { base, .. } => hir_expr_refs_var(base, name),
         HirExpr::FocusField { param, .. } => param == name,
-        HirExpr::CursorField { cursor, .. } | HirExpr::CursorIndex { cursor, .. } => {
-            cursor == name
-        }
+        HirExpr::CursorField { cursor, .. } | HirExpr::CursorIndex { cursor, .. } => cursor == name,
         HirExpr::LitInt(_, _) | HirExpr::LitFloat(_, _) | HirExpr::Unsupported { .. } => false,
     }
 }

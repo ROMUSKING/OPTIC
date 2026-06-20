@@ -30,7 +30,8 @@ Library entrypoints (`crates/optic`):
 | `compile_*_with_limit` | Same with explicit source byte cap |
 | `explain_grade_from_src` | Declared vs inferred grade (fails on target TYP-*; lenient for other items) |
 | `explain_focus_from_src` | PathLift / root-path report (per-node lenience for sibling errors) |
-| `collect_unsupported_surface` | Early TYP-010 rejection for traversal/unsafe/extern |
+| `collect_unsupported_surface` | Early surface gate: TYP-010 (unsafe/extern), OBS-701 (profile/replay), OBS-702 (trailing tap/record), OBS-703 (invalid hook label defense-in-depth) |
+| `has_unsupported_observability` | True when diagnostics include OBS-701 or OBS-702 |
 | `parse_src`, `lower_src`, `dump_ast_src`, `dump_hir_src` | Front-end helpers returning `Diagnostic` |
 | `Diagnostic` | Structured diagnostic from `optic-diagnostics` |
 | `DEFAULT_MAX_SOURCE_BYTES` | 4 MiB cap (matches CLI) |
@@ -67,14 +68,17 @@ Appendix B names the binary `optic`; this repo ships **`opticc`** as the CLI cra
 | EXP-001 | type | Unknown `--node` name (`explain-grade`, `explain-focus`, `dump-summary`, `dump-cgir`; numeric id misses use plain `node id N not found`) |
 | TYP-001 | type | Unknown costate/focus type |
 | TYP-002 | type | Optic body type ≠ declared focus |
-| TYP-003 | type | Invalid grade annotation syntax |
+| TYP-003 | type | Invalid grade syntax or optic clause mix (lens/prism/traversal) |
 | TYP-004 | type | Cannot infer optic body type (v0) |
-| TYP-010 | type | Traversal / host / foreign boundary syntax deferred to M7+ |
+| TYP-010 | type | `unsafe optic` / `extern` host boundary syntax deferred to M7+ |
 | GRA-110 | grade | Declared CacheGrade tighter than inferred |
 | GRA-104 | grade | Sequential `>>>` exceeds cache bound |
 | ALI-201 | alias | Product alias conflict |
 | CGI-001–005 | cgir/codegen | Graph/build/codegen failures |
-| CGI-006 | cgir | Unstubs M7/M8 reserved node (`TraversalLeaf`/`Tap`/`Record` or stub `PrismLeaf`) |
+| CGI-006 | cgir | Stub M7/M8 reserved node (`m7_reserved=true` on PrismLeaf/TraversalLeaf/Tap/Record) |
+| OBS-701 | type | Unsupported observability query method (profile/replay in v0) |
+| OBS-702 | type | Trailing `.tap`/`.record` after `.get`/`.set`/`.map` (prefix-only in v0) |
+| OBS-703 | type | Invalid observability hook label (typeck defense-in-depth; parse normally rejects) |
 | FUS-501 | fusion | Compose blocked — intermediate escapes |
 | FUS-502 | fusion | Compose blocked — legality precondition |
 
@@ -99,17 +103,20 @@ cargo run -p optic-cli -- bench --update
 
 Review diffs before commit. See `fixtures/README.md`.
 
-## M7 prism (done)
+## M7 prism + traversal (done)
 
 - `GradedPrism` preview/review: HIR summaries → `PrismLeaf` (`m7_reserved=false`) → Rust codegen
-- `verify` allows properly lowered `PrismLeaf`; still rejects stub `PrismLeaf`, `TraversalLeaf`, `Tap`, `Record` (**CGI-006**)
-- Acceptance: `examples/alive_filter.opt` (tokens/ast/hir/cgir/rust/bench + `run` execution)
+- `GradedTraversal` get/put (v0 surface; book traverse/update deferred): HIR summaries → `TraversalLeaf` (`m7_reserved=false`) → entity loop codegen + `// optic(traversal):` + optional `// simd-eligible` for homogeneous `SoA<f32>`
+- `verify` allows properly lowered `PrismLeaf` / `TraversalLeaf` / `Tap` / `Record` (`m7_reserved=false`); rejects stubs (**CGI-006**)
+- Compose+prism/traversal rejected at CGIR (**CGI-003** `prism_in_compose` / `traversal_in_compose`)
+- Acceptance: `examples/alive_filter.opt`, `examples/all_healths.opt` (tokens/ast/hir/cgir/rust/bench + `run` execution)
 
 ## M7+ deferred
 
-- `GradedTraversal` lowering + traversal SIMD bridge
+- traverse/update surface syntax (v0 uses get/put clauses for `GradedTraversal`)
+- Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only)
 - `unsafe optic` / `extern` host boundaries (**TYP-010**)
-- M8 observability (`Tap`/`Record`) — see `docs/observability-v0.md`
+- profile/replay observability CLI — see `docs/observability-v0.md` (tap/record scaffolding done)
 
 ## Verification
 

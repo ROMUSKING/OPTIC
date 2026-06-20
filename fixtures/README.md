@@ -56,15 +56,43 @@ Explain-grade JSON: `fixtures/diagnostics/explain_grade_*.json` (success: Health
 
 Explain-focus JSON: `fixtures/diagnostics/explain_focus_*.json` (success: HealthView, nested let; errors: EXP-001, TYP-002/010 target blocking).
 
-Appendix B negative (TYP-010): `unsupported_traversal.json`, `host_boundary.json` — traversal, `unsafe optic`, and `extern` rejected before lower/HIR/dump (except `dump-tokens`).
+Appendix B negative (TYP-010): `host_boundary.json` — `unsafe optic` and `extern` rejected before lower/HIR/dump (except `dump-tokens`).
 
-`unsupported_prism.json` — **GRA-110** witness (`CacheGrade<1>` tighter than inferred cache for preview+review regions); prism surface is supported (see `alive_filter.opt`).
+`unsupported_prism.json` / `unsupported_traversal.json` — **GRA-110** witnesses (`CacheGrade<1>` tighter than inferred); prism/traversal surfaces are supported (see `alive_filter.opt`, `all_healths.opt`).
+
+### M8 observability witnesses (OBS-701 / OBS-702)
+
+| Fixture | Code | Example |
+|---------|------|---------|
+| `unsupported_profile.json` | OBS-701 | `examples/unsupported_profile.opt` |
+| `unsupported_replay.json` | OBS-701 | `examples/unsupported_replay.opt` |
+| `trailing_tap.json` | OBS-702 | `examples/trailing_tap.opt` |
+| `trailing_record.json` | OBS-702 | `examples/trailing_record.opt` |
+
+These are **`opticc check --json` witnesses only** (no CGIR/HIR goldens). `dump-ast` / `dump-hir` reject them with the same OBS gate as `check`.
+
+### M8 positive examples — partial golden policy
+
+Not every M8 positive example has full `tokens/ast/hir/cgir/rust/bench` coverage:
+
+| Example | Goldens present |
+|---------|-----------------|
+| `tap_health.opt` | tokens, ast, hir, cgir/pre, cgir/post, rust, bench |
+| `record_health.opt` | tokens, ast, hir, cgir/pre, cgir/post, rust, bench |
+| `tap_record_chain.opt` | tokens, ast, hir, cgir/pre, cgir/post, rust (no bench) |
+| `compose_tap.opt` | cgir/pre, cgir/post, rust only (no tokens/ast/hir/bench) |
+
+Hook-string policy and structural limitations: `docs/observability-v0.md`.
+
+`cgi003_traversal_compose.json` — **CGI-003** witness (`traversal_in_compose`) from `compose_traversal.opt`.
 
 `cgi003_prism_compose.json` — **CGI-003** witness (`prism_in_compose`) from `compose_prism.opt`.
 
 Prism e2e positives: `prism_get.opt` (get query), `prism_set.opt` (set query), `partial_prism.opt` (`partial preview` → Option codegen path).
 
-CGI-006 witness: `cgi006_prism_leaf.json` — structured M7 reserved node diagnostic (library/unit test; no `.opt` pipeline example).
+Traversal e2e positives: `traversal_get.opt` (get query), `traversal_set.opt` (set query), `all_healths.opt` (GradedTraversal + map decay; `// optic(traversal):` + `// simd-eligible` in emitted Rust).
+
+CGI-006 witnesses: `cgi006_prism_leaf.json` / `cgi006_traversal_leaf.json` — structured M7 reserved node diagnostics (library/unit test; no `.opt` pipeline example).
 
 CLI binary name: **`opticc`** (book appendix B uses `optic`).
 

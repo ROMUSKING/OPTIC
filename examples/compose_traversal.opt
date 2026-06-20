@@ -1,0 +1,20 @@
+-- Negative: compose chain with TraversalLeaf rejected at CGIR (CGI-003 traversal_in_compose)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+let bad_pipeline: GradedOptic<Entities, f32, CacheGrade<4>> = HealthView >>> AllHealths;
+
+fn main() {
+    entities.query(bad_pipeline).map(|h| h - 10.0);
+}

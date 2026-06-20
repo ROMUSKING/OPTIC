@@ -142,7 +142,7 @@ pub enum CgirNode {
         /// Stub nodes use `true` (CGI-006); lowered prisms use `false`.
         m7_reserved: bool,
     },
-    /// M7+ reserved — bulk get/set traversal leaf (not lowered in narrow v0).
+    /// M7 traversal leaf — get/put lowered when `m7_reserved=false`.
     TraversalLeaf {
         id: NodeId,
         name: String,
@@ -247,6 +247,100 @@ fn compose_types_compatible(g: &CgirGraph, lhs: NodeId, rhs: NodeId) -> bool {
     }
 }
 
+/// How to stringify summary regions into cursor access stubs (display-only; codegen uses HIR bodies).
+enum RegionFnStyle {
+    Read,
+    Write,
+    PreviewOption,
+}
+
+fn build_region_fn(regions: &[hir::Region], style: RegionFnStyle) -> String {
+    if regions.is_empty() {
+        return match style {
+            RegionFnStyle::Read => "cursor.arena".into(),
+            RegionFnStyle::Write => String::new(),
+            RegionFnStyle::PreviewOption => "None".into(),
+        };
+    }
+    let parts: Vec<String> = regions
+        .iter()
+        .map(|r| match style {
+            RegionFnStyle::Read => format!("cursor.arena.{}[cursor.id]", r),
+            RegionFnStyle::Write => format!("cursor.arena.{}[cursor.id] = v", r),
+            RegionFnStyle::PreviewOption => format!("Some(cursor.arena.{}[cursor.id])", r),
+        })
+        .collect();
+    parts.join("; ")
+}
+
+struct LoweredGetPut {
+    get_param: String,
+    get_body: std::sync::Arc<hir::HirExpr>,
+    set_state_param: Option<String>,
+    set_value_param: Option<String>,
+    set_value_body: Option<std::sync::Arc<hir::HirExpr>>,
+    get_fn: String,
+    write_fn: String,
+}
+
+fn lower_get_put_leaf(
+    decl: &optic_syntax::OpticDecl,
+    summary: &hir::OpticSummary,
+    region_map: &hir::RegionMap,
+    missing_get_rule: &str,
+) -> Result<LoweredGetPut, Vec<optic_diagnostics::Diagnostic>> {
+    let get = decl.get.as_ref().ok_or_else(|| {
+        vec![optic_diagnostics::cgir_diag(
+            "CGI-001",
+            decl.span,
+            missing_get_rule,
+            serde_json::json!({ "optic": decl.name.node }),
+        )]
+    })?;
+    let get_param = get.param.node.clone();
+    let get_body = std::sync::Arc::new(validate_optic_body_expr(
+        lower_optic_get_body(&get_param, &get.body),
+        region_map,
+    ));
+    let (set_state_param, set_value_param, set_value_body) = if let Some(put) = &decl.put {
+        (
+            Some(put.state_param.node.clone()),
+            Some(put.value_param.node.clone()),
+            Some(std::sync::Arc::new(validate_optic_body_expr(
+                lower_optic_put_value_body(&put.state_param.node, &put.value_param.node, &put.body),
+                region_map,
+            ))),
+        )
+    } else {
+        (None, None, None)
+    };
+    Ok(LoweredGetPut {
+        get_param,
+        get_body,
+        set_state_param,
+        set_value_param,
+        set_value_body,
+        get_fn: build_region_fn(&summary.get_reads, RegionFnStyle::Read),
+        write_fn: build_region_fn(&summary.put_writes, RegionFnStyle::Write),
+    })
+}
+
+/// Partial CGIR graph for compose-chain checks during incremental build (clones nodes; see PLAN §9).
+fn compose_build_probe(
+    nodes: &[CgirNode],
+    prov: &std::collections::BTreeMap<NodeId, FusionProvenance>,
+    resolved_optics: &std::collections::HashMap<String, NodeId>,
+    region_map: &hir::RegionMap,
+) -> CgirGraph {
+    CgirGraph {
+        nodes: nodes.to_vec(),
+        roots: vec![],
+        provenance_index: prov.clone(),
+        resolved_optics: resolved_optics.clone(),
+        region_map: region_map.clone(),
+    }
+}
+
 fn hir_expr_unsupported(e: &hir::HirExpr) -> Option<(&Span, String)> {
     match e {
         hir::HirExpr::Unsupported { reason, span } => Some((span, reason.clone())),
@@ -254,12 +348,54 @@ fn hir_expr_unsupported(e: &hir::HirExpr) -> Option<(&Span, String)> {
     }
 }
 
-/// First PrismLeaf in a compose spine, if any (narrow v0 rejects compose+prism).
-pub fn compose_chain_prism_leaf(g: &CgirGraph, compose_id: NodeId) -> Option<NodeId> {
+/// Compose spine leaf forbidden in narrow v0 codegen (prism or traversal).
+pub fn compose_chain_forbidden_leaf(
+    g: &CgirGraph,
+    compose_id: NodeId,
+) -> Option<(&'static str, NodeId)> {
     let chain = compose_leaf_chain(g, compose_id)?;
-    chain
-        .into_iter()
-        .find(|&lid| matches!(g.nodes.get(lid as usize), Some(CgirNode::PrismLeaf { .. })))
+    for &lid in &chain {
+        match g.nodes.get(lid as usize) {
+            Some(CgirNode::PrismLeaf { .. }) => return Some(("prism_in_compose", lid)),
+            Some(CgirNode::TraversalLeaf { .. }) => return Some(("traversal_in_compose", lid)),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Rule text for compose-chain prism/traversal rejection (CGI-003).
+pub fn compose_forbidden_rule(reason: &str) -> &'static str {
+    match reason {
+        "prism_in_compose" => "compose chain with PrismLeaf is not supported in narrow v0",
+        "traversal_in_compose" => "compose chain with TraversalLeaf is not supported in narrow v0",
+        _ => "compose chain contains unsupported leaf in narrow v0",
+    }
+}
+
+/// Structured CGI-003 diagnostic for prism/traversal leaves in a compose spine.
+pub fn compose_forbidden_diag(
+    g: &CgirGraph,
+    compose_id: NodeId,
+    reason: &'static str,
+    leaf_id: NodeId,
+    fallback_span: Span,
+) -> optic_diagnostics::Diagnostic {
+    let span = g
+        .nodes
+        .get(leaf_id as usize)
+        .map(node_span)
+        .unwrap_or(fallback_span);
+    optic_diagnostics::cgir_diag(
+        optic_diagnostics::CGIR_UNSUPPORTED_EXPR,
+        span,
+        compose_forbidden_rule(reason),
+        serde_json::json!({
+            "compose_id": compose_id,
+            "leaf_id": leaf_id,
+            "reason": reason,
+        }),
+    )
 }
 
 fn compose_chain_unsupported_body(
@@ -300,10 +436,25 @@ fn compose_chain_unsupported_body(
                     }
                 }
             }
+            CgirNode::TraversalLeaf {
+                name,
+                get_body,
+                set_value_body,
+                ..
+            } => {
+                if let Some((span, reason)) = hir_expr_unsupported(get_body) {
+                    return Some((*span, format!("optic `{name}` get body: {reason}"), lid));
+                }
+                if let Some(body) = set_value_body {
+                    if let Some((span, reason)) = hir_expr_unsupported(body) {
+                        return Some((*span, format!("optic `{name}` put body: {reason}"), lid));
+                    }
+                }
+            }
             _ => {
                 return Some((
                     Span::dummy(),
-                    "compose chain must be optic or prism leaves".into(),
+                    "compose chain must be optic, prism, or traversal leaves".into(),
                     lid,
                 ));
             }
@@ -414,11 +565,20 @@ pub struct M7Violation {
     pub reason: optic_diagnostics::M7ReservedReason,
 }
 
-/// True when an M7/M8 reserved node is allowed in narrow v0 (properly lowered prism).
+/// True when an M7/M8 reserved node is allowed in narrow v0 (properly lowered prism/traversal/observability).
 pub fn is_allowed_m7_node(node: &CgirNode) -> bool {
     matches!(
         node,
         CgirNode::PrismLeaf {
+            m7_reserved: false,
+            ..
+        } | CgirNode::TraversalLeaf {
+            m7_reserved: false,
+            ..
+        } | CgirNode::Tap {
+            m7_reserved: false,
+            ..
+        } | CgirNode::Record {
             m7_reserved: false,
             ..
         }
@@ -476,7 +636,9 @@ pub fn verify_to_diagnostic(g: &CgirGraph) -> Result<(), optic_diagnostics::Diag
 /// Left-to-right leaf spine of a (possibly nested) Compose tree.
 pub fn compose_leaf_chain(g: &CgirGraph, id: NodeId) -> Option<Vec<NodeId>> {
     match g.nodes.get(id as usize)? {
-        CgirNode::OpticLeaf { .. } | CgirNode::PrismLeaf { .. } => Some(vec![id]),
+        CgirNode::OpticLeaf { .. }
+        | CgirNode::PrismLeaf { .. }
+        | CgirNode::TraversalLeaf { .. } => Some(vec![id]),
         CgirNode::Compose { lhs, rhs, .. } => {
             let mut chain = compose_leaf_chain(g, *lhs)?;
             chain.extend(compose_leaf_chain(g, *rhs)?);
@@ -498,7 +660,9 @@ pub fn compose_exit_leaf(g: &CgirGraph, id: NodeId) -> Option<NodeId> {
 
 fn compose_subtree_ids(g: &CgirGraph, id: NodeId, out: &mut Vec<NodeId>) {
     match g.nodes.get(id as usize) {
-        Some(CgirNode::OpticLeaf { .. }) | Some(CgirNode::PrismLeaf { .. }) => out.push(id),
+        Some(CgirNode::OpticLeaf { .. })
+        | Some(CgirNode::PrismLeaf { .. })
+        | Some(CgirNode::TraversalLeaf { .. }) => out.push(id),
         Some(CgirNode::Compose { lhs, rhs, .. }) => {
             compose_subtree_ids(g, *lhs, out);
             compose_subtree_ids(g, *rhs, out);
@@ -590,26 +754,9 @@ pub fn build(
                     );
                     let preview_returns_option = preview.partial || inferred_option;
                     let preview_wrap_some = preview.partial && !inferred_option;
-                    let preview_fn = if summary.get_reads.is_empty() {
-                        "None".into()
-                    } else {
-                        summary
-                            .get_reads
-                            .iter()
-                            .map(|r| format!("Some(cursor.arena.{}[cursor.id])", r))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    };
-                    let review_fn = if summary.put_writes.is_empty() {
-                        "".into()
-                    } else {
-                        summary
-                            .put_writes
-                            .iter()
-                            .map(|r| format!("cursor.arena.{}[cursor.id] = v", r))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    };
+                    let preview_fn =
+                        build_region_fn(&summary.get_reads, RegionFnStyle::PreviewOption);
+                    let review_fn = build_region_fn(&summary.put_writes, RegionFnStyle::Write);
                     nodes.push(CgirNode::PrismLeaf {
                         id: nid,
                         name: decl.name.node.clone(),
@@ -629,64 +776,51 @@ pub fn build(
                         provenance: decl.span,
                         m7_reserved: false,
                     });
+                } else if decl.is_traversal() {
+                    let lowered = lower_get_put_leaf(
+                        decl,
+                        summary,
+                        &region_map,
+                        "traversal optic requires get clause",
+                    )?;
+                    nodes.push(CgirNode::TraversalLeaf {
+                        id: nid,
+                        name: decl.name.node.clone(),
+                        costate,
+                        focus,
+                        grade: summary.get_grade.clone(),
+                        get_fn: lowered.get_fn,
+                        set_fn: lowered.write_fn,
+                        get_param: lowered.get_param,
+                        get_body: lowered.get_body,
+                        set_state_param: lowered.set_state_param,
+                        set_value_param: lowered.set_value_param,
+                        set_value_body: lowered.set_value_body,
+                        summary: Arc::clone(summary),
+                        provenance: decl.span,
+                        m7_reserved: false,
+                    });
                 } else {
                     // real from summary per ch10.9 (OpticLeaf from named optic + summary)
-                    let get_fn = if summary.get_reads.is_empty() {
-                        "cursor.arena".into()
-                    } else {
-                        summary
-                            .get_reads
-                            .iter()
-                            .map(|r| format!("cursor.arena.{}[cursor.id]", r))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    };
-                    let put_fn = if summary.put_writes.is_empty() {
-                        "".into()
-                    } else {
-                        summary
-                            .put_writes
-                            .iter()
-                            .map(|r| format!("cursor.arena.{}[cursor.id] = v", r))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    };
-                    let get = decl.get.as_ref().expect("optic leaf requires get clause");
-                    let get_param = get.param.node.clone();
-                    let get_body = Arc::new(validate_optic_body_expr(
-                        lower_optic_get_body(&get_param, &get.body),
+                    let lowered = lower_get_put_leaf(
+                        decl,
+                        summary,
                         &region_map,
-                    ));
-                    let (put_state_param, put_value_param, put_value_body) =
-                        if let Some(put) = &decl.put {
-                            (
-                                Some(put.state_param.node.clone()),
-                                Some(put.value_param.node.clone()),
-                                Some(Arc::new(validate_optic_body_expr(
-                                    lower_optic_put_value_body(
-                                        &put.state_param.node,
-                                        &put.value_param.node,
-                                        &put.body,
-                                    ),
-                                    &region_map,
-                                ))),
-                            )
-                        } else {
-                            (None, None, None)
-                        };
+                        "optic requires get clause",
+                    )?;
                     nodes.push(CgirNode::OpticLeaf {
                         id: nid,
                         name: decl.name.node.clone(),
                         costate,
                         focus,
                         grade: summary.get_grade.clone(),
-                        get_fn,
-                        put_fn,
-                        get_param,
-                        get_body,
-                        put_state_param,
-                        put_value_param,
-                        put_value_body,
+                        get_fn: lowered.get_fn,
+                        put_fn: lowered.write_fn,
+                        get_param: lowered.get_param,
+                        get_body: lowered.get_body,
+                        put_state_param: lowered.set_state_param,
+                        put_value_param: lowered.set_value_param,
+                        put_value_body: lowered.set_value_body,
                         summary: Arc::clone(summary),
                         provenance: decl.span,
                     });
@@ -769,28 +903,11 @@ pub fn build(
                     if let Some(cid) =
                         build_seq_chain(optic, &mut nodes, &optic_leaf_ids, &mut id, &mut prov)
                     {
-                        let probe = CgirGraph {
-                            nodes: nodes.clone(),
-                            roots: vec![],
-                            provenance_index: prov.clone(),
-                            resolved_optics: resolved_optics.clone(),
-                            region_map: region_map.clone(),
-                        };
-                        if let Some(prism_leaf) = compose_chain_prism_leaf(&probe, cid) {
-                            let err_span = probe
-                                .nodes
-                                .get(prism_leaf as usize)
-                                .map(node_span)
-                                .unwrap_or(*span);
-                            return Err(vec![optic_diagnostics::cgir_diag(
-                                optic_diagnostics::CGIR_UNSUPPORTED_EXPR,
-                                err_span,
-                                "compose chain with PrismLeaf is not supported in narrow v0",
-                                serde_json::json!({
-                                    "compose_id": cid,
-                                    "leaf_id": prism_leaf,
-                                    "reason": "prism_in_compose",
-                                }),
+                        let probe =
+                            compose_build_probe(&nodes, &prov, &resolved_optics, &region_map);
+                        if let Some((reason, leaf_id)) = compose_chain_forbidden_leaf(&probe, cid) {
+                            return Err(vec![compose_forbidden_diag(
+                                &probe, cid, reason, leaf_id, *span,
                             )]);
                         }
                         optic_leaf_ids.insert(name.clone(), cid);
@@ -831,28 +948,11 @@ pub fn build(
                 }
                 if let Some(&nid) = resolved_optics.get(&optic_name) {
                     if matches!(nodes.get(nid as usize), Some(CgirNode::Compose { .. })) {
-                        let probe = CgirGraph {
-                            nodes: nodes.clone(),
-                            roots: vec![],
-                            provenance_index: prov.clone(),
-                            resolved_optics: resolved_optics.clone(),
-                            region_map: region_map.clone(),
-                        };
-                        if let Some(prism_leaf) = compose_chain_prism_leaf(&probe, nid) {
-                            let span = probe
-                                .nodes
-                                .get(prism_leaf as usize)
-                                .map(node_span)
-                                .unwrap_or(q.span);
-                            return Err(vec![optic_diagnostics::cgir_diag(
-                                optic_diagnostics::CGIR_UNSUPPORTED_EXPR,
-                                span,
-                                "compose chain with PrismLeaf is not supported in narrow v0",
-                                serde_json::json!({
-                                    "compose_id": nid,
-                                    "leaf_id": prism_leaf,
-                                    "reason": "prism_in_compose",
-                                }),
+                        let probe =
+                            compose_build_probe(&nodes, &prov, &resolved_optics, &region_map);
+                        if let Some((reason, leaf_id)) = compose_chain_forbidden_leaf(&probe, nid) {
+                            return Err(vec![compose_forbidden_diag(
+                                &probe, nid, reason, leaf_id, q.span,
                             )]);
                         }
                         if let Some((span, reason, leaf_id)) =
@@ -870,6 +970,37 @@ pub fn build(
                             )]);
                         }
                     }
+                }
+                for hook in &q.observability {
+                    let hid = id;
+                    id += 1;
+                    let node = match hook {
+                        hir::ObsHook::Tap(label, span) => CgirNode::Tap {
+                            id: hid,
+                            optic_name: optic_name.clone(),
+                            label: label.clone(),
+                            provenance: *span,
+                            m7_reserved: false,
+                        },
+                        hir::ObsHook::Record(event, span) => CgirNode::Record {
+                            id: hid,
+                            optic_name: optic_name.clone(),
+                            event: event.clone(),
+                            provenance: *span,
+                            m7_reserved: false,
+                        },
+                    };
+                    nodes.push(node);
+                    prov.insert(
+                        hid,
+                        FusionProvenance {
+                            original_ids: vec![hid],
+                            spans: vec![*match hook {
+                                hir::ObsHook::Tap(_, sp) | hir::ObsHook::Record(_, sp) => sp,
+                            }],
+                            reason: FusionReason::Build,
+                        },
+                    );
                 }
                 let qid = id;
                 id += 1;
@@ -1165,10 +1296,7 @@ pub fn node_summary(node: &CgirNode) -> Option<&Arc<hir::OpticSummary>> {
 }
 
 /// Resolve a leaf's OpticSummary by graph node id.
-pub fn leaf_summary_by_id<'a>(
-    graph: &'a CgirGraph,
-    id: NodeId,
-) -> Option<&'a hir::OpticSummary> {
+pub fn leaf_summary_by_id<'a>(graph: &'a CgirGraph, id: NodeId) -> Option<&'a hir::OpticSummary> {
     graph.nodes.get(id as usize)?.summary().map(|s| s.as_ref())
 }
 
@@ -2344,7 +2472,7 @@ mod tests {
                     preview_param: "s".into(),
                     preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
                     preview_returns_option: false,
-            preview_wrap_some: false,
+                    preview_wrap_some: false,
                     review_state_param: None,
                     review_value_param: None,
                     review_value_body: None,
@@ -2421,28 +2549,90 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_rejects_m7_reserved_without_flag() {
+    fn test_build_tap_record_chain_node_order() {
+        let src = include_str!("../../../examples/tap_record_chain.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hir = optic_hir::lower(prog).expect("lower");
+        let typed = optic_typeck::check(hir).expect("typeck");
+        let g = build(&typed).expect("build");
+        let out = dump_pretty(&g);
+        let tap_idx = out.find("Tap(HealthView,probe_a").expect("tap node");
+        let rec_idx = out.find("Record(HealthView,probe_b").expect("record node");
+        let map_idx = out.find("QueryMap(HealthView)").expect("map node");
+        assert!(tap_idx < rec_idx, "tap before record in CGIR dump");
+        assert!(rec_idx < map_idx, "record before map in CGIR dump");
+    }
+
+    #[test]
+    fn test_verify_allows_lowered_tap_record() {
+        for (kind, node) in [
+            (
+                "Tap",
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "HealthView".into(),
+                    label: "health_probe".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: false,
+                },
+            ),
+            (
+                "Record",
+                CgirNode::Record {
+                    id: 0,
+                    optic_name: "HealthView".into(),
+                    event: "health_decay".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: false,
+                },
+            ),
+        ] {
+            let g = CgirGraph {
+                nodes: vec![node],
+                roots: vec![0],
+                provenance_index: Default::default(),
+                resolved_optics: Default::default(),
+                region_map: Default::default(),
+            };
+            verify(&g).unwrap_or_else(|e| panic!("lowered {kind} must pass verify: {e}"));
+            verify_to_diagnostic(&g)
+                .unwrap_or_else(|d| panic!("lowered {kind} must not emit CGI-006: {d:?}"));
+        }
+    }
+
+    #[test]
+    fn test_verify_rejects_prism_missing_reserved_flag() {
+        let summary = minimal_summary("AliveFilter");
         let g = CgirGraph {
-            nodes: vec![CgirNode::Tap {
+            nodes: vec![CgirNode::PrismLeaf {
                 id: 0,
-                optic_name: "HealthView".into(),
-                label: "tap".into(),
+                name: "AliveFilter".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: default_grade_v0(),
+                preview_fn: String::new(),
+                review_fn: String::new(),
+                preview_param: "s".into(),
+                preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                preview_returns_option: false,
+                preview_wrap_some: false,
+                review_state_param: None,
+                review_value_param: None,
+                review_value_body: None,
+                summary,
                 provenance: Span::dummy(),
-                m7_reserved: false,
+                m7_reserved: true,
             }],
             roots: vec![0],
             provenance_index: Default::default(),
             resolved_optics: Default::default(),
             region_map: Default::default(),
         };
-        let err = verify(&g).expect_err("m7_reserved=false must fail");
+        let err = verify(&g).expect_err("stub PrismLeaf must fail");
         assert!(err.contains("CGI-006"));
-        assert!(err.contains("missing m7_reserved=true"));
-        assert!(err.contains("M8 reserved node `Tap`"));
+        assert!(err.contains("materialized"));
         let diag = verify_to_diagnostic(&g).expect_err("structured diag");
-        assert_eq!(diag.code, optic_diagnostics::CGIR_M7_RESERVED);
-        assert_eq!(diag.evidence["reason"], "missing_m7_reserved_flag");
-        assert_eq!(diag.evidence["milestone"], "M8");
+        assert_eq!(diag.evidence["reason"], "materialized");
     }
 
     #[test]
@@ -2460,7 +2650,7 @@ mod tests {
                 preview_param: "s".into(),
                 preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
                 preview_returns_option: false,
-            preview_wrap_some: false,
+                preview_wrap_some: false,
                 review_state_param: Some("s".into()),
                 review_value_param: Some("a".into()),
                 review_value_body: Some(Arc::new(hir::HirExpr::LitInt(2, Span::dummy()))),
@@ -2478,6 +2668,36 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_allows_lowered_traversal_leaf() {
+        let summary = minimal_summary("AllHealths");
+        let g = CgirGraph {
+            nodes: vec![CgirNode::TraversalLeaf {
+                id: 0,
+                name: "AllHealths".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: default_grade_v0(),
+                get_fn: "cursor.arena.healths[cursor.id]".into(),
+                set_fn: "cursor.arena.healths[cursor.id] = v".into(),
+                get_param: "s".into(),
+                get_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                set_state_param: Some("s".into()),
+                set_value_param: Some("v".into()),
+                set_value_body: Some(Arc::new(hir::HirExpr::LitInt(2, Span::dummy()))),
+                summary,
+                provenance: Span::dummy(),
+                m7_reserved: false,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        verify(&g).expect("lowered TraversalLeaf must pass verify");
+        verify_to_diagnostic(&g).expect("lowered TraversalLeaf must not emit CGI-006");
+    }
+
+    #[test]
     fn test_dump_cgir_check_path_maps_cgi006() {
         let summary = minimal_summary("AliveFilter");
         let g = CgirGraph {
@@ -2492,7 +2712,7 @@ mod tests {
                 preview_param: "s".into(),
                 preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
                 preview_returns_option: false,
-            preview_wrap_some: false,
+                preview_wrap_some: false,
                 review_state_param: None,
                 review_value_param: None,
                 review_value_body: None,
@@ -2562,6 +2782,32 @@ fn main() { entities.query(chain).map(|h| h); }
             .find(|d| d.code == optic_diagnostics::CGIR_UNSUPPORTED_EXPR)
             .expect("CGI-003");
         assert_eq!(diag.evidence["reason"], "prism_in_compose");
+    }
+
+    #[test]
+    fn test_build_rejects_compose_with_traversal_leaf() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2>> {
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+let chain = HealthView >>> AllHealths;
+fn main() { entities.query(chain).map(|h| h); }
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (typed, _) = optic_typeck::typeck_pass(hirp);
+        let err = build(&typed).expect_err("compose+traversal must fail CGIR build");
+        let diag = err
+            .iter()
+            .find(|d| d.code == optic_diagnostics::CGIR_UNSUPPORTED_EXPR)
+            .expect("CGI-003");
+        assert_eq!(diag.evidence["reason"], "traversal_in_compose");
     }
 
     #[test]

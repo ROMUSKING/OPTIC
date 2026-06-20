@@ -110,7 +110,10 @@ fn run_partial_prism_emits_if_let_some() {
         .assert()
         .success();
     let out = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert_eq!(parse_entities_line(&out, "before:"), vec![100.0, 80.0, 50.0]);
+    assert_eq!(
+        parse_entities_line(&out, "before:"),
+        vec![100.0, 80.0, 50.0]
+    );
     assert_eq!(parse_entities_line(&out, "after:"), vec![90.0, 70.0, 40.0]);
     assert!(out.contains("RUN VERIFIED"));
     let transpile = opticc()
@@ -121,8 +124,14 @@ fn run_partial_prism_emits_if_let_some() {
     let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
     let _ = transpile;
     let _ = std::fs::remove_file(&rust_path);
-    assert!(rust.contains("if let Some"), "partial preview must use if-let");
-    assert!(rust.contains("Some(cursor"), "partial preview must wrap Some(...)");
+    assert!(
+        rust.contains("if let Some"),
+        "partial preview must use if-let"
+    );
+    assert!(
+        rust.contains("Some(cursor"),
+        "partial preview must wrap Some(...)"
+    );
 }
 
 #[test]
@@ -137,6 +146,99 @@ fn run_health_decay_mutates() {
     assert_eq!(before, vec![100.0, 80.0, 50.0]);
     assert_eq!(after, vec![90.0, 70.0, 40.0]);
     assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_tap_health_mutates_with_observability_hook() {
+    let assert = opticc()
+        .args(["run", &example("tap_health.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+
+    let transpile = opticc()
+        .args(["transpile", &example("tap_health.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("tap_health.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(rust.contains("// optic(tap): health_probe"));
+}
+
+#[test]
+fn run_record_health_mutates_with_observability_hook() {
+    let assert = opticc()
+        .args(["run", &example("record_health.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+
+    let transpile = opticc()
+        .args(["transpile", &example("record_health.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("record_health.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(rust.contains("// optic(record): health_decay"));
+}
+
+#[test]
+fn run_traversal_get_prints_values() {
+    let assert = opticc()
+        .args(["run", &example("traversal_get.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(parse_get_lines(&out), vec![100.0, 80.0, 50.0]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_traversal_set_mutates() {
+    let assert = opticc()
+        .args(["run", &example("traversal_set.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![42.0, 42.0, 42.0]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_all_healths_traversal_mutates() {
+    let assert = opticc()
+        .args(["run", &example("all_healths.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+    let transpile = opticc()
+        .args(["transpile", &example("all_healths.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("all_healths.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(rust.contains("// optic(traversal): AllHealths"));
+    assert!(rust.contains("// simd-eligible"));
 }
 
 #[test]

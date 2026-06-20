@@ -56,7 +56,8 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
         .iter()
         .filter_map(|n| match n {
             CgirNode::OpticLeaf { name, summary, .. }
-            | CgirNode::PrismLeaf { name, summary, .. } => Some((name.clone(), summary)),
+            | CgirNode::PrismLeaf { name, summary, .. }
+            | CgirNode::TraversalLeaf { name, summary, .. } => Some((name.clone(), summary)),
             _ => None,
         })
         .collect();
@@ -97,8 +98,11 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     match &query_mode {
         QueryMode::Get { root } => {
             let optic_name = query_optic_name(graph, *root)?;
+            emit_observability_hooks(&mut out, graph, &optic_name, *root);
             if let Some(prism_id) = resolved_prism_leaf(graph, &optic_name) {
                 emit_prism_query_get(&mut out, graph, prism_id, &struct_name)?;
+            } else if let Some(traversal_id) = resolved_traversal_leaf(graph, &optic_name) {
+                emit_traversal_query_get(&mut out, graph, traversal_id, &struct_name)?;
             } else {
                 let field = primary_field_for_optic(graph, &optic_name)?;
                 out.push_str(&format!(
@@ -126,9 +130,12 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
                     "invalid set root: expected QuerySet at node {root}"
                 ));
             };
+            emit_observability_hooks(&mut out, graph, optic_name, *root);
             let lit = validate_f32_literal(value_repr)?;
             if let Some(prism_id) = resolved_prism_leaf(graph, optic_name) {
                 emit_prism_query_set(&mut out, graph, prism_id, &lit, &struct_name)?;
+            } else if let Some(traversal_id) = resolved_traversal_leaf(graph, optic_name) {
+                emit_traversal_query_set(&mut out, graph, traversal_id, &lit, &struct_name)?;
             } else {
                 let field = primary_field_for_optic(graph, optic_name)?;
                 out.push_str(&format!(
@@ -154,6 +161,7 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
             else {
                 return Err("invalid map root".into());
             };
+            emit_observability_hooks(&mut out, graph, optic_name, *root);
             let regions = product_regions_ordered(graph, optic_name)?;
             let comment_names = if leaf_names.is_empty() {
                 "unknown".to_string()
@@ -208,11 +216,21 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
             else {
                 return Err("invalid map root".into());
             };
+            emit_observability_hooks(&mut out, graph, optic_name, *root);
             if let Some(prism_id) = resolved_prism_leaf(graph, optic_name) {
                 emit_prism_map_decay(
                     &mut out,
                     graph,
                     prism_id,
+                    map_body.as_ref(),
+                    map_param,
+                    &struct_name,
+                )?;
+            } else if let Some(traversal_id) = resolved_traversal_leaf(graph, optic_name) {
+                emit_traversal_map_decay(
+                    &mut out,
+                    graph,
+                    traversal_id,
                     map_body.as_ref(),
                     map_param,
                     &struct_name,
@@ -245,9 +263,15 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
             }
         }
         QueryMode::MapCompose { root, compose_id } => {
+            if let Ok(optic_name) = query_optic_name(graph, *root) {
+                emit_observability_hooks(&mut out, graph, &optic_name, *root);
+            }
             emit_compose_map(&mut out, graph, *root, *compose_id, &struct_name)?;
         }
         QueryMode::FusedCompose { root } => {
+            if let Ok(optic_name) = query_optic_name(graph, *root) {
+                emit_observability_hooks(&mut out, graph, &optic_name, *root);
+            }
             emit_fused_compose_loop(&mut out, graph, *root, &leaf_names, &struct_name)?;
         }
     }
@@ -320,13 +344,72 @@ fn emit_product_stores(
     Ok(())
 }
 
+/// Sanitize hook text for comment emission (defense-in-depth after parse validation).
+fn sanitize_obs_hook_comment(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_graphic() && !matches!(c, '\n' | '\r') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Emit v0 observability comment hooks for prefix Tap/Record nodes before `query_root`.
+fn emit_observability_hooks(
+    out: &mut String,
+    graph: &CgirGraph,
+    optic_name: &str,
+    query_root: NodeId,
+) {
+    let root_idx = query_root as usize;
+    for (i, node) in graph.nodes.iter().enumerate() {
+        if i >= root_idx {
+            break;
+        }
+        match node {
+            CgirNode::Tap {
+                optic_name: on,
+                label,
+                m7_reserved: false,
+                ..
+            } if on == optic_name => {
+                let safe = sanitize_obs_hook_comment(label);
+                out.push_str(&format!("// optic(tap): {safe}\n"));
+            }
+            CgirNode::Record {
+                optic_name: on,
+                event,
+                m7_reserved: false,
+                ..
+            } if on == optic_name => {
+                let safe = sanitize_obs_hook_comment(event);
+                out.push_str(&format!("// optic(record): {safe}\n"));
+            }
+            _ => {}
+        }
+    }
+}
+
 fn query_optic_name(graph: &CgirGraph, root: NodeId) -> Result<String, String> {
     match graph.nodes.get(root as usize) {
         Some(CgirNode::QueryGet { optic_name, .. })
         | Some(CgirNode::QuerySet { optic_name, .. })
         | Some(CgirNode::QueryMap { optic_name, .. }) => Ok(optic_name.clone()),
+        Some(CgirNode::FusedLoop { original_ids, .. }) => original_ids
+            .iter()
+            .find_map(|&oid| {
+                if let CgirNode::QueryMap { optic_name, .. } = graph.nodes.get(oid as usize)? {
+                    Some(optic_name.clone())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| format!("FusedLoop at node {root} has no QueryMap in original_ids")),
         _ => Err(format!(
-            "invalid query root at node {root}: expected QueryGet/Set/Map"
+            "invalid query root at node {root}: expected QueryGet/Set/Map/FusedLoop"
         )),
     }
 }
@@ -362,9 +445,9 @@ fn collect_regions_from_node(graph: &CgirGraph, nid: NodeId) -> Vec<String> {
             out.extend(collect_regions_from_node(graph, *rhs));
             out
         }
-        Some(CgirNode::OpticLeaf { summary, .. }) | Some(CgirNode::PrismLeaf { summary, .. }) => {
-            summary.get_reads.clone()
-        }
+        Some(CgirNode::OpticLeaf { summary, .. })
+        | Some(CgirNode::PrismLeaf { summary, .. })
+        | Some(CgirNode::TraversalLeaf { summary, .. }) => summary.get_reads.clone(),
         _ => vec![],
     }
 }
@@ -375,6 +458,23 @@ fn resolved_prism_leaf(graph: &CgirGraph, optic_name: &str) -> Option<NodeId> {
         Some(CgirNode::PrismLeaf { .. }) => Some(nid),
         _ => None,
     }
+}
+
+fn resolved_traversal_leaf(graph: &CgirGraph, optic_name: &str) -> Option<NodeId> {
+    let nid = graph.resolved_optics.get(optic_name).copied()?;
+    match graph.nodes.get(nid as usize) {
+        Some(CgirNode::TraversalLeaf { .. }) => Some(nid),
+        _ => None,
+    }
+}
+
+fn is_simd_eligible_region(graph: &CgirGraph, region: &str) -> bool {
+    graph
+        .region_map
+        .columns
+        .get(region)
+        .and_then(|c| c.element_ty.as_deref())
+        .is_some_and(|ty| ty == "f32")
 }
 
 fn leaf_summary<'a>(
@@ -481,7 +581,14 @@ fn emit_prism_query_set(
         out.push_str(&format!("            let _set_lit = {lit};\n"));
         let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
         out.push_str(&format!("            let _review_out = {review_expr};\n"));
-        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "            ")?;
+        emit_leaf_review_stores(
+            graph,
+            prism_id,
+            "cursor_0",
+            "_review_out",
+            out,
+            "            ",
+        )?;
         out.push_str("        }\n");
     } else {
         out.push_str(&format!("        let _set_lit = {lit};\n"));
@@ -493,6 +600,135 @@ fn emit_prism_query_set(
     Ok(())
 }
 
+fn emit_traversal_query_get(
+    out: &mut String,
+    graph: &CgirGraph,
+    traversal_id: NodeId,
+    struct_name: &str,
+) -> Result<(), String> {
+    let CgirNode::TraversalLeaf { name, .. } = &graph.nodes[traversal_id as usize] else {
+        return Err(format!("node {traversal_id} not TraversalLeaf"));
+    };
+    let summary = leaf_summary(graph, traversal_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| "traversal get requires at least one get read region".to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    let get_expr = emit_leaf_get(graph, traversal_id, "cursor_0", None)?;
+    out.push_str(&format!("// optic(traversal): {name}\n"));
+    if is_simd_eligible_region(graph, reg) {
+        out.push_str("// simd-eligible\n");
+    }
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    out.push_str(&format!(
+        "        let {bind} = {get_expr};\n        println!(\"get: {{}}\", {bind});\n"
+    ));
+    out.push_str("    }\n}\n\n");
+    Ok(())
+}
+
+fn emit_traversal_query_set(
+    out: &mut String,
+    graph: &CgirGraph,
+    traversal_id: NodeId,
+    lit: &str,
+    struct_name: &str,
+) -> Result<(), String> {
+    let CgirNode::TraversalLeaf { name, .. } = &graph.nodes[traversal_id as usize] else {
+        return Err(format!("node {traversal_id} not TraversalLeaf"));
+    };
+    let summary = leaf_summary(graph, traversal_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| "traversal set requires at least one get read region".to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    out.push_str(&format!("// optic(traversal): {name}\n"));
+    if is_simd_eligible_region(graph, reg) {
+        out.push_str("// simd-eligible\n");
+    }
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    out.push_str(&format!("        let _set_lit = {lit};\n"));
+    let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_set_lit")?;
+    out.push_str(&format!("        let _set_out = {set_expr};\n"));
+    emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out)?;
+    out.push_str("    }\n}\n\n");
+    Ok(())
+}
+
+fn leaf_map_decay_region(
+    graph: &CgirGraph,
+    leaf_id: NodeId,
+    require_reads_msg: &str,
+) -> Result<(String, String, String), String> {
+    let summary = leaf_summary(graph, leaf_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| require_reads_msg.to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    Ok((field, bind, reg.clone()))
+}
+
+fn emit_entity_loop_prelude(out: &mut String, struct_name: &str, field: &str) {
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+}
+
+fn emit_entity_loop_postlude(out: &mut String) {
+    out.push_str("    }\n}\n\n");
+}
+
+fn emit_traversal_map_decay(
+    out: &mut String,
+    graph: &CgirGraph,
+    traversal_id: NodeId,
+    map_body: &HirExpr,
+    map_param: &str,
+    struct_name: &str,
+) -> Result<(), String> {
+    let CgirNode::TraversalLeaf { name, .. } = &graph.nodes[traversal_id as usize] else {
+        return Err(format!("node {traversal_id} not TraversalLeaf"));
+    };
+    let (field, bind, reg) = leaf_map_decay_region(
+        graph,
+        traversal_id,
+        "traversal map requires at least one get read region",
+    )?;
+    validate_user_ident(map_param, "map parameter")?;
+    out.push_str(&format!("// optic(traversal): {name}\n"));
+    if is_simd_eligible_region(graph, &reg) {
+        out.push_str("// simd-eligible\n");
+    }
+    let get_expr = emit_leaf_get(graph, traversal_id, "cursor_0", None)?;
+    emit_entity_loop_prelude(out, struct_name, &field);
+    out.push_str(&format!("        let {bind} = {get_expr};\n"));
+    let body_rust = emit_map_body(map_body, map_param, &bind)?;
+    out.push_str(&format!("        let _new = {body_rust};\n"));
+    let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_new")?;
+    out.push_str(&format!("        let _set_out = {set_expr};\n"));
+    emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out)?;
+    emit_entity_loop_postlude(out);
+    Ok(())
+}
+
 fn emit_prism_map_decay(
     out: &mut String,
     graph: &CgirGraph,
@@ -501,22 +737,15 @@ fn emit_prism_map_decay(
     map_param: &str,
     struct_name: &str,
 ) -> Result<(), String> {
-    let summary = leaf_summary(graph, prism_id)?;
-    let reg = summary
-        .get_reads
-        .first()
-        .ok_or_else(|| "prism map requires at least one preview read region".to_string())?;
-    let field = lookup_region_field(&graph.region_map, reg)?;
-    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    let (field, bind, _reg) = leaf_map_decay_region(
+        graph,
+        prism_id,
+        "prism map requires at least one preview read region",
+    )?;
     validate_user_ident(map_param, "map parameter")?;
     let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
     let partial = prism_preview_returns_option(graph, prism_id)?;
-    out.push_str(&format!(
-        "pub fn run_example(entities: &mut {struct_name}) {{\n"
-    ));
-    out.push_str(&format!("    let n = entities.{field}.len();\n"));
-    out.push_str("    for id_0 in 0..n {\n");
-    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    emit_entity_loop_prelude(out, struct_name, &field);
     if partial {
         out.push_str(&format!(
             "        if let Some({bind}) = {preview_expr} {{\n"
@@ -525,7 +754,14 @@ fn emit_prism_map_decay(
         out.push_str(&format!("            let _new = {body_rust};\n"));
         let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
         out.push_str(&format!("            let _review_out = {review_expr};\n"));
-        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "            ")?;
+        emit_leaf_review_stores(
+            graph,
+            prism_id,
+            "cursor_0",
+            "_review_out",
+            out,
+            "            ",
+        )?;
         out.push_str("        }\n");
     } else {
         out.push_str(&format!("        let {bind} = {preview_expr};\n"));
@@ -535,7 +771,7 @@ fn emit_prism_map_decay(
         out.push_str(&format!("        let _review_out = {review_expr};\n"));
         emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "        ")?;
     }
-    out.push_str("    }\n}\n\n");
+    emit_entity_loop_postlude(out);
     Ok(())
 }
 
@@ -801,7 +1037,22 @@ fn validate_leaf_params(leaf: &CgirNode) -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err("validate_leaf_params expects OpticLeaf or PrismLeaf".into()),
+        CgirNode::TraversalLeaf {
+            get_param,
+            set_state_param,
+            set_value_param,
+            ..
+        } => {
+            validate_user_ident(get_param, "optic get parameter")?;
+            if let Some(s) = set_state_param {
+                validate_user_ident(s, "optic set state parameter")?;
+            }
+            if let Some(v) = set_value_param {
+                validate_user_ident(v, "optic set value parameter")?;
+            }
+            Ok(())
+        }
+        _ => Err("validate_leaf_params expects OpticLeaf, PrismLeaf, or TraversalLeaf".into()),
     }
 }
 
@@ -954,11 +1205,11 @@ fn emit_compose_chain_loop(
     if chain.iter().any(|&leaf| {
         matches!(
             graph.nodes.get(leaf as usize),
-            Some(CgirNode::PrismLeaf { .. })
+            Some(CgirNode::PrismLeaf { .. } | CgirNode::TraversalLeaf { .. })
         )
     }) {
         return Err(
-            "compose chain with PrismLeaf is not supported in narrow v0 codegen (use prism query directly)"
+            "compose chain with PrismLeaf or TraversalLeaf is not supported in narrow v0 codegen (use direct query)"
                 .into(),
         );
     }
@@ -1028,8 +1279,11 @@ fn fused_provenance_names(
 ) -> String {
     let mut names = vec![];
     for &id in original_ids {
-        if let Some(CgirNode::OpticLeaf { name, .. } | CgirNode::PrismLeaf { name, .. }) =
-            graph.nodes.get(id as usize)
+        if let Some(
+            CgirNode::OpticLeaf { name, .. }
+            | CgirNode::PrismLeaf { name, .. }
+            | CgirNode::TraversalLeaf { name, .. },
+        ) = graph.nodes.get(id as usize)
         {
             if !names.contains(name) {
                 names.push(name.clone());
@@ -1131,6 +1385,11 @@ fn emit_leaf_get(
             get_body,
             get_param,
             ..
+        }
+        | CgirNode::TraversalLeaf {
+            get_body,
+            get_param,
+            ..
         } => {
             let mut body = get_body.as_ref().clone();
             if let Some(bind) = focus_bind {
@@ -1138,7 +1397,9 @@ fn emit_leaf_get(
             }
             emit_pure_hir_expr(&body, cursor)
         }
-        _ => Err(format!("node {id} not OpticLeaf or PrismLeaf")),
+        _ => Err(format!(
+            "node {id} not OpticLeaf, PrismLeaf, or TraversalLeaf"
+        )),
     }
 }
 
@@ -1164,6 +1425,16 @@ fn emit_leaf_put_value(
             put_state_param.as_deref(),
             put_value_param.as_deref(),
         ),
+        CgirNode::TraversalLeaf {
+            set_value_body,
+            set_state_param,
+            set_value_param,
+            ..
+        } => (
+            set_value_body.as_ref(),
+            set_state_param.as_deref(),
+            set_value_param.as_deref(),
+        ),
         CgirNode::PrismLeaf {
             review_value_body,
             review_state_param,
@@ -1174,7 +1445,11 @@ fn emit_leaf_put_value(
             review_state_param.as_deref(),
             review_value_param.as_deref(),
         ),
-        _ => return Err(format!("node {id} not OpticLeaf or PrismLeaf")),
+        _ => {
+            return Err(format!(
+                "node {id} not OpticLeaf, PrismLeaf, or TraversalLeaf"
+            ))
+        }
     };
     let Some(body) = put_value_body else {
         return Ok(value_bind.to_string());
@@ -1376,6 +1651,188 @@ mod tests {
     #[test]
     fn golden_rust_partial_prism() {
         assert_rust_golden("partial_prism.opt");
+    }
+
+    #[test]
+    fn golden_rust_all_healths() {
+        assert_rust_golden("all_healths.opt");
+    }
+
+    #[test]
+    fn golden_rust_tap_health() {
+        assert_rust_golden("tap_health.opt");
+    }
+
+    #[test]
+    fn golden_rust_record_health() {
+        assert_rust_golden("record_health.opt");
+    }
+
+    #[test]
+    fn golden_rust_compose_tap() {
+        assert_rust_golden("compose_tap.opt");
+    }
+
+    #[test]
+    fn golden_rust_tap_record_chain() {
+        assert_rust_golden("tap_record_chain.opt");
+    }
+
+    #[test]
+    fn emit_compose_tap_includes_observability_hook() {
+        let src = include_str!("../../../examples/compose_tap.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hir = optic_hir::lower(prog).expect("lower");
+        let typed = optic_typeck::check(hir).expect("typeck");
+        let cg = optic_cgir::build(&typed).expect("cgir");
+        let graph = optic_opt::optimize(cg).expect("optimize").graph;
+        let emitted = emit(&graph, "optic_runtime").expect("emit");
+        assert!(emitted.contains("// optic(tap): compose_probe"));
+    }
+
+    #[test]
+    fn sanitize_obs_hook_comment_strips_unsafe_chars() {
+        assert_eq!(sanitize_obs_hook_comment("probe_a"), "probe_a");
+        assert_eq!(sanitize_obs_hook_comment("a\nb\rc"), "a_b_c");
+        assert_eq!(sanitize_obs_hook_comment("x\x00y"), "x_y");
+    }
+
+    #[test]
+    fn emit_get_with_prefix_tap_includes_hook_comment() {
+        let (h_leaf, _) = mk_leaf("H", vec!["healths"]);
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "H".into(),
+                    label: "get_probe".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: false,
+                },
+                h_leaf,
+                CgirNode::QueryGet {
+                    id: 1,
+                    optic_name: "H".into(),
+                    costate: "entities".into(),
+                    cursor: "cur_0".into(),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![2],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: [("H".into(), 1)].into_iter().collect(),
+            region_map: mk_region_map(&[("healths", "Vec<f32>")]),
+        };
+        let emitted = emit(&g, "optic_runtime").expect("emit get+tap");
+        assert!(emitted.contains("// optic(tap): get_probe"));
+    }
+
+    #[test]
+    fn emit_fused_loop_without_query_map_skips_observability_hooks() {
+        let (h_leaf, _) = mk_leaf("H", vec!["healths"]);
+        let (d_leaf, _) = mk_leaf("D", vec![]);
+        let map_body = Arc::new(HirExpr::Var("y".into(), Span::dummy()));
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "H".into(),
+                    label: "skipped".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: false,
+                },
+                h_leaf,
+                d_leaf,
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 1,
+                    rhs: 2,
+                    grade: ConcreteGrade {
+                        cache: 1,
+                        ownership: OwnershipDim {
+                            share: Rational::one(),
+                            read_only: false,
+                            must_use: false,
+                        },
+                    },
+                    provenance: Span::dummy(),
+                },
+                CgirNode::FusedLoop {
+                    id: 4,
+                    original_ids: vec![1, 2, 3],
+                    costate: "entities".into(),
+                    provenance: Span::dummy(),
+                    compose_body: Some(optic_cgir::ComposeFusedBody {
+                        compose_id: 3,
+                        lhs: 1,
+                        rhs: 2,
+                        map_param: "y".into(),
+                        map_body: map_body.clone(),
+                    }),
+                },
+            ],
+            roots: vec![4],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: Default::default(),
+            region_map: mk_region_map(&[("healths", "Vec<f32>")]),
+        };
+        let emitted =
+            emit(&g, "optic_runtime").expect("FusedLoop without QueryMap in original_ids");
+        assert!(
+            !emitted.contains("// optic(tap): skipped"),
+            "hooks must be skipped when optic name cannot resolve: {emitted}"
+        );
+        assert!(emitted.contains("// optic(fused):"));
+    }
+
+    #[test]
+    fn emit_tap_record_chain_preserves_hook_order() {
+        let src = include_str!("../../../examples/tap_record_chain.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hir = optic_hir::lower(prog).expect("lower");
+        let typed = optic_typeck::check(hir).expect("typeck");
+        let cg = optic_cgir::build(&typed).expect("cgir");
+        let graph = optic_opt::optimize(cg).expect("optimize").graph;
+        let emitted = emit(&graph, "optic_runtime").expect("emit");
+        let tap_pos = emitted.find("// optic(tap): probe_a").expect("tap hook");
+        let rec_pos = emitted
+            .find("// optic(record): probe_b")
+            .expect("record hook");
+        assert!(
+            tap_pos < rec_pos,
+            "tap must precede record in emitted comments"
+        );
+    }
+
+    #[test]
+    fn golden_rust_traversal_get() {
+        assert_rust_golden("traversal_get.opt");
+    }
+
+    #[test]
+    fn golden_rust_traversal_set() {
+        assert_rust_golden("traversal_set.opt");
+    }
+
+    #[test]
+    fn emit_traversal_map_decay_includes_provenance_comments() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/all_healths.opt");
+        let src = std::fs::read_to_string(&path).expect("read example");
+        let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
+        let hir = optic_hir::lower(prog).expect("lower");
+        let typed = optic_typeck::check(hir).expect("typeck");
+        let cg = optic_cgir::build(&typed).expect("cgir");
+        let graph = optic_opt::optimize(cg).expect("optimize").graph;
+        let emitted = emit(&graph, "optic_runtime").expect("emit");
+        assert!(
+            emitted.contains("// optic(traversal): AllHealths"),
+            "traversal map must emit provenance comment"
+        );
+        assert!(
+            emitted.contains("// simd-eligible"),
+            "homogeneous f32 SoA must emit simd-eligible comment"
+        );
     }
 
     #[test]

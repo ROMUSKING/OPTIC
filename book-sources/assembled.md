@@ -10308,7 +10308,7 @@ The codes are theorem-stable, but the preferred rendering should default to mach
 | `OPT-301` | feature | Prism syntax used in v0 | Rewrite to a supported lens-like form |
 | `OPT-311` | feature | Traversal syntax used in v0 | Rewrite to the supported prelude subset |
 | `OPT-321` | feature | `.coinductive()` or `.drive()` used in v0 | Remove or gate for the full language |
-| `OPT-331` | feature | `.record()` or `.replay()` used in v0 | Remove or gate for the observability milestone |
+| `OPT-331` | feature | `.replay()` used in v0 (deferred beyond narrow M8) | Use `.record("event")` or defer replay CLI; see **OBS-701** |
 | `OPT-341` | feature | `stage` keyword used in v0 | Remove or gate for the staging milestone |
 | `CGI-410` | CGIR | CGIR invariant failure during construction | Dump HIR and the failing node; likely compiler bug |
 | `CGI-420` | CGIR | Cycle detected in the CGIR graph | Treat as compiler bug |
@@ -10329,7 +10329,8 @@ The codes are theorem-stable, but the preferred rendering should default to mach
 | `GRD-151` | grade | Elided or partially specified grade cannot be reconstructed exactly | Make the missing dimensions explicit or switch to gradual `?` |
 | `GRD-161` | grade | Observed development-time grade diverges from the declared or inferred contract | Accept the suggested grade, tighten the implementation, or declare a wider bound |
 | `GRD-171` | grade | Elided grade would widen an exported or persisted contract illegally | Spell out the hidden dimensions explicitly at the boundary |
-| `OBS-701` | observability | Debug/trace optic used without a matching grade or mode | Add the correct observability grade in the full language |
+| `OBS-701` | observability | Unsupported observability query method (`.profile`/`.replay` deferred in narrow v0) | Use `.tap("label")` or `.record("event")`; defer profile/replay CLI until M8+ |
+| `OBS-702` | observability | Observability hook appears after `.get`/`.set`/`.map` (prefix-only in v0) | Move `.tap`/`.record` before query methods |
 | `BTS-801` | bootstrap | Self-hosted output diverged from the seed compiler | Run differential harness and compare diagnostics |
 | `KRN-901` | kernel | Kernel target used an unsupported host dependency | Replace with a target-approved runtime optic |
 | `INI-101` | init | Project intent is incomplete or contradictory | Supply or revise runtime family, target, or domain answers in the wizard or intent file |

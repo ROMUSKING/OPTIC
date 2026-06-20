@@ -345,14 +345,21 @@ fn compose_fusion_block_note(
     map_param: &str,
     span: Span,
 ) -> Option<Diagnostic> {
-    if let Some(prism_leaf) = optic_cgir::compose_chain_prism_leaf(g, compose_id) {
+    if let Some((reason, leaf_id)) = optic_cgir::compose_chain_forbidden_leaf(g, compose_id) {
+        let msg = match reason {
+            "prism_in_compose" => "compose fusion blocked — compose chain contains PrismLeaf",
+            "traversal_in_compose" => {
+                "compose fusion blocked — compose chain contains TraversalLeaf"
+            }
+            _ => "compose fusion blocked — compose chain contains unsupported leaf",
+        };
         return Some(optic_diagnostics::fusion_compose_legality_diag(
             span,
-            "compose fusion blocked — compose chain contains PrismLeaf",
+            msg,
             serde_json::json!({
-                "reason": "prism_in_compose",
+                "reason": reason,
                 "compose_id": compose_id,
-                "leaf_id": prism_leaf,
+                "leaf_id": leaf_id,
             }),
         ));
     }
@@ -455,6 +462,9 @@ fn intermediate_escapes_query(
             focus,
             ..
         }) => (preview_param.as_str(), focus.as_str()),
+        Some(CgirNode::TraversalLeaf {
+            get_param, focus, ..
+        }) => (get_param.as_str(), focus.as_str()),
         _ => return false,
     };
     // Rhs param names the intermediate flowing through compose (e.g. `x` in `get x => ...`).
@@ -481,9 +491,11 @@ fn flatten_product_children(g: &CgirGraph, id: NodeId) -> Result<Vec<NodeId>, St
             Ok(out)
         }
         Some(CgirNode::ProductFlat { children, .. }) => Ok(children.clone()),
-        Some(CgirNode::OpticLeaf { .. }) | Some(CgirNode::PrismLeaf { .. }) => Ok(vec![id]),
+        Some(CgirNode::OpticLeaf { .. })
+        | Some(CgirNode::PrismLeaf { .. })
+        | Some(CgirNode::TraversalLeaf { .. }) => Ok(vec![id]),
         Some(_) => Err(format!(
-            "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf/PrismLeaf"
+            "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf/PrismLeaf/TraversalLeaf"
         )),
         None => Err(format!("flatten_product_children: node {id} out of bounds")),
     }
@@ -1695,6 +1707,36 @@ mod tests {
         assert!(matches!(hir_sub, HirExpr::FocusField { .. }));
     }
 
+    fn mk_traversal(
+        id: NodeId,
+        name: &str,
+        costate: &str,
+        focus: &str,
+        sum: Arc<hir::OpticSummary>,
+    ) -> CgirNode {
+        CgirNode::TraversalLeaf {
+            id,
+            name: name.into(),
+            costate: costate.into(),
+            focus: focus.into(),
+            grade: sum.get_grade.clone(),
+            get_fn: String::new(),
+            set_fn: String::new(),
+            get_param: "s".into(),
+            get_body: Arc::new(HirExpr::CursorIndex {
+                cursor: "cursor".into(),
+                field: "healths".into(),
+                span: Span::dummy(),
+            }),
+            set_state_param: Some("s".into()),
+            set_value_param: Some("v".into()),
+            set_value_body: Some(Arc::new(HirExpr::Var("v".into(), Span::dummy()))),
+            summary: sum,
+            provenance: Span::dummy(),
+            m7_reserved: false,
+        }
+    }
+
     fn mk_prism(
         id: NodeId,
         name: &str,
@@ -1869,6 +1911,91 @@ mod tests {
     }
 
     #[test]
+    fn compose_fusion_blocked_on_traversal_in_compose() {
+        let sum_lhs = Arc::new(hir::OpticSummary {
+            name: Some("H".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_traversal = Arc::new(hir::OpticSummary {
+            name: Some("T".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: sum_lhs.get_grade.clone(),
+            put_grade: sum_lhs.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("seq".into(), 2);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "H", "Entities", "f32", Arc::clone(&sum_lhs)),
+                mk_traversal(1, "T", "f32", "f32", Arc::clone(&sum_traversal)),
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_lhs.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 3,
+                    optic_name: "seq".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "h".into(),
+                    map_body: Arc::new(HirExpr::Var("h".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![3],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("compose+traversal should still verify unfused");
+        assert_eq!(out.graph.roots, vec![3]);
+        assert!(
+            out.fusion_notes.iter().any(|d| {
+                d.code == optic_diagnostics::FUS_COMPOSE_LEGALITY_BLOCKED
+                    && d.evidence["reason"] == "traversal_in_compose"
+            }),
+            "compose+traversal must emit FUS-502 traversal_in_compose"
+        );
+    }
+
+    #[test]
     fn flatten_product_children_accepts_prism_leaf() {
         let sum = Arc::new(hir::OpticSummary {
             name: Some("P".into()),
@@ -1925,6 +2052,66 @@ mod tests {
             region_map: hir::RegionMap::default(),
         };
         let children = flatten_product_children(&g, 2).expect("prism in product");
+        assert_eq!(children, vec![0, 1]);
+    }
+
+    #[test]
+    fn flatten_product_children_accepts_traversal_leaf() {
+        let sum = Arc::new(hir::OpticSummary {
+            name: Some("T".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![
+                mk_traversal(0, "T", "Entities", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "H", "Entities", "f32", sum),
+                CgirNode::Product {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: hir::ConcreteGrade {
+                        cache: 1,
+                        ownership: OwnershipDim {
+                            share: Rational::one(),
+                            read_only: false,
+                            must_use: false,
+                        },
+                    },
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![2],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
+        };
+        let children = flatten_product_children(&g, 2).expect("traversal in product");
         assert_eq!(children, vec![0, 1]);
     }
 }

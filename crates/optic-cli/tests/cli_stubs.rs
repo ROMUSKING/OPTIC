@@ -39,6 +39,57 @@ fn explain_fus502() {
 }
 
 #[test]
+fn explain_obs701_catalog() {
+    let out = opticc()
+        .args(["explain", "OBS-701"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&out);
+    assert!(stdout.contains("OBS-701"));
+    assert!(stdout.contains("tap_health.opt"));
+    assert!(stdout.contains("unsupported_profile.opt"));
+    assert!(stdout.contains("unsupported_replay.opt"));
+    assert!(stdout.contains("profile"));
+    assert!(stdout.contains("replay"));
+}
+
+#[test]
+fn explain_obs703_catalog() {
+    let out = opticc()
+        .args(["explain", "OBS-703"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&out);
+    assert!(stdout.contains("OBS-703"));
+    assert!(stdout.contains("hook label"));
+    assert!(stdout.contains("defense-in-depth"));
+    assert!(stdout.contains("docs/observability-v0.md"));
+}
+
+#[test]
+fn explain_obs702_catalog() {
+    let out = opticc()
+        .args(["explain", "OBS-702"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&out);
+    assert!(stdout.contains("OBS-702"));
+    assert!(stdout.contains("trailing_tap.opt"));
+    assert!(stdout.contains("trailing_record.opt"));
+    assert!(stdout.contains("prefix-only"));
+    assert!(stdout.contains("docs/observability-v0.md"));
+}
+
+#[test]
 fn explain_cgi006_catalog() {
     let out = opticc()
         .args(["explain", "CGI-006"])
@@ -54,7 +105,8 @@ fn explain_cgi006_catalog() {
     }
     assert!(stdout.contains("docs/observability-v0.md"));
     assert!(stdout.contains("explain TYP-010"));
-    assert!(stdout.contains("M8; rejected in v0 via CGI-006"));
+    assert!(stdout.contains("m7_reserved=true"));
+    assert!(stdout.contains("m7_reserved=false"));
 }
 
 #[test]

@@ -1,0 +1,5 @@
+CGIR (3 nodes, roots [2])
+  [0] OpticLeaf(HealthView)  provenance=Build
+  [1] Tap(HealthView,health_probe,m7_reserved=false)  provenance=Build
+  [2] QueryMap(HealthView)  provenance=Build
+

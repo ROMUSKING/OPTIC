@@ -1,0 +1,17 @@
+-- M8 observability: prefix tap + record ordering before map
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities
+        .query(HealthView)
+        .tap("probe_a")
+        .record("probe_b")
+        .map(|h| h - 10.0);
+}

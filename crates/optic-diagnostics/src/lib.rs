@@ -94,6 +94,9 @@ pub const TYPE_BODY_MISMATCH: &str = "TYP-002";
 pub const TYPE_GRADE_SYNTAX: &str = "TYP-003";
 pub const TYPE_BODY_UNINFERABLE: &str = "TYP-004";
 pub const TYPE_UNSUPPORTED_V0: &str = "TYP-010";
+pub const OBS_UNSUPPORTED_METHOD: &str = "OBS-701";
+pub const OBS_TRAILING_HOOK: &str = "OBS-702";
+pub const OBS_INVALID_HOOK_LABEL: &str = "OBS-703";
 pub const EXPLAIN_UNKNOWN_NODE: &str = "EXP-001";
 
 fn ranked(fixes: &[&str]) -> Vec<RankedFix> {
@@ -411,14 +414,8 @@ pub fn cgir_m7_reserved_diag(
             "reason": reason_key,
             "milestone": milestone,
         }),
-        minimal_fix_options: vec![
-            "remove stub M7/M8 reserved nodes from CGIR graphs".into(),
-            "defer traversal/observability lowering until supported".into(),
-        ],
-        ranked_fixes: ranked(&[
-            "remove stub M7/M8 reserved nodes from CGIR graphs",
-            "defer traversal/observability lowering until supported",
-        ]),
+        minimal_fix_options: cgir_m7_reserved_fixes(kind).0,
+        ranked_fixes: cgir_m7_reserved_fixes(kind).1,
         confidence: 1.0,
         next_commands: vec![
             "opticc explain CGI-006".into(),
@@ -491,6 +488,19 @@ mod cgir_verify_tests {
     fn cgir_verify_failed_diag_falls_back_to_cgi004() {
         let d = cgir_verify_failed_diag("node 0: compose edge out of bounds");
         assert_eq!(d.code, CGIR_VERIFY_FAILED);
+    }
+
+    #[test]
+    fn obs_invalid_hook_label_diag_uses_type_phase() {
+        let d = obs_invalid_hook_label_diag(
+            Span::dummy(),
+            "tap",
+            "observability hook label contains invalid character",
+        );
+        assert_eq!(d.code, OBS_INVALID_HOOK_LABEL);
+        assert_eq!(d.phase, Phase::Type);
+        assert!(d.rule.contains("invalid character"));
+        assert_eq!(d.evidence["method"], "tap");
     }
 }
 
@@ -617,16 +627,139 @@ pub fn type_unsupported_v0_diag(
         rule: detail.into(),
         evidence,
         minimal_fix_options: vec![
-            "use lens-like GradedOptic or GradedPrism forms supported in v0".into(),
-            "defer traversal and host boundaries until M7+".into(),
+            "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0".into(),
+            "defer host/foreign boundaries until M7+".into(),
         ],
         ranked_fixes: ranked(&[
-            "use lens-like GradedOptic or GradedPrism forms supported in v0",
-            "defer traversal and host boundaries until M7+",
+            "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0",
+            "defer host/foreign boundaries until M7+",
         ]),
         confidence: 1.0,
         next_commands: vec![
             "opticc explain TYP-010".into(),
+            "opticc check file.opt --json".into(),
+        ],
+    }
+}
+
+fn cgir_m7_reserved_fixes(kind: &str) -> (Vec<String>, Vec<RankedFix>) {
+    match kind {
+        "Tap" | "Record" => (
+            vec![
+                "remove stub Tap/Record nodes from CGIR graphs".into(),
+                "use .tap(\"label\") or .record(\"event\") on query chains (m7_reserved=false)"
+                    .into(),
+            ],
+            ranked(&[
+                "remove stub Tap/Record nodes from CGIR graphs",
+                "use .tap(\"label\") or .record(\"event\") on query chains (m7_reserved=false)",
+            ]),
+        ),
+        _ => (
+            vec![
+                "remove stub M7 reserved nodes from CGIR graphs".into(),
+                "lower prism/traversal optics with m7_reserved=false".into(),
+            ],
+            ranked(&[
+                "remove stub M7 reserved nodes from CGIR graphs",
+                "lower prism/traversal optics with m7_reserved=false",
+            ]),
+        ),
+    }
+}
+
+/// OBS-701: profile/replay observability query methods deferred in narrow v0.
+pub fn obs_unsupported_method_diag(
+    span: Span,
+    method: &str,
+    hook_value: Option<&str>,
+) -> Diagnostic {
+    let mut evidence = json!({ "method": method, "milestone": "M8" });
+    if let Some(v) = hook_value {
+        match method {
+            "profile" => evidence["mode"] = json!(v),
+            "replay" => evidence["checkpoint"] = json!(v),
+            _ => {}
+        }
+    }
+    Diagnostic {
+        code: OBS_UNSUPPORTED_METHOD.into(),
+        title: "unsupported observability query method".into(),
+        severity: Severity::Error,
+        phase: Phase::Type,
+        primary_span: span,
+        related_spans: vec![],
+        rule: format!(
+            "query method `{method}` is not supported in narrow v0 (use .tap/.record or defer profile/replay)"
+        ),
+        evidence,
+        minimal_fix_options: vec![
+            "use .tap(\"label\") or .record(\"event\") for v0 observability hooks".into(),
+            "defer profile/replay CLI until M8+".into(),
+        ],
+        ranked_fixes: ranked(&[
+            "use .tap(\"label\") or .record(\"event\") for v0 observability hooks",
+            "defer profile/replay CLI until M8+",
+        ]),
+        confidence: 1.0,
+        next_commands: vec![
+            "opticc explain OBS-701".into(),
+            "opticc check file.opt --json".into(),
+        ],
+    }
+}
+
+/// OBS-703: observability hook label failed defense-in-depth validation in typeck.
+pub fn obs_invalid_hook_label_diag(span: Span, method: &str, rule: &str) -> Diagnostic {
+    Diagnostic {
+        code: OBS_INVALID_HOOK_LABEL.into(),
+        title: "invalid observability hook label".into(),
+        severity: Severity::Error,
+        phase: Phase::Type,
+        primary_span: span,
+        related_spans: vec![],
+        rule: format!("observability hook label: {rule}"),
+        evidence: json!({ "method": method, "rule": rule, "milestone": "M8" }),
+        minimal_fix_options: vec![
+            "use single-line ASCII labels [A-Za-z0-9_.-] (max 128 bytes)".into(),
+            "escape only \\\" in source literals; reject multiline/control chars".into(),
+        ],
+        ranked_fixes: ranked(&[
+            "use single-line ASCII labels [A-Za-z0-9_.-] (max 128 bytes)",
+            "escape only \\\" in source literals; reject multiline/control chars",
+        ]),
+        confidence: 1.0,
+        next_commands: vec![
+            "opticc explain OBS-703".into(),
+            "opticc check file.opt --json".into(),
+        ],
+    }
+}
+
+/// OBS-702: tap/record hooks must be prefix-only on query chains in narrow v0.
+pub fn obs_trailing_hook_diag(span: Span, method: &str) -> Diagnostic {
+    Diagnostic {
+        code: OBS_TRAILING_HOOK.into(),
+        title: "observability hook must precede query methods".into(),
+        severity: Severity::Error,
+        phase: Phase::Type,
+        primary_span: span,
+        related_spans: vec![],
+        rule: format!(
+            "`.{method}(...)` must appear before .get/.set/.map in narrow v0 (prefix-only hooks)"
+        ),
+        evidence: json!({ "method": method, "milestone": "M8" }),
+        minimal_fix_options: vec![
+            "move .tap/.record before .get/.set/.map".into(),
+            "defer interleaved hook ordering until M8+".into(),
+        ],
+        ranked_fixes: ranked(&[
+            "move .tap/.record before .get/.set/.map",
+            "defer interleaved hook ordering until M8+",
+        ]),
+        confidence: 1.0,
+        next_commands: vec![
+            "opticc explain OBS-702".into(),
             "opticc check file.opt --json".into(),
         ],
     }
@@ -674,11 +807,11 @@ pub fn type_clause_mix_diag(span: Span, detail: &str, fragment: &str, optic: &st
         rule: detail.into(),
         evidence: json!({ "fragment": fragment, "optic": optic, "feature": "clause_mix" }),
         minimal_fix_options: vec![
-            "use get/put only on GradedOptic".into(),
+            "use get/put only on GradedOptic or GradedTraversal".into(),
             "use preview/review only on GradedPrism".into(),
         ],
         ranked_fixes: ranked(&[
-            "use get/put only on GradedOptic",
+            "use get/put only on GradedOptic or GradedTraversal",
             "use preview/review only on GradedPrism",
         ]),
         confidence: 0.95,
@@ -716,7 +849,55 @@ pub fn type_grade_syntax_diag(span: Span, detail: &str, fragment: &str, optic: &
     }
 }
 
+fn cgir_compose_forbidden_fixes(reason: &str) -> (Vec<String>, Vec<RankedFix>, Vec<String>) {
+    let fixes: &[&str] = match reason {
+        "prism_in_compose" => &[
+            "use entities.query(PrismOptic).get()/.set() without >>> compose",
+            "split prism optics into separate queries",
+        ],
+        "traversal_in_compose" => &[
+            "use entities.query(TraversalOptic).get()/.set()/.map() without >>> compose",
+            "split traversal optics into separate queries",
+        ],
+        _ => {
+            return (
+                vec![],
+                vec![],
+                vec!["opticc dump-cgir file.opt --check".into()],
+            )
+        }
+    };
+    (
+        fixes.iter().map(|s| (*s).into()).collect(),
+        ranked(fixes),
+        vec![
+            "opticc explain CGI-003".into(),
+            "opticc dump-cgir file.opt --check".into(),
+        ],
+    )
+}
+
 pub fn cgir_diag(code: &str, span: Span, rule: &str, evidence: serde_json::Value) -> Diagnostic {
+    let (minimal_fix_options, ranked_fixes, next_commands) = if code == CGIR_UNSUPPORTED_EXPR {
+        evidence
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .filter(|r| matches!(*r, "prism_in_compose" | "traversal_in_compose"))
+            .map(cgir_compose_forbidden_fixes)
+            .unwrap_or_else(|| {
+                (
+                    vec![],
+                    vec![],
+                    vec!["opticc dump-cgir file.opt --check".into()],
+                )
+            })
+    } else {
+        (
+            vec![],
+            vec![],
+            vec!["opticc dump-cgir file.opt --check".into()],
+        )
+    };
     Diagnostic {
         code: code.into(),
         title: "CGIR invariant violation".into(),
@@ -726,9 +907,9 @@ pub fn cgir_diag(code: &str, span: Span, rule: &str, evidence: serde_json::Value
         related_spans: vec![],
         rule: rule.into(),
         evidence,
-        minimal_fix_options: vec![],
-        ranked_fixes: vec![],
+        minimal_fix_options,
+        ranked_fixes,
         confidence: 1.0,
-        next_commands: vec!["opticc dump-cgir file.opt --check".into()],
+        next_commands,
     }
 }

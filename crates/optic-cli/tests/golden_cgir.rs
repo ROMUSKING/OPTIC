@@ -168,3 +168,73 @@ fn golden_cgir_pre_partial_prism() {
 fn golden_cgir_post_partial_prism() {
     assert_golden("cgir/post", "partial_prism.opt", false);
 }
+
+#[test]
+fn golden_cgir_pre_all_healths() {
+    assert_golden("cgir/pre", "all_healths.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_all_healths() {
+    assert_golden("cgir/post", "all_healths.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_traversal_get() {
+    assert_golden("cgir/pre", "traversal_get.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_traversal_get() {
+    assert_golden("cgir/post", "traversal_get.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_traversal_set() {
+    assert_golden("cgir/pre", "traversal_set.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_traversal_set() {
+    assert_golden("cgir/post", "traversal_set.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_tap_health() {
+    assert_golden("cgir/pre", "tap_health.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_tap_health() {
+    assert_golden("cgir/post", "tap_health.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_record_health() {
+    assert_golden("cgir/pre", "record_health.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_record_health() {
+    assert_golden("cgir/post", "record_health.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_tap_record_chain() {
+    assert_golden("cgir/pre", "tap_record_chain.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_tap_record_chain() {
+    assert_golden("cgir/post", "tap_record_chain.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_compose_tap() {
+    assert_golden("cgir/pre", "compose_tap.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_compose_tap() {
+    assert_golden("cgir/post", "compose_tap.opt", false);
+}

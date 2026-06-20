@@ -15,34 +15,45 @@ Cross-reference: [v0 executable spec](v0-executable-spec.md), book ch12–14 (gr
 
 These are enforced through `optic-typeck` and verified on CGIR compose/product wiring.
 
-## M7 prism (done)
+## M7 prism + traversal (done)
 
 - **GradedPrism** surface, HIR summaries (preview/review regions), and `PrismLeaf` CGIR lowering (`m7_reserved=false`)
 - Rust codegen: preview as `Option<focus>`, review as conditional store in map queries
 - Acceptance: `examples/alive_filter.opt` (full golden + execution parity)
 
+- **GradedTraversal** surface (v0 get/put clauses), HIR summaries, and `TraversalLeaf` CGIR lowering (`m7_reserved=false`)
+- Rust codegen: entity-loop get/put/map with `// optic(traversal):` + optional `// simd-eligible` metadata (no intrinsics in v0)
+- Acceptance: `examples/all_healths.opt` (full golden + execution parity)
+
 ## Deferred to M7+
 
-- **GradedTraversal** surface, HIR lowering, and `TraversalLeaf` CGIR codegen
 - Coinductive grade dimensions, staging grades, session types (book ch12–14)
 - `unsafe optic` and `extern` / foreign host boundaries (rejected **TYP-010** in v0)
+- traverse/update surface syntax (book ch13; v0 uses get/put for `GradedTraversal`)
+- Full AVX intrinsics / LLVM SIMD bridge (beyond v0 metadata comment)
 
-CGIR reserves `TraversalLeaf` stubs. Materialized stubs (`m7_reserved=true`) or unstubs traversal/tap/record nodes still fail **CGI-006** in narrow v0.
+CGIR rejects stub `TraversalLeaf` (`m7_reserved=true`) and stub `Tap`/`Record` (`m7_reserved=true`) via **CGI-006**. Lowered observability nodes (`m7_reserved=false`) pass verify.
 
-## Deferred to M8
+## M8 observability (scaffolding done)
 
-Observability (`Tap`, `Record`) — see [observability-v0.md](observability-v0.md).
+`.tap`/`.record` query methods → `Tap`/`Record` CGIR + comment hooks. Profile/replay → **OBS-701**; trailing hooks → **OBS-702**. Witnesses: `tap_record_chain.opt`, `compose_tap.opt`, `unsupported_replay.opt`, `trailing_tap.opt`, `trailing_record.opt`. See [observability-v0.md](observability-v0.md).
 
 ## Diagnostic pointers
 
 | Code | When |
 |------|------|
-| TYP-010 | Traversal/unsafe/extern on surface (`collect_unsupported_surface`) |
-| CGI-006 | Unstubs M7/M8 reserved CGIR node (`TraversalLeaf`, `Tap`, `Record`, or stub `PrismLeaf`) |
-| GRA-* / ALI-* | Grade and alias checks on supported lens forms |
+| TYP-010 | `unsafe optic` / `extern` on surface (`collect_unsupported_surface`) |
+| TYP-003 | Clause mix (e.g. GradedTraversal + preview/review) |
+| CGI-003 | Compose+prism/traversal (`prism_in_compose`, `traversal_in_compose`) |
+| CGI-006 | Stub M7/M8 reserved CGIR node (`m7_reserved=true`) |
+| OBS-701 | Unsupported observability query method (profile/replay) |
+| OBS-702 | Trailing `.tap`/`.record` after `.get`/`.set`/`.map` (prefix-only in v0) |
+| GRA-* / ALI-* | Grade and alias checks on supported lens/prism/traversal forms |
 
 ```bash
 opticc explain TYP-010
-opticc check examples/alive_filter.opt
+opticc explain TYP-003
+opticc explain CGI-003
+opticc check examples/all_healths.opt
 opticc check examples/unsupported_traversal.opt --json
 ```

@@ -1,0 +1,13 @@
+-- M7 traversal set query (put as write path)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(AllHealths).set(42.0);
+}

@@ -54,7 +54,93 @@ pub struct FocusReport {
     pub focus_fields: Vec<String>,
 }
 
-/// Reject deferred surface features (traversal, host/foreign boundaries) before M7.
+fn is_query_operation(m: &syn::QueryMethod) -> bool {
+    matches!(
+        m,
+        syn::QueryMethod::Get(_) | syn::QueryMethod::Set(_, _) | syn::QueryMethod::Map(_, _)
+    )
+}
+
+/// Validate observability hooks on a single query chain (OBS-701/702 + label defense).
+fn collect_observability_from_query_chain(qc: &syn::QueryChain, diags: &mut Vec<Diagnostic>) {
+    let mut seen_query_op = false;
+    for m in &qc.methods {
+        match m {
+            syn::QueryMethod::Profile(mode, sp) => {
+                diags.push(diag::obs_unsupported_method_diag(
+                    *sp,
+                    "profile",
+                    Some(mode),
+                ));
+            }
+            syn::QueryMethod::Replay(checkpoint, sp) => {
+                diags.push(diag::obs_unsupported_method_diag(
+                    *sp,
+                    "replay",
+                    Some(checkpoint),
+                ));
+            }
+            syn::QueryMethod::Tap(label, sp) | syn::QueryMethod::Record(label, sp) => {
+                if let Err(rule) = optic_syntax::validate_obs_hook_label(label) {
+                    let method = if matches!(m, syn::QueryMethod::Tap(_, _)) {
+                        "tap"
+                    } else {
+                        "record"
+                    };
+                    diags.push(diag::obs_invalid_hook_label_diag(*sp, method, rule));
+                } else if seen_query_op {
+                    let method = if matches!(m, syn::QueryMethod::Tap(_, _)) {
+                        "tap"
+                    } else {
+                        "record"
+                    };
+                    diags.push(diag::obs_trailing_hook_diag(*sp, method));
+                }
+            }
+            _ if is_query_operation(m) => seen_query_op = true,
+            _ => {}
+        }
+    }
+}
+
+/// Walk all expression shapes for observability surface violations.
+fn collect_observability_from_expr(e: &syn::Expr, diags: &mut Vec<Diagnostic>) {
+    match e {
+        syn::Expr::QueryChain(qc) => collect_observability_from_query_chain(qc, diags),
+        syn::Expr::Block { stmts, result, .. } => {
+            for s in stmts {
+                collect_observability_from_expr(&s.expr, diags);
+            }
+            if let Some(r) = result {
+                collect_observability_from_expr(r, diags);
+            }
+        }
+        syn::Expr::Binary { left, right, .. } => {
+            collect_observability_from_expr(left, diags);
+            collect_observability_from_expr(right, diags);
+        }
+        syn::Expr::Assign { target, value, .. } => {
+            collect_observability_from_expr(target, diags);
+            collect_observability_from_expr(value, diags);
+        }
+        syn::Expr::Field(field) => collect_observability_from_field(field, diags),
+        syn::Expr::Atom(_) => {}
+    }
+}
+
+fn collect_observability_from_field(field: &syn::FieldExpr, diags: &mut Vec<Diagnostic>) {
+    match field {
+        syn::FieldExpr::Base(_, _) => {}
+        syn::FieldExpr::FieldAccess { base, .. } => {
+            collect_observability_from_field(base, diags);
+        }
+        syn::FieldExpr::Index { base, index, .. } => {
+            collect_observability_from_field(base, diags);
+            collect_observability_from_expr(index, diags);
+        }
+    }
+}
+
 pub fn collect_unsupported_surface(prog: &syn::Program) -> Vec<Diagnostic> {
     let mut diags = vec![];
     for item in &prog.items {
@@ -75,13 +161,12 @@ pub fn collect_unsupported_surface(prog: &syn::Program) -> Vec<Diagnostic> {
                         "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
                         Some(&decl.name.node),
                     ));
-                } else if decl.type_ctor == syn::OpticTypeCtor::GradedTraversal {
-                    diags.push(diag::type_unsupported_v0_diag(
-                        decl.span,
-                        "traversal",
-                        "traversal syntax (`GradedTraversal`) is not supported in narrow v0 (M7+)",
-                        Some(&decl.name.node),
-                    ));
+                }
+            }
+            syn::Item::Expr(e) => collect_observability_from_expr(e, &mut diags),
+            syn::Item::Fn(f) => {
+                for stmt in &f.body {
+                    collect_observability_from_expr(&stmt.expr, &mut diags);
                 }
             }
             _ => {}
@@ -105,6 +190,7 @@ pub fn typeck_pass(hir: hir::HirProgram) -> (TypedHir, Vec<Diagnostic>) {
                 diags.extend(validate_grade_syntax(&decl.grade, &decl.name.node));
                 diags.extend(validate_optic_clause_mixing(decl));
                 diags.extend(validate_prism_clauses(decl));
+                diags.extend(validate_traversal_clauses(decl));
                 diags.extend(check_optic_body_types(decl, &region_map));
             }
             hir::HirItem::Let {
@@ -509,7 +595,19 @@ fn le_share(a: &Rational, b: &Rational) -> bool {
 
 /// True when any TYP-010 diagnostic is present (strict gate for check/dump paths).
 pub fn has_unsupported_surface(diags: &[Diagnostic]) -> bool {
-    diags.iter().any(|d| d.code == diag::TYPE_UNSUPPORTED_V0)
+    diags.iter().any(|d| {
+        d.code == diag::TYPE_UNSUPPORTED_V0
+            || d.code == diag::OBS_UNSUPPORTED_METHOD
+            || d.code == diag::OBS_TRAILING_HOOK
+            || d.code == diag::OBS_INVALID_HOOK_LABEL
+    })
+}
+
+/// True when diagnostics include OBS-701 or OBS-702.
+pub fn has_unsupported_observability(diags: &[Diagnostic]) -> bool {
+    diags
+        .iter()
+        .any(|d| d.code == diag::OBS_UNSUPPORTED_METHOD || d.code == diag::OBS_TRAILING_HOOK)
 }
 
 /// TYP-010 diagnostics that apply to a specific optic/extern name.
@@ -986,6 +1084,23 @@ fn validate_optic_clause_mixing(decl: &syn::OpticDecl) -> Vec<Diagnostic> {
                 optic,
             ));
         }
+    } else if decl.type_ctor == syn::OpticTypeCtor::GradedTraversal {
+        if let Some(preview) = &decl.preview {
+            out.push(diag::type_clause_mix_diag(
+                preview.span,
+                "GradedTraversal cannot use preview clause (use get instead)",
+                "preview",
+                optic,
+            ));
+        }
+        if let Some(review) = &decl.review {
+            out.push(diag::type_clause_mix_diag(
+                review.span,
+                "GradedTraversal cannot use review clause (use put instead)",
+                "review",
+                optic,
+            ));
+        }
     } else if decl.type_ctor == syn::OpticTypeCtor::GradedOptic {
         if let Some(preview) = &decl.preview {
             out.push(diag::type_clause_mix_diag(
@@ -1020,6 +1135,21 @@ fn validate_prism_clauses(decl: &syn::OpticDecl) -> Vec<Diagnostic> {
     }
     if decl.review.is_none() {
         out.push(diag::type_body_uninferable_diag(decl.span, "review", optic));
+    }
+    out
+}
+
+fn validate_traversal_clauses(decl: &syn::OpticDecl) -> Vec<Diagnostic> {
+    if !decl.is_traversal() {
+        return vec![];
+    }
+    let optic = decl.name.node.as_str();
+    let mut out = vec![];
+    if decl.get.is_none() {
+        out.push(diag::type_body_uninferable_diag(decl.span, "get", optic));
+    }
+    if decl.put.is_none() {
+        out.push(diag::type_body_uninferable_diag(decl.span, "put", optic));
     }
     out
 }
@@ -1602,18 +1732,227 @@ fn main() { entities.query(X).get(); }
     }
 
     #[test]
-    fn test_collect_unsupported_surface_traversal() {
+    fn test_collect_unsupported_surface_profile_obs701() {
+        let src = include_str!("../../../examples/unsupported_profile.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let diags = collect_unsupported_surface(&prog);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, diag::OBS_UNSUPPORTED_METHOD);
+        assert_eq!(diags[0].evidence["method"], "profile");
+        assert_eq!(diags[0].evidence["mode"], "run");
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_replay_obs701() {
+        let src = include_str!("../../../examples/unsupported_replay.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let diags = collect_unsupported_surface(&prog);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, diag::OBS_UNSUPPORTED_METHOD);
+        assert_eq!(diags[0].evidence["method"], "replay");
+        assert_eq!(diags[0].evidence["checkpoint"], "checkpoint");
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_invalid_hook_label_obs703() {
+        use syn::{
+            AtomExpr, Expr, Item, OpticAtom, OpticExpr, Program, QueryChain, QueryMethod, Spanned,
+        };
+        let span = Span::dummy();
+        let qc = QueryChain {
+            base: Box::new(Expr::Atom(AtomExpr::Ident(Spanned::new(
+                "entities".into(),
+                span,
+            )))),
+            optic: OpticExpr::Atom(OpticAtom::Named(Spanned::new("H".into(), span))),
+            methods: vec![QueryMethod::Tap("bad\nlabel".into(), span)],
+            span,
+        };
+        let prog = Program {
+            items: vec![Item::Expr(Expr::QueryChain(qc))],
+            span,
+        };
+        let diags = collect_unsupported_surface(&prog);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, diag::OBS_INVALID_HOOK_LABEL);
+        assert_eq!(diags[0].phase, diag::Phase::Type);
+        assert_eq!(diags[0].evidence["method"], "tap");
+        assert_eq!(
+            diags[0].evidence["rule"],
+            "observability hook label must not contain control characters"
+        );
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_trailing_tap_obs702() {
+        let src = include_str!("../../../examples/trailing_tap.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let diags = collect_unsupported_surface(&prog);
+        assert!(
+            diags.iter().any(|d| d.code == diag::OBS_TRAILING_HOOK),
+            "trailing tap must emit OBS-702: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_tap_record_allowed() {
+        for src in [
+            include_str!("../../../examples/tap_health.opt"),
+            include_str!("../../../examples/record_health.opt"),
+        ] {
+            let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+            let diags = collect_unsupported_surface(&prog);
+            assert!(
+                diags.is_empty(),
+                "tap/record positive examples must pass surface gate: {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_trailing_record_obs702() {
+        let src = include_str!("../../../examples/trailing_record.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let diags = collect_unsupported_surface(&prog);
+        assert!(
+            diags.iter().any(|d| d.code == diag::OBS_TRAILING_HOOK),
+            "trailing record must emit OBS-702: {diags:?}"
+        );
+        assert_eq!(diags[0].evidence["method"], "record");
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_nested_replay_in_binary() {
         let src = r#"
 data Entities { healths: SoA<f32> }
-optic Scan: GradedTraversal<Entities, f32, _> {
+optic H: GradedOptic<Entities, f32, _> {
     get s => s.healths[s.id]
+    put (s,v) => { s.healths[s.id] = v }
+}
+fn main() {
+    entities.query(H).get() + entities.query(H).replay("cp").map(|h| h);
 }
 "#;
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert!(diags
-            .iter()
-            .any(|d| d.evidence["feature"].as_str() == Some("traversal")));
+        assert!(
+            diags.iter().any(|d| d.code == diag::OBS_UNSUPPORTED_METHOD),
+            "replay in binary rhs must emit OBS-701: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_unsupported_surface_traversal_allowed() {
+        let src = include_str!("../../../examples/all_healths.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let diags = collect_unsupported_surface(&prog);
+        assert!(
+            diags.is_empty(),
+            "GradedTraversal must not be rejected via TYP-010: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_traversal_rejects_preview_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadTraversal: GradedTraversal<Entities, f32, _> {
+    preview s => s.healths[s.id]
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_GRADE_SYNTAX
+                    && d.evidence["fragment"].as_str() == Some("preview")
+            }),
+            "GradedTraversal + preview must emit TYP-003: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_traversal_rejects_review_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadTraversal: GradedTraversal<Entities, f32, _> {
+    review (s, a) => { s.healths[s.id] = a }
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_GRADE_SYNTAX
+                    && d.evidence["fragment"].as_str() == Some("review")
+            }),
+            "GradedTraversal + review must emit TYP-003: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_traversal_missing_put_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadTraversal: GradedTraversal<Entities, f32, _> {
+    get s => s.healths[s.id]
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_BODY_UNINFERABLE
+                    && d.evidence["clause"].as_str() == Some("put")
+            }),
+            "missing put must emit TYP-004: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_traversal_missing_get_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadTraversal: GradedTraversal<Entities, f32, _> {
+    put (s, v) => { s.healths[s.id] = v }
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_BODY_UNINFERABLE
+                    && d.evidence["clause"].as_str() == Some("get")
+            }),
+            "missing get must emit TYP-004: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_explain_focus_traversal_lowers_and_reports() {
+        let src = include_str!("../../../examples/all_healths.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let unsupported = collect_unsupported_surface(&prog);
+        assert!(unsupported.is_empty());
+        let hirp = optic_hir::lower(prog).expect("lower");
+        assert!(
+            hirp.items.iter().any(
+                |i| matches!(i, hir::HirItem::Optic { decl, .. } if decl.name.node == "AllHealths")
+            ),
+            "traversal optic must lower into HIR"
+        );
+        let (typed, diags) = typeck_pass(hirp);
+        let report =
+            explain_focus_with_diags(&typed, "AllHealths", &diags).expect("traversal focus");
+        assert_eq!(report.root_path, "entities.healths[id]");
     }
 
     #[test]

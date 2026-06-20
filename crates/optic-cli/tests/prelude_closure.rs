@@ -11,21 +11,8 @@ fn example(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn assert_typ010_json(stderr: &str, feature: &str) {
-    let v: serde_json::Value = serde_json::from_str(stderr.trim()).expect("parse json");
-    assert_eq!(v["ok"], false);
-    let diags = v["diagnostics"].as_array().expect("diagnostics");
-    let d = diags
-        .iter()
-        .find(|d| d["code"].as_str() == Some("TYP-010"))
-        .unwrap_or_else(|| panic!("missing TYP-010 in {stderr}"));
-    assert_eq!(d["evidence"]["feature"].as_str(), Some(feature));
-    let fixes = d["ranked_fixes"].as_array().expect("ranked_fixes");
-    assert!(!fixes.is_empty());
-}
-
 #[test]
-fn check_unsupported_traversal_typ010() {
+fn check_unsupported_traversal_gra110() {
     let assert = opticc()
         .args([
             "check",
@@ -35,13 +22,43 @@ fn check_unsupported_traversal_typ010() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert_typ010_json(&stderr, "traversal");
+    let v: serde_json::Value = serde_json::from_str(stderr.trim()).expect("parse json");
+    let diags = v["diagnostics"].as_array().expect("diagnostics");
+    let d = diags
+        .iter()
+        .find(|d| d["code"].as_str() == Some("GRA-110"))
+        .expect("GRA-110 for tight CacheGrade");
+    assert_eq!(d["evidence"]["optic"].as_str(), Some("AllHealths"));
+}
+
+#[test]
+fn check_all_healths_traversal_ok() {
+    opticc()
+        .args(["check", &example("all_healths.opt").to_string_lossy()])
+        .assert()
+        .success();
 }
 
 #[test]
 fn check_alive_filter_prism_ok() {
     opticc()
         .args(["check", &example("alive_filter.opt").to_string_lossy()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn check_tap_health_ok() {
+    opticc()
+        .args(["check", &example("tap_health.opt").to_string_lossy()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn check_record_health_ok() {
+    opticc()
+        .args(["check", &example("record_health.opt").to_string_lossy()])
         .assert()
         .success();
 }
@@ -79,6 +96,46 @@ fn dump_hir_alive_filter_prism() {
         .assert()
         .success()
         .stdout(predicates::str::contains("AliveFilter"));
+}
+
+#[test]
+fn dump_hir_all_healths_traversal() {
+    opticc()
+        .args(["dump-hir", &example("all_healths.opt").to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("AllHealths"))
+        .stdout(predicates::str::contains("kind=Traversal"));
+}
+
+#[test]
+fn dump_summary_all_healths_by_name() {
+    opticc()
+        .args([
+            "dump-summary",
+            &example("all_healths.opt").to_string_lossy(),
+            "--node",
+            "AllHealths",
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("AllHealths"))
+        .stdout(predicates::str::contains("lift"));
+}
+
+#[test]
+fn dump_cgir_all_healths_traversal_leaf() {
+    opticc()
+        .args([
+            "dump-cgir",
+            &example("all_healths.opt").to_string_lossy(),
+            "--node",
+            "AllHealths",
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("TraversalLeaf(AllHealths"))
+        .stdout(predicates::str::contains("m7_reserved=false"));
 }
 
 #[test]
@@ -262,7 +319,7 @@ fn explain_typ010_catalog() {
     assert!(stdout.contains("GradedPrism"));
     assert!(stdout.contains("GradedTraversal"));
     assert!(stdout.contains("alive_filter.opt"));
-    assert!(stdout.contains("unsupported_traversal.opt"));
+    assert!(stdout.contains("all_healths.opt"));
     assert!(stdout.contains("host_boundary.opt"));
     assert!(stdout.contains("docs/observability-v0.md"));
     assert!(stdout.contains("docs/effect-coeffect-v0.md"));
@@ -273,6 +330,26 @@ fn explain_typ010_catalog() {
     assert!(stdout.contains("extern"));
     assert!(stdout.contains("docs/v0-executable-spec.md"));
     assert!(stdout.contains("explain CGI-006"));
+}
+
+#[test]
+fn explain_typ003_catalog() {
+    let assert = opticc().args(["explain", "TYP-003"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("clause_mix"));
+    assert!(stdout.contains("GradedTraversal"));
+    assert!(stdout.contains("GradedTraversal + review"));
+    assert!(stdout.contains("GradedPrism: preview/review only"));
+}
+
+#[test]
+fn explain_cgi003_catalog() {
+    let assert = opticc().args(["explain", "CGI-003"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("traversal_in_compose"));
+    assert!(stdout.contains("prism_in_compose"));
+    assert!(stdout.contains("compose_traversal.opt"));
+    assert!(stdout.contains("compose_prism.opt"));
 }
 
 #[test]

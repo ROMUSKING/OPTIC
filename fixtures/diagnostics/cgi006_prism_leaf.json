@@ -10,8 +10,8 @@
         "reason": "materialized"
       },
       "minimal_fix_options": [
-        "remove stub M7/M8 reserved nodes from CGIR graphs",
-        "defer traversal/observability lowering until supported"
+        "remove stub M7 reserved nodes from CGIR graphs",
+        "lower prism/traversal optics with m7_reserved=false"
       ],
       "next_commands": [
         "opticc explain CGI-006",
@@ -26,11 +26,11 @@
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "remove stub M7/M8 reserved nodes from CGIR graphs"
+          "description": "remove stub M7 reserved nodes from CGIR graphs"
         },
         {
           "confidence": 0.8999999761581421,
-          "description": "defer traversal/observability lowering until supported"
+          "description": "lower prism/traversal optics with m7_reserved=false"
         }
       ],
       "related_spans": [],

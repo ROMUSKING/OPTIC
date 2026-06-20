@@ -378,8 +378,23 @@ fn explain_code(code: &str) -> String {
     if code == "TYP-010" {
         return explain_typ010().to_string();
     }
+    if code == "TYP-003" {
+        return explain_typ003().to_string();
+    }
+    if code == "CGI-003" {
+        return explain_cgi003().to_string();
+    }
     if code == "CGI-006" {
         return explain_cgi006().to_string();
+    }
+    if code == "OBS-701" {
+        return explain_obs701().to_string();
+    }
+    if code == "OBS-702" {
+        return explain_obs702().to_string();
+    }
+    if code == "OBS-703" {
+        return explain_obs703().to_string();
     }
     let (title, rule, phase) = match code {
         "GRA-110" => (
@@ -476,35 +491,149 @@ fn explain_code(code: &str) -> String {
     format!("{code}: {title}\nphase: {phase}\nrule: {rule}\nnext: opticc check <file.opt> --json")
 }
 
+fn explain_typ003() -> &'static str {
+    r#"TYP-003: invalid optic clause combination / grade syntax
+phase: type
+rule: mutually exclusive optic clause sets and malformed grade annotations
+
+clause_mix (feature=clause_mix in evidence):
+  - GradedOptic: get/put only (no preview/review)
+  - GradedPrism: preview/review only (no get/put)
+  - GradedTraversal: get/put only (no preview/review)
+
+grade syntax:
+  - CacheGrade<N>, LinearGrade, AffineGrade, SharedGrade
+  - OwnershipGrade<num/den> rational fractions
+
+examples:
+  - GradedTraversal + preview → TYP-003 fragment=preview
+  - GradedTraversal + review → TYP-003 fragment=review
+  - GradedPrism + get → TYP-003 fragment=get
+
+related: opticc explain TYP-004 (missing required clause body)
+
+next: opticc check file.opt --json"#
+}
+
+fn explain_cgi003() -> &'static str {
+    r#"CGI-003: unsupported expression in query / compose chain
+phase: cgir
+rule: narrow v0 rejects unsupported optic bodies and M7 leaf placement in compose
+
+compose chain (evidence.reason):
+  - prism_in_compose — PrismLeaf in >>> chain (examples/compose_prism.opt)
+  - traversal_in_compose — TraversalLeaf in >>> chain (examples/compose_traversal.opt)
+
+map/set body:
+  - unsupported surface forms in query map bodies
+  - incompatible map chain fusion
+
+fusion note: compose+prism/traversal may also surface as FUS-502 with same reason keys.
+
+examples:
+  - examples/compose_prism.opt (prism_in_compose)
+  - examples/compose_traversal.opt (traversal_in_compose)
+
+next: opticc check file.opt --json"#
+}
+
 fn explain_typ010() -> &'static str {
     r#"TYP-010: unsupported in narrow v0
 phase: type
-rule: traversal, unsafe optic, and extern/foreign host boundaries rejected before CGIR
+rule: unsafe optic and extern/foreign host boundaries rejected before CGIR
 
 rejected surface:
-  - GradedTraversal optics
   - unsafe optic boundaries
   - extern / foreign host declarations
 
-supported (M7 prism):
-  - GradedPrism optics (preview/review) — see examples/alive_filter.opt
-  - PrismLeaf CGIR lowering + Rust codegen (m7_reserved=false)
+supported (M7):
+  - GradedPrism optics (preview/review) — examples/alive_filter.opt
+  - GradedTraversal optics (get/put v0 surface) — examples/all_healths.opt
+  - PrismLeaf / TraversalLeaf CGIR lowering + Rust codegen (m7_reserved=false)
 
 still deferred:
-  - TraversalLeaf lowering + SIMD bridge (book ch13)
-  - Tap / Record observability (M8; CGI-006 if materialized)
+  - traverse/update surface syntax (book ch13; v0 uses get/put clauses)
+  - profile / replay query methods (OBS-701)
 
 examples:
   - examples/alive_filter.opt (positive prism)
-  - examples/unsupported_traversal.opt
-  - examples/host_boundary.opt
+  - examples/all_healths.opt (positive traversal)
+  - examples/host_boundary.opt (TYP-010 negative)
 
 docs:
-  - docs/observability-v0.md (tap/record deferred M8)
+  - docs/observability-v0.md (tap/record v0 comment hooks; profile/replay OBS-701)
   - docs/effect-coeffect-v0.md
   - docs/v0-executable-spec.md
 
 related: opticc explain CGI-006 (CGIR verify rejects unstubs M7/M8 reserved nodes)
+
+next: opticc check <file.opt> --json"#
+}
+
+fn explain_obs703() -> &'static str {
+    r#"OBS-703: invalid observability hook label
+phase: type
+rule: tap/record/profile/replay hook strings must satisfy narrow v0 label policy
+
+policy:
+  - single-line ASCII labels: [A-Za-z0-9_.-]
+  - max 128 bytes
+  - only \" escape in source literals
+  - no control characters or newlines
+
+parse vs type:
+  - parser rejects invalid literals at parse time (PAR-001)
+  - typeck re-validates decoded labels as defense-in-depth (OBS-703)
+
+docs:
+  - docs/observability-v0.md (hook string policy)
+
+next: opticc check <file.opt> --json"#
+}
+
+fn explain_obs702() -> &'static str {
+    r#"OBS-702: observability hook must precede query methods
+phase: type
+rule: .tap/.record must appear before .get/.set/.map in narrow v0 (prefix-only)
+
+supported ordering:
+  entities.query(Optic).tap("label").record("evt").map(|x| ...)
+
+rejected:
+  entities.query(Optic).map(|x| ...).tap("label")
+
+negative witnesses:
+  - examples/trailing_tap.opt
+  - examples/trailing_record.opt
+
+docs:
+  - docs/observability-v0.md
+
+next: opticc check <file.opt> --json"#
+}
+
+fn explain_obs701() -> &'static str {
+    r#"OBS-701: unsupported observability query method
+phase: type
+rule: profile/replay query methods are deferred in narrow v0
+
+supported (M8 scaffolding):
+  - .tap("label") on query chains — examples/tap_health.opt
+  - .record("event") on query chains — examples/record_health.opt
+  - Tap / Record CGIR with m7_reserved=false + // optic(tap|record): comment hooks
+
+still deferred:
+  - .profile(...) / .replay(...) query methods
+  - full profile/replay CLI (appendix B placeholders)
+
+negative witnesses:
+  - examples/unsupported_profile.opt
+  - examples/unsupported_replay.opt
+
+docs:
+  - docs/observability-v0.md
+
+related: opticc explain CGI-006 (stub Tap/Record with m7_reserved=true)
 
 next: opticc check <file.opt> --json"#
 }
@@ -516,13 +645,12 @@ rule: unstubs M7/M8 reserved variants must not appear in narrow v0 graphs
 
 reserved variants:
   - PrismLeaf with m7_reserved=true (stub; use m7_reserved=false for lowered prisms)
-  - TraversalLeaf — bulk get/set traversal (M7+; not lowered in v0)
-  - Tap — observability tap placeholder (M8; rejected in v0 via CGI-006)
-  - Record — observability record placeholder (M8; rejected in v0 via CGI-006)
+  - TraversalLeaf with m7_reserved=true (stub; use m7_reserved=false for lowered traversals)
+  - Tap / Record with m7_reserved=true (stub placeholders; rejected via CGI-006)
 
-properly lowered PrismLeaf (m7_reserved=false) is allowed after M7 prism lowering.
+properly lowered PrismLeaf / TraversalLeaf / Tap / Record (m7_reserved=false) are allowed after M7/M8 lowering.
 
-surface still rejected earlier via TYP-010 for traversal/host syntax.
+surface still rejected earlier via TYP-010 for unsafe optic / host syntax.
 
 docs:
   - docs/observability-v0.md
@@ -945,6 +1073,9 @@ fn bench_examples(update: bool, verbose: bool) -> anyhow::Result<()> {
     let examples = [
         "health_decay.opt",
         "alive_filter.opt",
+        "all_healths.opt",
+        "tap_health.opt",
+        "record_health.opt",
         "health_position.opt",
         "health_get.opt",
         "health_set.opt",
@@ -1058,11 +1189,12 @@ fn verify_example_stdout(filename: &str, stdout: &str) -> bool {
         "compose_decay.opt" => {
             stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("45.0")
         }
-        "health_decay.opt" | "alive_filter.opt" | "partial_prism.opt" => {
+        "health_decay.opt" | "alive_filter.opt" | "partial_prism.opt" | "all_healths.opt"
+        | "tap_health.opt" | "record_health.opt" => {
             stdout.contains("90.0") && stdout.contains("70.0")
         }
-        "health_set.opt" | "prism_set.opt" => stdout.contains("42.0"),
-        "health_get.opt" | "prism_get.opt" => stdout.contains("get:"),
+        "health_set.opt" | "prism_set.opt" | "traversal_set.opt" => stdout.contains("42.0"),
+        "health_get.opt" | "prism_get.opt" | "traversal_get.opt" => stdout.contains("get:"),
         "nested_position.opt" => {
             stdout.contains("(0.1, 0.1)")
                 && stdout.contains("(1.1, 1.1)")

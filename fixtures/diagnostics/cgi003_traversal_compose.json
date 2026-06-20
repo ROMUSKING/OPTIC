@@ -1,0 +1,42 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-003",
+      "confidence": 1.0,
+      "evidence": {
+        "compose_id": 2.0,
+        "leaf_id": 1.0,
+        "reason": "traversal_in_compose"
+      },
+      "minimal_fix_options": [
+        "use entities.query(TraversalOptic).get()/.set()/.map() without >>> compose",
+        "split traversal optics into separate queries"
+      ],
+      "next_commands": [
+        "opticc explain CGI-003",
+        "opticc dump-cgir file.opt --check"
+      ],
+      "phase": "cgir",
+      "primary_span": {
+        "end": 438.0,
+        "source": 1.0,
+        "start": 293.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use entities.query(TraversalOptic).get()/.set()/.map() without >>> compose"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "split traversal optics into separate queries"
+        }
+      ],
+      "related_spans": [],
+      "rule": "compose chain with TraversalLeaf is not supported in narrow v0",
+      "severity": "error",
+      "title": "CGIR invariant violation"
+    }
+  ],
+  "ok": false
+}

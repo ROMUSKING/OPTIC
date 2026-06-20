@@ -1,0 +1,5 @@
+HIR items: 4
+  other
+  Optic HealthView kind=Optic costate=Entities lift=[] reads=["healths"] writes=["healths"]
+  Query cursor=cur_0 kind=Discriminant(2) obs=["tap:probe_a", "record:probe_b"]
+  other

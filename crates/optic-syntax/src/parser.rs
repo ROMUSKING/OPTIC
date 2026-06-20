@@ -1095,6 +1095,40 @@ impl<'a> Parser<'a> {
         false
     }
 
+    /// Consume through `)` after a failed observability hook parse (ch7.6 error recovery).
+    fn recover_obs_hook_call(&mut self) {
+        while self.current() != TokenKind::RParen && self.current() != TokenKind::Eof {
+            self.advance();
+        }
+        if self.current() == TokenKind::RParen {
+            self.advance();
+        }
+    }
+
+    fn parse_obs_hook_string_lit(&mut self, context: &str) -> Option<String> {
+        if self.current() != TokenKind::StringLit {
+            self.errors.push(ParseError {
+                message: format!("expected string literal for {context}"),
+                span: self.current_span(),
+                kind: None,
+            });
+            return None;
+        }
+        let lit = self.advance();
+        let raw = self.text_of(&lit);
+        match crate::obs::decode_obs_hook_string_lit(&raw) {
+            Ok(s) => Some(s),
+            Err(rule) => {
+                self.errors.push(ParseError {
+                    message: format!("{context}: {rule}"),
+                    span: lit.span,
+                    kind: None,
+                });
+                None
+            }
+        }
+    }
+
     fn parse_query_chain(&mut self) -> Option<QueryChain> {
         let base_tok = self.advance();
         let base = Box::new(Expr::Atom(AtomExpr::Ident(Spanned::new(
@@ -1125,6 +1159,46 @@ impl<'a> Parser<'a> {
                     let val = self.parse_expr()?;
                     self.expect(TokenKind::RParen, ")")?;
                     methods.push(QueryMethod::Set(val, sp));
+                }
+                TokenKind::Ident if self.text_of_current() == "tap" => {
+                    let sp = self.advance().span;
+                    self.expect(TokenKind::LParen, "tap(")?;
+                    if let Some(label) = self.parse_obs_hook_string_lit("tap label") {
+                        self.expect(TokenKind::RParen, "tap )")?;
+                        methods.push(QueryMethod::Tap(label, sp));
+                    } else {
+                        self.recover_obs_hook_call();
+                    }
+                }
+                TokenKind::Ident if self.text_of_current() == "record" => {
+                    let sp = self.advance().span;
+                    self.expect(TokenKind::LParen, "record(")?;
+                    if let Some(event) = self.parse_obs_hook_string_lit("record event") {
+                        self.expect(TokenKind::RParen, "record )")?;
+                        methods.push(QueryMethod::Record(event, sp));
+                    } else {
+                        self.recover_obs_hook_call();
+                    }
+                }
+                TokenKind::Ident if self.text_of_current() == "profile" => {
+                    let sp = self.advance().span;
+                    self.expect(TokenKind::LParen, "profile(")?;
+                    if let Some(mode) = self.parse_obs_hook_string_lit("profile mode") {
+                        self.expect(TokenKind::RParen, "profile )")?;
+                        methods.push(QueryMethod::Profile(mode, sp));
+                    } else {
+                        self.recover_obs_hook_call();
+                    }
+                }
+                TokenKind::Ident if self.text_of_current() == "replay" => {
+                    let sp = self.advance().span;
+                    self.expect(TokenKind::LParen, "replay(")?;
+                    if let Some(checkpoint) = self.parse_obs_hook_string_lit("replay checkpoint") {
+                        self.expect(TokenKind::RParen, "replay )")?;
+                        methods.push(QueryMethod::Replay(checkpoint, sp));
+                    } else {
+                        self.recover_obs_hook_call();
+                    }
                 }
                 TokenKind::Ident if self.text_of_current() == "map" => {
                     let sp = self.advance().span;
@@ -1535,5 +1609,82 @@ mod tests {
             panic!("expected map method");
         };
         assert_eq!(cl.params.len(), 2);
+    }
+
+    #[test]
+    fn rejects_tap_without_string_literal() {
+        let src = "e.query(o).tap();";
+        let err = parse(src, SourceId(0)).expect_err("tap without label");
+        assert!(err.iter().any(|e| e.message.contains("string literal")));
+    }
+
+    #[test]
+    fn rejects_tap_multiline_string_injection() {
+        let src = "e.query(o).tap(\"a\\ninclude!(\\\"x\\\"\");";
+        let err = parse(src, SourceId(0)).expect_err("multiline tap");
+        assert!(
+            err.iter().any(|e| {
+                e.message.contains("control")
+                    || e.message.contains("invalid")
+                    || e.message.contains("escape")
+            }),
+            "expected validation error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn failed_obs_hook_parse_recovers_without_cascading_errors() {
+        let src = "e.query(o).tap(\"a\\n\").map(|h| h);";
+        let err = parse(src, SourceId(0)).expect_err("invalid tap label");
+        let hook_errs: Vec<_> = err
+            .iter()
+            .filter(|e| {
+                e.message.contains("tap label")
+                    || e.message.contains("control")
+                    || e.message.contains("invalid")
+            })
+            .collect();
+        assert_eq!(
+            hook_errs.len(),
+            1,
+            "expected single hook parse error: {err:?}"
+        );
+        assert!(
+            !err.iter()
+                .any(|e| e.message.contains("expected query method")),
+            "must not cascade query-chain errors: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_profile_without_string_literal() {
+        let src = "e.query(o).profile();";
+        let err = parse(src, SourceId(0)).expect_err("profile without mode");
+        assert!(err.iter().any(|e| e.message.contains("string literal")));
+    }
+
+    #[test]
+    fn rejects_record_without_string_literal() {
+        let src = "e.query(o).record();";
+        let err = parse(src, SourceId(0)).expect_err("record without event");
+        assert!(err.iter().any(|e| e.message.contains("string literal")));
+    }
+
+    #[test]
+    fn rejects_replay_without_string_literal() {
+        let src = "e.query(o).replay();";
+        let err = parse(src, SourceId(0)).expect_err("replay without checkpoint");
+        assert!(err.iter().any(|e| e.message.contains("string literal")));
+    }
+
+    #[test]
+    fn parses_tap_and_record_prefix_chain() {
+        let src = "e.query(o).tap(\"a\").record(\"b\").map(|h| h);";
+        let prog = parse(src, SourceId(0)).expect("parse obs chain");
+        let Item::Expr(Expr::QueryChain(q)) = &prog.items[0] else {
+            panic!("expected query");
+        };
+        assert!(matches!(q.methods[0], QueryMethod::Tap(ref l, _) if l == "a"));
+        assert!(matches!(q.methods[1], QueryMethod::Record(ref e, _) if e == "b"));
     }
 }

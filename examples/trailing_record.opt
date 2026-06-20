@@ -1,0 +1,13 @@
+-- Appendix B negative: OBS-702 witness (trailing record after map; v0 prefix-only)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(HealthView).map(|h| h).record("too_late");
+}

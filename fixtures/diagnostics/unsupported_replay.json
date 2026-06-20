@@ -1,0 +1,42 @@
+{
+  "diagnostics": [
+    {
+      "code": "OBS-701",
+      "confidence": 1.0,
+      "evidence": {
+        "checkpoint": "checkpoint",
+        "method": "replay",
+        "milestone": "M8"
+      },
+      "minimal_fix_options": [
+        "use .tap(\"label\") or .record(\"event\") for v0 observability hooks",
+        "defer profile/replay CLI until M8+"
+      ],
+      "next_commands": [
+        "opticc explain OBS-701",
+        "opticc check file.opt --json"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 311,
+        "source": 1,
+        "start": 305
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "use .tap(\"label\") or .record(\"event\") for v0 observability hooks"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer profile/replay CLI until M8+"
+        }
+      ],
+      "related_spans": [],
+      "rule": "query method `replay` is not supported in narrow v0 (use .tap/.record or defer profile/replay)",
+      "severity": "error",
+      "title": "unsupported observability query method"
+    }
+  ],
+  "ok": false
+}

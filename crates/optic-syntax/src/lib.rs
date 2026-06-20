@@ -9,9 +9,12 @@
 
 pub mod ast;
 pub mod lexer;
+pub mod obs;
 pub mod parser;
 pub mod span;
 pub mod token;
+
+pub use obs::{decode_obs_hook_string_lit, validate_obs_hook_label, MAX_OBS_HOOK_LABEL_BYTES};
 
 pub use ast::*;
 pub use lexer::Lexer;
@@ -210,6 +213,45 @@ mod golden_tests {
     }
 
     #[test]
+    fn golden_tokens_all_healths() {
+        let src = std::fs::read_to_string(examples_dir().join("all_healths.opt")).expect("read");
+        assert_golden("tokens", "all_healths", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_all_healths() {
+        let src = std::fs::read_to_string(examples_dir().join("all_healths.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "all_healths", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_traversal_get() {
+        let src = std::fs::read_to_string(examples_dir().join("traversal_get.opt")).expect("read");
+        assert_golden("tokens", "traversal_get", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_traversal_get() {
+        let src = std::fs::read_to_string(examples_dir().join("traversal_get.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "traversal_get", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_traversal_set() {
+        let src = std::fs::read_to_string(examples_dir().join("traversal_set.opt")).expect("read");
+        assert_golden("tokens", "traversal_set", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_traversal_set() {
+        let src = std::fs::read_to_string(examples_dir().join("traversal_set.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "traversal_set", &dump_ast(&prog));
+    }
+
+    #[test]
     fn golden_tokens_compose_prism() {
         let src = std::fs::read_to_string(examples_dir().join("compose_prism.opt")).expect("read");
         assert_golden("tokens", "compose_prism", &dump_tokens(&src, SourceId(1)));
@@ -220,6 +262,102 @@ mod golden_tests {
         let src = std::fs::read_to_string(examples_dir().join("compose_prism.opt")).expect("read");
         let prog = parse(&src, SourceId(1)).expect("parse");
         assert_golden("ast", "compose_prism", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_tap_health() {
+        let src = std::fs::read_to_string(examples_dir().join("tap_health.opt")).expect("read");
+        assert_golden("tokens", "tap_health", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_tap_health() {
+        let src = std::fs::read_to_string(examples_dir().join("tap_health.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "tap_health", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_record_health() {
+        let src = std::fs::read_to_string(examples_dir().join("record_health.opt")).expect("read");
+        assert_golden("tokens", "record_health", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_record_health() {
+        let src = std::fs::read_to_string(examples_dir().join("record_health.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "record_health", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_tap_record_chain() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("tap_record_chain.opt")).expect("read");
+        assert_golden(
+            "tokens",
+            "tap_record_chain",
+            &dump_tokens(&src, SourceId(1)),
+        );
+    }
+
+    #[test]
+    fn golden_ast_tap_record_chain() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("tap_record_chain.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "tap_record_chain", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_unsupported_profile() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_profile.opt")).expect("read");
+        assert_golden(
+            "tokens",
+            "unsupported_profile",
+            &dump_tokens(&src, SourceId(1)),
+        );
+    }
+
+    #[test]
+    fn golden_ast_unsupported_profile() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_profile.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "unsupported_profile", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_unsupported_replay() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_replay.opt")).expect("read");
+        assert_golden(
+            "tokens",
+            "unsupported_replay",
+            &dump_tokens(&src, SourceId(1)),
+        );
+    }
+
+    #[test]
+    fn golden_ast_unsupported_replay() {
+        let src =
+            std::fs::read_to_string(examples_dir().join("unsupported_replay.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "unsupported_replay", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_trailing_tap() {
+        let src = std::fs::read_to_string(examples_dir().join("trailing_tap.opt")).expect("read");
+        assert_golden("tokens", "trailing_tap", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_trailing_tap() {
+        let src = std::fs::read_to_string(examples_dir().join("trailing_tap.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "trailing_tap", &dump_ast(&prog));
     }
 
     #[test]

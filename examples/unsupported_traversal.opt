@@ -1,10 +1,11 @@
--- Appendix B negative: traversal syntax rejected in narrow v0 (M7+)
+-- Appendix B negative: GRA-110 witness (CacheGrade<1> tighter than inferred; see all_healths.opt for positive e2e)
 data Entities {
     healths: SoA<f32>,
 }
 
 optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<1>> {
-    get s => s.healths[s.id]
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
 }
 
 fn main() {

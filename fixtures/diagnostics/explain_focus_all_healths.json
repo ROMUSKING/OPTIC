@@ -1,0 +1,11 @@
+{
+  "focus": {
+    "costate": "Entities",
+    "focus": "f32",
+    "focus_fields": [],
+    "node": "AllHealths",
+    "path_lift_prefix": [],
+    "root_path": "entities.healths[id]"
+  },
+  "ok": true
+}

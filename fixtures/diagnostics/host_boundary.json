@@ -9,8 +9,8 @@
         "name": "host_helper"
       },
       "minimal_fix_options": [
-        "use lens-like GradedOptic or GradedPrism forms supported in v0",
-        "defer traversal and host boundaries until M7+"
+        "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0",
+        "defer host/foreign boundaries until M7+"
       ],
       "next_commands": [
         "opticc explain TYP-010",
@@ -25,11 +25,11 @@
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "use lens-like GradedOptic or GradedPrism forms supported in v0"
+          "description": "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0"
         },
         {
           "confidence": 0.8999999761581421,
-          "description": "defer traversal and host boundaries until M7+"
+          "description": "defer host/foreign boundaries until M7+"
         }
       ],
       "related_spans": [],
@@ -46,8 +46,8 @@
         "name": "HostCopy"
       },
       "minimal_fix_options": [
-        "use lens-like GradedOptic or GradedPrism forms supported in v0",
-        "defer traversal and host boundaries until M7+"
+        "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0",
+        "defer host/foreign boundaries until M7+"
       ],
       "next_commands": [
         "opticc explain TYP-010",
@@ -62,11 +62,11 @@
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "use lens-like GradedOptic or GradedPrism forms supported in v0"
+          "description": "use GradedOptic, GradedPrism, or GradedTraversal forms supported in v0"
         },
         {
           "confidence": 0.8999999761581421,
-          "description": "defer traversal and host boundaries until M7+"
+          "description": "defer host/foreign boundaries until M7+"
         }
       ],
       "related_spans": [],

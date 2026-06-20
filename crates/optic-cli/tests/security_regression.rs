@@ -1,6 +1,7 @@
 //! Security regression tests (path limits, size caps, diagnostic hygiene).
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -12,6 +13,64 @@ fn example(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(name)
+}
+
+fn write_temp_opt(src: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("inject.opt");
+    std::fs::write(&path, src).expect("write temp opt");
+    (dir, path)
+}
+
+#[test]
+fn rejects_tap_multiline_string_injection() {
+    let src = r#"
+data Entities { healths: SoA<f32> }
+optic H: GradedOptic<Entities, f32, _> {
+    get s => s.healths[s.id]
+    put (s,v) => { s.healths[s.id] = v }
+}
+fn main() {
+    entities.query(H).tap("x
+include!(\"pwn\")").map(|h| h);
+}
+"#;
+    let (_dir, path) = write_temp_opt(src);
+    opticc()
+        .args(["check", "--json", &path.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("PAR-001").or(predicates::str::contains("control")));
+}
+
+#[test]
+fn rejects_tap_include_escape_in_label() {
+    let src = r#"
+data Entities { healths: SoA<f32> }
+optic H: GradedOptic<Entities, f32, _> {
+    get s => s.healths[s.id]
+    put (s,v) => { s.healths[s.id] = v }
+}
+fn main() {
+    entities.query(H).tap("a\ninclude!(\"x\")").map(|h| h);
+}
+"#;
+    let (_dir, path) = write_temp_opt(src);
+    let assert = opticc()
+        .args(["check", &path.to_string_lossy()])
+        .assert()
+        .failure();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&assert.get_output().stderr),
+        String::from_utf8_lossy(&assert.get_output().stdout)
+    );
+    assert!(
+        combined.contains("PAR-001")
+            || combined.contains("control")
+            || combined.contains("invalid"),
+        "must reject injection attempt: {combined}"
+    );
 }
 
 #[test]

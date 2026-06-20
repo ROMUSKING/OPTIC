@@ -1,0 +1,41 @@
+{
+  "diagnostics": [
+    {
+      "code": "OBS-702",
+      "confidence": 1.0,
+      "evidence": {
+        "method": "record",
+        "milestone": "M8"
+      },
+      "minimal_fix_options": [
+        "move .tap/.record before .get/.set/.map",
+        "defer interleaved hook ordering until M8+"
+      ],
+      "next_commands": [
+        "opticc explain OBS-702",
+        "opticc check file.opt --json"
+      ],
+      "phase": "type",
+      "primary_span": {
+        "end": 329,
+        "source": 1,
+        "start": 323
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "move .tap/.record before .get/.set/.map"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer interleaved hook ordering until M8+"
+        }
+      ],
+      "related_spans": [],
+      "rule": "`.record(...)` must appear before .get/.set/.map in narrow v0 (prefix-only hooks)",
+      "severity": "error",
+      "title": "observability hook must precede query methods"
+    }
+  ],
+  "ok": false
+}

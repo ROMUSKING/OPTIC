@@ -19,14 +19,19 @@ pub enum OpticTypeCtor {
 }
 
 impl OpticDecl {
-    /// True when the surface form is deferred to M7+ (traversal, unsafe boundary).
+    /// True when the surface form is deferred to M7+ (unsafe boundary, host/foreign).
     pub fn is_unsupported_v0(&self) -> bool {
-        self.unsafe_boundary || self.type_ctor == OpticTypeCtor::GradedTraversal
+        self.unsafe_boundary
     }
 
     /// True when the optic is a graded prism (preview/review surface).
     pub fn is_prism(&self) -> bool {
         self.type_ctor == OpticTypeCtor::GradedPrism
+    }
+
+    /// True when the optic is a graded traversal (get/put surface; bulk/SIMD metadata).
+    pub fn is_traversal(&self) -> bool {
+        self.type_ctor == OpticTypeCtor::GradedTraversal
     }
 }
 
@@ -209,6 +214,13 @@ pub enum QueryMethod {
     Get(Span),
     Set(Expr, Span),
     Map(Closure, Span),
+    /// M8 observability tap (book ch14.5); lowered to CGIR `Tap`.
+    Tap(String, Span),
+    /// M8 observability record (book ch14.5); lowered to CGIR `Record`.
+    Record(String, Span),
+    /// Deferred observability surface (profile/replay); rejected via OBS-701 in v0.
+    Profile(String, Span),
+    Replay(String, Span),
 }
 
 #[derive(Debug, Clone)]
