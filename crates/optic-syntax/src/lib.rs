@@ -158,6 +158,71 @@ mod golden_tests {
     }
 
     #[test]
+    fn golden_tokens_alive_filter() {
+        let src = std::fs::read_to_string(examples_dir().join("alive_filter.opt")).expect("read");
+        assert_golden("tokens", "alive_filter", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_alive_filter() {
+        let src = std::fs::read_to_string(examples_dir().join("alive_filter.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "alive_filter", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_prism_get() {
+        let src = std::fs::read_to_string(examples_dir().join("prism_get.opt")).expect("read");
+        assert_golden("tokens", "prism_get", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_prism_get() {
+        let src = std::fs::read_to_string(examples_dir().join("prism_get.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "prism_get", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_prism_set() {
+        let src = std::fs::read_to_string(examples_dir().join("prism_set.opt")).expect("read");
+        assert_golden("tokens", "prism_set", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_prism_set() {
+        let src = std::fs::read_to_string(examples_dir().join("prism_set.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "prism_set", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_partial_prism() {
+        let src = std::fs::read_to_string(examples_dir().join("partial_prism.opt")).expect("read");
+        assert_golden("tokens", "partial_prism", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_partial_prism() {
+        let src = std::fs::read_to_string(examples_dir().join("partial_prism.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "partial_prism", &dump_ast(&prog));
+    }
+
+    #[test]
+    fn golden_tokens_compose_prism() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_prism.opt")).expect("read");
+        assert_golden("tokens", "compose_prism", &dump_tokens(&src, SourceId(1)));
+    }
+
+    #[test]
+    fn golden_ast_compose_prism() {
+        let src = std::fs::read_to_string(examples_dir().join("compose_prism.opt")).expect("read");
+        let prog = parse(&src, SourceId(1)).expect("parse");
+        assert_golden("ast", "compose_prism", &dump_ast(&prog));
+    }
+
+    #[test]
     fn golden_tokens_invalid_grade() {
         let src = std::fs::read_to_string(examples_dir().join("invalid_grade.opt")).expect("read");
         assert_golden("tokens", "invalid_grade", &dump_tokens(&src, SourceId(1)));
@@ -226,7 +291,11 @@ mod golden_tests {
     fn golden_tokens_unsupported_prism() {
         let src =
             std::fs::read_to_string(examples_dir().join("unsupported_prism.opt")).expect("read");
-        assert_golden("tokens", "unsupported_prism", &dump_tokens(&src, SourceId(1)));
+        assert_golden(
+            "tokens",
+            "unsupported_prism",
+            &dump_tokens(&src, SourceId(1)),
+        );
     }
 
     #[test]
@@ -245,15 +314,19 @@ mod golden_tests {
 
     #[test]
     fn golden_tokens_unsupported_traversal() {
-        let src =
-            std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt")).expect("read");
-        assert_golden("tokens", "unsupported_traversal", &dump_tokens(&src, SourceId(1)));
+        let src = std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt"))
+            .expect("read");
+        assert_golden(
+            "tokens",
+            "unsupported_traversal",
+            &dump_tokens(&src, SourceId(1)),
+        );
     }
 
     #[test]
     fn golden_ast_unsupported_traversal() {
-        let src =
-            std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt")).expect("read");
+        let src = std::fs::read_to_string(examples_dir().join("unsupported_traversal.opt"))
+            .expect("read");
         let prog = parse(&src, SourceId(1)).expect("parse");
         assert_golden("ast", "unsupported_traversal", &dump_ast(&prog));
     }

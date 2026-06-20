@@ -1,0 +1,5 @@
+HIR items: 4
+  other
+  Optic AliveFilter costate=Entities lift=[] reads=["healths"] writes=["healths"]
+  Query cursor=cur_0 kind=Discriminant(2)
+  other

@@ -39,19 +39,21 @@ fn check_unsupported_traversal_typ010() {
 }
 
 #[test]
-fn check_unsupported_prism_typ010() {
-    let assert = opticc()
-        .args(["check", "--json", &example("unsupported_prism.opt").to_string_lossy()])
+fn check_alive_filter_prism_ok() {
+    opticc()
+        .args(["check", &example("alive_filter.opt").to_string_lossy()])
         .assert()
-        .failure();
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert_typ010_json(&stderr, "prism");
+        .success();
 }
 
 #[test]
 fn check_host_boundary_typ010() {
     let assert = opticc()
-        .args(["check", "--json", &example("host_boundary.opt").to_string_lossy()])
+        .args([
+            "check",
+            "--json",
+            &example("host_boundary.opt").to_string_lossy(),
+        ])
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
@@ -71,28 +73,27 @@ fn check_host_boundary_typ010() {
 }
 
 #[test]
-fn dump_hir_rejects_unsupported_prism() {
-    let assert = opticc()
-        .args(["dump-hir", &example("unsupported_prism.opt").to_string_lossy()])
+fn dump_hir_alive_filter_prism() {
+    opticc()
+        .args(["dump-hir", &example("alive_filter.opt").to_string_lossy()])
         .assert()
-        .failure();
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert!(stderr.contains("TYP-010"));
+        .success()
+        .stdout(predicates::str::contains("AliveFilter"));
 }
 
 #[test]
-fn dump_summary_rejects_unsupported_prism_by_name() {
-    let assert = opticc()
+fn dump_summary_alive_filter_by_name() {
+    opticc()
         .args([
             "dump-summary",
-            &example("unsupported_prism.opt").to_string_lossy(),
+            &example("alive_filter.opt").to_string_lossy(),
             "--node",
             "AliveFilter",
         ])
         .assert()
-        .failure();
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert!(stderr.contains("TYP-010"));
+        .success()
+        .stdout(predicates::str::contains("AliveFilter"))
+        .stdout(predicates::str::contains("lift"));
 }
 
 #[test]
@@ -106,8 +107,12 @@ fn explain_focus_nested_position() {
         ])
         .assert()
         .success()
-        .stdout(predicates::str::contains("root_path: entities.transforms[id].position"))
-        .stdout(predicates::str::contains("path_lift.prefix: [\"position\"]"));
+        .stdout(predicates::str::contains(
+            "root_path: entities.transforms[id].position",
+        ))
+        .stdout(predicates::str::contains(
+            "path_lift.prefix: [\"position\"]",
+        ));
 }
 
 #[test]
@@ -167,14 +172,19 @@ fn dump_summary_unknown_name_fails() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("EXP-001"));
     assert!(stderr.contains("MissingOptic"));
-    assert!(stderr.contains("not found"));
+    assert!(stderr.contains("HealthView"));
+    assert!(stderr.contains("candidates"));
 }
 
 #[test]
 fn doctor_failed_check_suggests_fix_and_explain() {
     let assert = opticc()
-        .args(["doctor", &example("typ002_body_mismatch.opt").to_string_lossy()])
+        .args([
+            "doctor",
+            &example("typ002_body_mismatch.opt").to_string_lossy(),
+        ])
         .assert()
         .failure();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
@@ -246,11 +256,135 @@ fn dump_summary_by_numeric_node_id() {
 
 #[test]
 fn explain_typ010_catalog() {
+    let assert = opticc().args(["explain", "TYP-010"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("unsupported in narrow v0"));
+    assert!(stdout.contains("GradedPrism"));
+    assert!(stdout.contains("GradedTraversal"));
+    assert!(stdout.contains("alive_filter.opt"));
+    assert!(stdout.contains("unsupported_traversal.opt"));
+    assert!(stdout.contains("host_boundary.opt"));
+    assert!(stdout.contains("docs/observability-v0.md"));
+    assert!(stdout.contains("docs/effect-coeffect-v0.md"));
+    assert!(stdout.contains("PrismLeaf"));
+    assert!(stdout.contains("TraversalLeaf"));
+    assert!(stdout.contains("CGI-006"));
+    assert!(stdout.contains("unsafe optic"));
+    assert!(stdout.contains("extern"));
+    assert!(stdout.contains("docs/v0-executable-spec.md"));
+    assert!(stdout.contains("explain CGI-006"));
+}
+
+#[test]
+fn dump_summary_unknown_numeric_id_fails() {
+    let assert = opticc()
+        .args([
+            "dump-summary",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "99999",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("node id 99999 not found"));
+    assert!(!stderr.contains("EXP-001"));
+}
+
+#[test]
+fn dump_cgir_alive_filter_prism_leaf() {
     opticc()
-        .args(["explain", "TYP-010"])
+        .args([
+            "dump-cgir",
+            &example("alive_filter.opt").to_string_lossy(),
+            "--node",
+            "AliveFilter",
+        ])
         .assert()
         .success()
-        .stdout(predicates::str::contains("unsupported in narrow v0"));
+        .stdout(predicates::str::contains("PrismLeaf(AliveFilter"))
+        .stdout(predicates::str::contains("m7_reserved=false"));
+}
+
+#[test]
+fn dump_cgir_by_optic_name() {
+    opticc()
+        .args([
+            "dump-cgir",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "HealthView",
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("node id="))
+        .stdout(predicates::str::contains("OpticLeaf(HealthView)"))
+        .stdout(predicates::str::contains("summary(HealthView)"));
+}
+
+#[test]
+fn explain_grade_rejects_oversized_node_name() {
+    let long = "x".repeat(4097);
+    let assert = opticc()
+        .args([
+            "explain-grade",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            &long,
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("4096"));
+}
+
+#[test]
+fn dump_cgir_unknown_name_fails_exp001() {
+    let assert = opticc()
+        .args([
+            "dump-cgir",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "MissingOptic",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("EXP-001"));
+    assert!(stderr.contains("MissingOptic"));
+    assert!(stderr.contains("HealthView"));
+    assert!(stderr.contains("candidates"));
+}
+
+#[test]
+fn dump_cgir_by_numeric_node_id() {
+    opticc()
+        .args([
+            "dump-cgir",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "0",
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("OpticLeaf"))
+        .stdout(predicates::str::contains("HealthView"));
+}
+
+#[test]
+fn dump_cgir_unknown_numeric_id_fails() {
+    let assert = opticc()
+        .args([
+            "dump-cgir",
+            &example("health_get.opt").to_string_lossy(),
+            "--node",
+            "99999",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("node id 99999 not found"));
+    assert!(!stderr.contains("EXP-001"));
 }
 
 #[test]

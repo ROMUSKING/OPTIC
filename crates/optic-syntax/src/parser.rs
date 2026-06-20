@@ -215,7 +215,7 @@ impl<'a> Parser<'a> {
                     self.errors.push(ParseError {
                         message: "expected top-level item (data, optic, let, fn) or expr".into(),
                         span: sp,
-                kind: None,
+                        kind: None,
                     });
                     self.skip_until_sync(&sync);
                 }
@@ -343,7 +343,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected type".into(),
                     span: sp,
-                kind: None,
+                    kind: None,
                 });
                 None
             }
@@ -421,7 +421,9 @@ impl<'a> Parser<'a> {
             match self.current() {
                 TokenKind::KwGet => get = Some(self.parse_get_clause()?),
                 TokenKind::KwPut => put = Some(self.parse_put_clause()?),
-                TokenKind::KwPreview => preview = Some(self.parse_preview_clause()?),
+                TokenKind::KwPreview | TokenKind::KwPartial => {
+                    preview = Some(self.parse_preview_clause()?);
+                }
                 TokenKind::KwReview => review = Some(self.parse_review_clause()?),
                 _ => {
                     self.errors.push(ParseError {
@@ -508,13 +510,24 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_preview_clause(&mut self) -> Option<GetClause> {
+        let partial = if self.current() == TokenKind::KwPartial {
+            self.advance();
+            true
+        } else {
+            false
+        };
         let start = self.expect(TokenKind::KwPreview, "preview")?;
         let param_tok = self.advance();
         let param = Spanned::new(self.text_of(&param_tok), param_tok.span);
         self.expect(TokenKind::FatArrow, "=>")?;
-        let body = self.parse_expr()?;
+        let body = self.parse_expr_or_block()?;
         let span = start.merge(body_span(&body));
-        Some(GetClause { param, body, span })
+        Some(GetClause {
+            param,
+            body,
+            partial,
+            span,
+        })
     }
 
     fn parse_review_clause(&mut self) -> Option<PutClause> {
@@ -527,7 +540,7 @@ impl<'a> Parser<'a> {
         let value_param = Spanned::new(self.text_of(&vp_tok), vp_tok.span);
         self.expect(TokenKind::RParen, ")")?;
         self.expect(TokenKind::FatArrow, "=>")?;
-        let body = self.parse_expr()?;
+        let body = self.parse_expr_or_block()?;
         let span = start.merge(body_span(&body));
         Some(PutClause {
             state_param,
@@ -574,7 +587,7 @@ impl<'a> Parser<'a> {
                                     self.errors.push(ParseError {
                                         message: "invalid CacheGrade literal".into(),
                                         span: n_tok.span,
-                kind: None,
+                                        kind: None,
                                     });
                                     return None;
                                 }
@@ -588,7 +601,7 @@ impl<'a> Parser<'a> {
                         self.errors.push(ParseError {
                             message: "expected CacheGrade<_> or CacheGrade<N>".into(),
                             span: sp,
-                kind: None,
+                            kind: None,
                         });
                         return None;
                     }
@@ -630,7 +643,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected grade dim".into(),
                     span: sp,
-                kind: None,
+                    kind: None,
                 });
                 Some(GradeDim::Infer(sp))
             }
@@ -644,7 +657,12 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::FatArrow, "=>")?;
         let body = self.parse_expr()?;
         let span = start.merge(body_span(&body));
-        Some(GetClause { param, body, span })
+        Some(GetClause {
+            param,
+            body,
+            partial: false,
+            span,
+        })
     }
 
     fn parse_put_clause(&mut self) -> Option<PutClause> {
@@ -694,7 +712,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected GradedOptic<...> type annotation after let name:".into(),
                     span: self.current_span(),
-                kind: None,
+                    kind: None,
                 });
                 return None;
             }
@@ -775,7 +793,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected ';' or '}' after statement in fn body".into(),
                     span: self.current_span(),
-                kind: None,
+                    kind: None,
                 });
                 break;
             }
@@ -945,7 +963,7 @@ impl<'a> Parser<'a> {
                         self.errors.push(ParseError {
                             message: "expected field ident after .".into(),
                             span: id_tok.span,
-                kind: None,
+                            kind: None,
                         });
                         self.skip_until_sync(&[
                             TokenKind::Comma,
@@ -1053,7 +1071,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected atom (ident/lit/( / { / query )".into(),
                     span: sp,
-                kind: None,
+                    kind: None,
                 });
                 Some(AtomExpr::Ident(Spanned::new("_err_atom".into(), sp)))
             }
@@ -1253,7 +1271,7 @@ impl<'a> Parser<'a> {
                 self.errors.push(ParseError {
                     message: "expected optic atom (ident or ( ))".into(),
                     span: sp,
-                kind: None,
+                    kind: None,
                 });
                 None
             }

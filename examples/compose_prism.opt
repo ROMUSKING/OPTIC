@@ -1,0 +1,20 @@
+-- Negative: compose chain with PrismLeaf rejected at CGIR (CGI-003 prism_in_compose)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+let bad_pipeline: GradedOptic<Entities, f32, CacheGrade<4>> = HealthView >>> AliveFilter;
+
+fn main() {
+    entities.query(bad_pipeline).map(|h| h - 10.0);
+}

@@ -3,7 +3,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use optic::{
-    compile_check, compile_cgir, compile_emit, dump_ast_src, dump_hir_src, explain_focus_from_src,
+    compile_cgir, compile_check, compile_emit, dump_ast_src, dump_hir_src, explain_focus_from_src,
     explain_grade_from_src, lower_src, SourceId,
 };
 
@@ -54,7 +54,7 @@ enum Commands {
         #[arg(long)]
         check: bool,
         #[arg(long)]
-        node: Option<u32>,
+        node: Option<String>,
     },
     /// Transpile + verified execution harness (M5/M6)
     Run { file: PathBuf },
@@ -77,9 +77,7 @@ enum Commands {
         json: bool,
     },
     /// Environment / toolchain sanity check; optional file runs `check` (appendix B)
-    Doctor {
-        file: Option<PathBuf>,
-    },
+    Doctor { file: Option<PathBuf> },
     /// Dump OpticSummary for an optic/let name or CGIR node id (appendix B)
     DumpSummary {
         file: PathBuf,
@@ -170,18 +168,12 @@ fn main() -> anyhow::Result<()> {
             let outcome = compile_cgir_or_exit(&src, before_fusion)?;
             let graph = outcome.graph;
             if check {
-                optic_cgir::verify(&graph).map_err(|e| anyhow::anyhow!(e))?;
+                optic_cgir::verify_to_diagnostic(&graph).map_err(|d| emit_pipeline_errors(&[d]))?;
                 println!("CGIR verify: OK");
             }
             if let Some(n) = node {
-                if let Some(nd) = optic_cgir::find_node_by_id(&graph, n) {
-                    println!("{nd:#?}");
-                    if let Some(p) = graph.provenance_index.get(&n) {
-                        println!("provenance: {p:#?}");
-                    }
-                } else {
-                    anyhow::bail!("node id {n} not found");
-                }
+                let id = resolve_dump_cgir_node(&graph, &n)?;
+                print!("{}", optic_cgir::dump_node_pretty(&graph, id));
             } else {
                 println!("{}", optic_cgir::dump_pretty(&graph));
             }
@@ -383,6 +375,12 @@ fn snapshot_update_goldens() -> anyhow::Result<()> {
 }
 
 fn explain_code(code: &str) -> String {
+    if code == "TYP-010" {
+        return explain_typ010().to_string();
+    }
+    if code == "CGI-006" {
+        return explain_cgi006().to_string();
+    }
     let (title, rule, phase) = match code {
         "GRA-110" => (
             "declared grade tighter than inferred",
@@ -469,11 +467,6 @@ fn explain_code(code: &str) -> String {
             "no optic or let binding matches --node",
             "type",
         ),
-        "TYP-010" => (
-            "unsupported in narrow v0",
-            "prisms and host/foreign boundaries are deferred to M7+",
-            "type",
-        ),
         _ => (
             "unknown code",
             "no catalog entry yet; see optic-diagnostics",
@@ -481,6 +474,121 @@ fn explain_code(code: &str) -> String {
         ),
     };
     format!("{code}: {title}\nphase: {phase}\nrule: {rule}\nnext: opticc check <file.opt> --json")
+}
+
+fn explain_typ010() -> &'static str {
+    r#"TYP-010: unsupported in narrow v0
+phase: type
+rule: traversal, unsafe optic, and extern/foreign host boundaries rejected before CGIR
+
+rejected surface:
+  - GradedTraversal optics
+  - unsafe optic boundaries
+  - extern / foreign host declarations
+
+supported (M7 prism):
+  - GradedPrism optics (preview/review) — see examples/alive_filter.opt
+  - PrismLeaf CGIR lowering + Rust codegen (m7_reserved=false)
+
+still deferred:
+  - TraversalLeaf lowering + SIMD bridge (book ch13)
+  - Tap / Record observability (M8; CGI-006 if materialized)
+
+examples:
+  - examples/alive_filter.opt (positive prism)
+  - examples/unsupported_traversal.opt
+  - examples/host_boundary.opt
+
+docs:
+  - docs/observability-v0.md (tap/record deferred M8)
+  - docs/effect-coeffect-v0.md
+  - docs/v0-executable-spec.md
+
+related: opticc explain CGI-006 (CGIR verify rejects unstubs M7/M8 reserved nodes)
+
+next: opticc check <file.opt> --json"#
+}
+
+fn explain_cgi006() -> &'static str {
+    r#"CGI-006: M7/M8 reserved CGIR node materialized
+phase: cgir
+rule: unstubs M7/M8 reserved variants must not appear in narrow v0 graphs
+
+reserved variants:
+  - PrismLeaf with m7_reserved=true (stub; use m7_reserved=false for lowered prisms)
+  - TraversalLeaf — bulk get/set traversal (M7+; not lowered in v0)
+  - Tap — observability tap placeholder (M8; rejected in v0 via CGI-006)
+  - Record — observability record placeholder (M8; rejected in v0 via CGI-006)
+
+properly lowered PrismLeaf (m7_reserved=false) is allowed after M7 prism lowering.
+
+surface still rejected earlier via TYP-010 for traversal/host syntax.
+
+docs:
+  - docs/observability-v0.md
+  - docs/effect-coeffect-v0.md
+
+related: opticc explain TYP-010 (surface rejection before CGIR)
+
+next: opticc dump-cgir file.opt --check"#
+}
+
+fn resolve_dump_cgir_node(
+    graph: &optic_cgir::CgirGraph,
+    node: &str,
+) -> anyhow::Result<optic_cgir::NodeId> {
+    if node.len() > optic_cgir::MAX_NODE_NAME_BYTES {
+        anyhow::bail!(
+            "node name exceeds {} bytes",
+            optic_cgir::MAX_NODE_NAME_BYTES
+        );
+    }
+    match optic_cgir::resolve_cgir_node(graph, node) {
+        Ok(id) => Ok(id),
+        Err(optic_cgir::ResolveCgirNodeError::NameTooLong) => anyhow::bail!(
+            "node name exceeds {} bytes",
+            optic_cgir::MAX_NODE_NAME_BYTES
+        ),
+        Err(optic_cgir::ResolveCgirNodeError::UnknownName { candidates }) => {
+            Err(emit_pipeline_errors(&[
+                optic_diagnostics::explain_unknown_node_diag(
+                    optic_syntax::Span::dummy(),
+                    node,
+                    &candidates,
+                ),
+            ]))
+        }
+        Err(optic_cgir::ResolveCgirNodeError::UnknownId { id }) => {
+            anyhow::bail!("node id {id} not found")
+        }
+        Err(optic_cgir::ResolveCgirNodeError::StaleName { name, id }) => {
+            anyhow::bail!("stale resolved_optics entry: name `{name}` maps to missing node id {id}")
+        }
+    }
+}
+
+fn validate_node_name(node: &str) -> anyhow::Result<()> {
+    if node.len() > optic_cgir::MAX_NODE_NAME_BYTES {
+        anyhow::bail!(
+            "node name exceeds {} bytes",
+            optic_cgir::MAX_NODE_NAME_BYTES
+        );
+    }
+    Ok(())
+}
+
+fn hir_binding_candidates(hir: &optic_hir::HirProgram) -> Vec<String> {
+    let mut candidates = vec![];
+    for item in &hir.items {
+        match item {
+            optic_hir::HirItem::Optic { decl, .. } => candidates.push(decl.name.node.clone()),
+            optic_hir::HirItem::Let { name, .. } => candidates.push(name.clone()),
+            _ => {}
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
 }
 
 fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
@@ -510,7 +618,10 @@ fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
                 }
                 println!("check: OK ({})", path.display());
                 if !outcome.fusion_notes.is_empty() {
-                    println!("notes: {} fusion diagnostic(s) on stderr", outcome.fusion_notes.len());
+                    println!(
+                        "notes: {} fusion diagnostic(s) on stderr",
+                        outcome.fusion_notes.len()
+                    );
                 }
                 println!(
                     "next: opticc explain-grade {} --node <optic>",
@@ -571,6 +682,7 @@ fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
 }
 
 fn explain_grade_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
+    validate_node_name(node)?;
     match explain_grade_from_src(src, node) {
         Ok(report) => {
             if json {
@@ -578,11 +690,7 @@ fn explain_grade_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
                 println!("{}", optic_diagnostics::explain_grade_ok_json(&value));
             } else {
                 println!("optic: {}", report.optic);
-                let decl_alias = report
-                    .declared
-                    .ownership_alias
-                    .as_deref()
-                    .unwrap_or("-");
+                let decl_alias = report.declared.ownership_alias.as_deref().unwrap_or("-");
                 println!(
                     "declared: cache={} ({}) ownership={} alias={} read_only={} must_use={}",
                     report.declared.cache,
@@ -622,6 +730,7 @@ fn explain_grade_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
 }
 
 fn explain_focus_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
+    validate_node_name(node)?;
     match explain_focus_from_src(src, node) {
         Ok(report) => {
             if json {
@@ -658,6 +767,12 @@ fn explain_focus_cmd(src: &str, node: &str, json: bool) -> anyhow::Result<()> {
 
 fn dump_summary(src: &str, node: Option<&str>) -> anyhow::Result<()> {
     if let Some(n) = node {
+        if n.len() > optic_cgir::MAX_NODE_NAME_BYTES {
+            anyhow::bail!(
+                "node name exceeds {} bytes",
+                optic_cgir::MAX_NODE_NAME_BYTES
+            );
+        }
         // Name lookup first so optic names like "42" are not mistaken for CGIR node ids.
         let hir = lower_src(src).map_err(|diags| emit_pipeline_errors(&diags))?;
         for item in &hir.items {
@@ -690,7 +805,14 @@ fn dump_summary(src: &str, node: Option<&str>) -> anyhow::Result<()> {
             }
             return Ok(());
         }
-        anyhow::bail!("optic or let binding `{n}` not found (use numeric id for CGIR nodes)");
+        let candidates = hir_binding_candidates(&hir);
+        return Err(emit_pipeline_errors(&[
+            optic_diagnostics::explain_unknown_node_diag(
+                optic_syntax::Span::dummy(),
+                n,
+                &candidates,
+            ),
+        ]));
     }
     let hir = lower_src(src).map_err(|diags| emit_pipeline_errors(&diags))?;
     for item in &hir.items {
@@ -822,6 +944,7 @@ fn validated_runtime_crate_path() -> anyhow::Result<PathBuf> {
 fn bench_examples(update: bool, verbose: bool) -> anyhow::Result<()> {
     let examples = [
         "health_decay.opt",
+        "alive_filter.opt",
         "health_position.opt",
         "health_get.opt",
         "health_set.opt",
@@ -935,9 +1058,11 @@ fn verify_example_stdout(filename: &str, stdout: &str) -> bool {
         "compose_decay.opt" => {
             stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("45.0")
         }
-        "health_decay.opt" => stdout.contains("90.0") && stdout.contains("70.0"),
-        "health_set.opt" => stdout.contains("42.0"),
-        "health_get.opt" => stdout.contains("get:"),
+        "health_decay.opt" | "alive_filter.opt" | "partial_prism.opt" => {
+            stdout.contains("90.0") && stdout.contains("70.0")
+        }
+        "health_set.opt" | "prism_set.opt" => stdout.contains("42.0"),
+        "health_get.opt" | "prism_get.opt" => stdout.contains("get:"),
         "nested_position.opt" => {
             stdout.contains("(0.1, 0.1)")
                 && stdout.contains("(1.1, 1.1)")

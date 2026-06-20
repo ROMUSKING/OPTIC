@@ -1,41 +1,47 @@
 {
   "diagnostics": [
     {
-      "code": "TYP-010",
-      "confidence": 1.0,
+      "code": "GRA-110",
+      "confidence": 0.8999999761581421,
       "evidence": {
-        "detail": "prism syntax (`GradedPrism`, `preview`/`review`) is not supported in narrow v0 (M7+)",
-        "feature": "prism",
-        "name": "AliveFilter"
+        "annotated": 1.0,
+        "inferred": 2.0,
+        "optic": "AliveFilter"
       },
       "minimal_fix_options": [
-        "use lens-like GradedOptic forms supported in v0",
-        "defer prisms and host boundaries to M7+"
+        "raise CacheGrade annotation",
+        "reduce read/write regions in optic body"
       ],
       "next_commands": [
-        "opticc explain TYP-010",
-        "opticc check file.opt --json"
+        "opticc explain GRA-110",
+        "opticc dump-summary --node ..."
       ],
-      "phase": "type",
+      "phase": "grade",
       "primary_span": {
-        "end": 268.0,
+        "end": 293.0,
         "source": 1.0,
-        "start": 126.0
+        "start": 151.0
       },
       "ranked_fixes": [
         {
           "confidence": 1.0,
-          "description": "use lens-like GradedOptic forms supported in v0"
+          "description": "raise CacheGrade annotation"
         },
         {
           "confidence": 0.8999999761581421,
-          "description": "defer prisms and host boundaries to M7+"
+          "description": "reduce read/write regions in optic body"
         }
       ],
-      "related_spans": [],
-      "rule": "prism syntax (`GradedPrism`, `preview`/`review`) is not supported in narrow v0 (M7+)",
+      "related_spans": [
+        {
+          "end": 207.0,
+          "source": 1.0,
+          "start": 197.0
+        }
+      ],
+      "rule": "declared CacheGrade is tighter than inferred from optic body",
       "severity": "error",
-      "title": "unsupported in narrow v0"
+      "title": "declared grade tighter than inferred"
     }
   ],
   "ok": false

@@ -39,7 +39,9 @@ Pipeline: `.opt → parse → lower → typeck → CGIR → optimize → verify 
 
 Embedding helpers: `compile_check`, `compile_check_from_path`, `compile_emit`, `explain_grade_from_src`, `explain_focus_from_src`, `parse_src`, `lower_src`, `dump_ast_src`, `dump_hir_src`, `collect_unsupported_surface`.
 
-`dump-summary --node` resolves optic/let **names first**, then falls back to numeric CGIR node ids. `dump-cgir --node` is numeric-only.
+`dump-summary --node` and `dump-cgir --node` both resolve optic/let **names first** (via HIR summaries / `resolved_optics`), then fall back to numeric CGIR node ids.
+
+M7 prep: CGIR reserves `PrismLeaf`/`TraversalLeaf`/`Tap`/`Record` stubs; see `docs/observability-v0.md` and `docs/effect-coeffect-v0.md`.
 
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 

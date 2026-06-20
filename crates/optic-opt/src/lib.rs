@@ -2,8 +2,8 @@
 //! Fixed-point driver (≤8 iters): map fusion, compose fusion, product flatten (ch10 order).
 
 use optic_cgir::{
-    compose_leaf_chain, compose_tree_node_ids, verify, CgirGraph, CgirNode, ComposeFusedBody,
-    FusionProvenance, FusionReason, NodeId,
+    compose_leaf_chain, compose_tree_node_ids, node_span, verify_to_diagnostic, CgirGraph,
+    CgirNode, ComposeFusedBody, FusionProvenance, FusionReason, NodeId,
 };
 use optic_diagnostics::Diagnostic;
 use optic_hir as hir;
@@ -20,26 +20,32 @@ pub struct OptimizeResult {
 
 /// Run fusion passes until fixed point, skipping compose body rewrite (for equivalence tests).
 pub fn optimize_without_compose_fusion(g: CgirGraph) -> Result<CgirGraph, String> {
-    optimize_without_compose_fusion_reporting(g).map(|r| r.graph)
+    optimize_without_compose_fusion_reporting(g)
+        .map(|r| r.graph)
+        .map_err(|d| d.rule.clone())
+}
+
+fn fusion_verify(g: &CgirGraph) -> Result<(), Diagnostic> {
+    verify_to_diagnostic(g)
 }
 
 pub fn optimize_without_compose_fusion_reporting(
     mut g: CgirGraph,
-) -> Result<OptimizeResult, String> {
+) -> Result<OptimizeResult, Diagnostic> {
     let mut fusion_notes = vec![];
     for _ in 0..MAX_FUSION_ITERS {
         let n_before = g.nodes.len();
         g = map_fusion(g);
-        verify(&g)?;
+        fusion_verify(&g)?;
         let (g2, flat_notes) = product_flatten(g);
         g = g2;
         fusion_notes.extend(flat_notes);
-        verify(&g)?;
+        fusion_verify(&g)?;
         if g.nodes.len() == n_before {
             break;
         }
     }
-    verify(&g)?;
+    fusion_verify(&g)?;
     Ok(OptimizeResult {
         graph: g,
         fusion_notes,
@@ -47,25 +53,25 @@ pub fn optimize_without_compose_fusion_reporting(
 }
 
 /// Run fusion passes until fixed point. Aborts on verify violation (ch10 post-fusion check).
-pub fn optimize(mut g: CgirGraph) -> Result<OptimizeResult, String> {
+pub fn optimize(mut g: CgirGraph) -> Result<OptimizeResult, Diagnostic> {
     let mut fusion_notes = vec![];
     for _ in 0..MAX_FUSION_ITERS {
         let n_before = g.nodes.len();
         g = map_fusion(g);
-        verify(&g)?;
+        fusion_verify(&g)?;
         let (g2, notes) = compose_fusion(g);
         g = g2;
         fusion_notes.extend(notes);
-        verify(&g)?;
+        fusion_verify(&g)?;
         let (g3, flat_notes) = product_flatten(g);
         g = g3;
         fusion_notes.extend(flat_notes);
-        verify(&g)?;
+        fusion_verify(&g)?;
         if g.nodes.len() == n_before {
             break;
         }
     }
-    verify(&g)?;
+    fusion_verify(&g)?;
     Ok(OptimizeResult {
         graph: g,
         fusion_notes,
@@ -84,14 +90,12 @@ fn map_fusion(mut g: CgirGraph) -> CgirGraph {
         return g;
     }
 
-    let mut chain = vec![];
+    let mut chain: Vec<(NodeId, String, Span)> = vec![];
     let mut costate = String::new();
     for &rid in &map_roots {
         if let Some(CgirNode::QueryMap {
             costate: cs,
-            optic_name,
             map_param,
-            map_body,
             provenance,
             ..
         }) = g.nodes.get(rid as usize)
@@ -101,13 +105,7 @@ fn map_fusion(mut g: CgirGraph) -> CgirGraph {
             } else if cs != &costate {
                 return g;
             }
-            chain.push((
-                rid,
-                optic_name.clone(),
-                map_param.clone(),
-                map_body.clone(),
-                *provenance,
-            ));
+            chain.push((rid, map_param.clone(), *provenance));
         }
     }
     if chain.len() <= 1 {
@@ -115,15 +113,23 @@ fn map_fusion(mut g: CgirGraph) -> CgirGraph {
     }
 
     let fused_id = chain[0].0;
-    let param = chain[0].2.clone();
-    let span = chain[0].4;
-    let mut body = chain[0].3.as_ref().clone();
-    for (_, _, inner_param, next_body, _) in chain.iter().skip(1) {
+    let param = chain[0].1.clone();
+    let span = chain[0].2;
+    let first_body = match g.nodes.get(fused_id as usize) {
+        Some(CgirNode::QueryMap { map_body, .. }) => map_body.as_ref(),
+        _ => return g,
+    };
+    let mut body = first_body.clone();
+    for &(rid, ref inner_param, _) in chain.iter().skip(1) {
+        let next_body = match g.nodes.get(rid as usize) {
+            Some(CgirNode::QueryMap { map_body, .. }) => map_body.as_ref(),
+            _ => return g,
+        };
         let params: Vec<&str> = inner_param.split(',').map(str::trim).collect();
         if params.len() > 1 && !matches!(body, hir::HirExpr::Tuple(_, _)) {
             return g;
         }
-        body = substitute_all_params(next_body.as_ref(), inner_param, &body);
+        body = substitute_all_params(next_body, inner_param, &body);
     }
 
     if let Some(CgirNode::QueryMap {
@@ -134,7 +140,8 @@ fn map_fusion(mut g: CgirGraph) -> CgirGraph {
     }) = g.nodes.get_mut(fused_id as usize)
     {
         *map_param = param;
-        *map_body = std::sync::Arc::new(body);
+        let slot = std::sync::Arc::make_mut(map_body);
+        *slot = body;
         *provenance = span;
     }
 
@@ -153,12 +160,12 @@ fn map_fusion(mut g: CgirGraph) -> CgirGraph {
 
 fn substitute_all_params(e: &hir::HirExpr, param_str: &str, repl: &hir::HirExpr) -> hir::HirExpr {
     let params: Vec<&str> = param_str.split(',').map(str::trim).collect();
-    if params.len() > 1 && !matches!(repl, hir::HirExpr::Tuple(_, _)) {
-        return e.clone();
-    }
-    let mut out = e.clone();
     if params.len() > 1 {
+        if !matches!(repl, hir::HirExpr::Tuple(_, _)) {
+            return e.clone();
+        }
         if let hir::HirExpr::Tuple(elems, _) = repl {
+            let mut out = e.clone();
             for (p, el) in params.iter().zip(elems.iter()) {
                 out = substitute_map_body(&out, p, el);
             }
@@ -166,9 +173,14 @@ fn substitute_all_params(e: &hir::HirExpr, param_str: &str, repl: &hir::HirExpr)
         }
     }
     let inner = params.first().copied().unwrap_or("it");
-    substitute_map_body(&out, inner, repl)
+    substitute_map_body(e, inner, repl)
 }
 
+/// Map-fusion substitution (ch10 compose body rewrite).
+///
+/// Differs from [`hir::substitute_hir_var`] on `FocusField`: here a matching `param`
+/// replaces the entire `FocusField` node with `repl` (tuple projection / bind splice).
+/// `substitute_hir_var` only renames the `param` ident when `repl` is a `Var`.
 fn substitute_map_body(e: &hir::HirExpr, name: &str, repl: &hir::HirExpr) -> hir::HirExpr {
     match e {
         hir::HirExpr::CursorField {
@@ -270,7 +282,7 @@ fn compose_fusion(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
     let Some(compose_node) = g.nodes.get(compose_id as usize) else {
         return (g, vec![]);
     };
-    let compose_span = node_provenance(compose_node);
+    let compose_span = node_span(compose_node);
     let span = map_span.merge(compose_span);
 
     if let Some(note) =
@@ -286,7 +298,7 @@ fn compose_fusion(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
         return (g, vec![]);
     }
     let entry = chain[0];
-    let exit = *chain.last().unwrap();
+    let exit = *chain.last().expect("compose chain len >= 2");
 
     let already = g
         .provenance_index
@@ -333,6 +345,17 @@ fn compose_fusion_block_note(
     map_param: &str,
     span: Span,
 ) -> Option<Diagnostic> {
+    if let Some(prism_leaf) = optic_cgir::compose_chain_prism_leaf(g, compose_id) {
+        return Some(optic_diagnostics::fusion_compose_legality_diag(
+            span,
+            "compose fusion blocked — compose chain contains PrismLeaf",
+            serde_json::json!({
+                "reason": "prism_in_compose",
+                "compose_id": compose_id,
+                "leaf_id": prism_leaf,
+            }),
+        ));
+    }
     let chain = compose_leaf_chain(g, compose_id)?;
     if chain.len() < 2 {
         return Some(optic_diagnostics::fusion_compose_legality_diag(
@@ -423,43 +446,30 @@ fn intermediate_escapes_query(
     map_body: &hir::HirExpr,
     map_param: &str,
 ) -> bool {
-    let Some(CgirNode::OpticLeaf {
-        get_param, focus, ..
-    }) = g.nodes.get(rhs as usize)
-    else {
-        return false;
+    let (leaf_param, focus) = match g.nodes.get(rhs as usize) {
+        Some(CgirNode::OpticLeaf {
+            get_param, focus, ..
+        }) => (get_param.as_str(), focus.as_str()),
+        Some(CgirNode::PrismLeaf {
+            preview_param,
+            focus,
+            ..
+        }) => (preview_param.as_str(), focus.as_str()),
+        _ => return false,
     };
-    // Rhs get_param names the intermediate flowing through compose (e.g. `x` in `get x => ...`).
-    if get_param != map_param && hir_expr_refs_var(map_body, get_param) {
+    // Rhs param names the intermediate flowing through compose (e.g. `x` in `get x => ...`).
+    if leaf_param != map_param && hir::hir_expr_refs_var(map_body, leaf_param) {
         return true;
     }
     // Conservative: reject map bodies that reference the declared focus type name as an ident.
-    if focus != map_param && hir_expr_refs_var(map_body, focus) {
+    if focus != map_param && hir::hir_expr_refs_var(map_body, focus) {
         return true;
     }
     false
 }
 
-fn hir_expr_refs_var(e: &hir::HirExpr, name: &str) -> bool {
-    match e {
-        hir::HirExpr::Var(v, _) => v == name,
-        hir::HirExpr::Bin { left, right, .. } => {
-            hir_expr_refs_var(left, name) || hir_expr_refs_var(right, name)
-        }
-        hir::HirExpr::Paren(inner, _) => hir_expr_refs_var(inner, name),
-        hir::HirExpr::Tuple(elems, _) => elems.iter().any(|el| hir_expr_refs_var(el, name)),
-        hir::HirExpr::TupleProj { base, .. } => hir_expr_refs_var(base, name),
-        hir::HirExpr::FocusField { param, .. } => param == name,
-        _ => false,
-    }
-}
-
 fn leaf_summary(n: &CgirNode) -> Option<&hir::OpticSummary> {
-    if let CgirNode::OpticLeaf { summary, .. } = n {
-        Some(summary.as_ref())
-    } else {
-        None
-    }
+    n.summary().map(|s| s.as_ref())
 }
 
 /// Collect leaf ids from a (possibly nested) Product tree in left-to-right order.
@@ -471,9 +481,9 @@ fn flatten_product_children(g: &CgirGraph, id: NodeId) -> Result<Vec<NodeId>, St
             Ok(out)
         }
         Some(CgirNode::ProductFlat { children, .. }) => Ok(children.clone()),
-        Some(CgirNode::OpticLeaf { .. }) => Ok(vec![id]),
+        Some(CgirNode::OpticLeaf { .. }) | Some(CgirNode::PrismLeaf { .. }) => Ok(vec![id]),
         Some(_) => Err(format!(
-            "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf"
+            "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf/PrismLeaf"
         )),
         None => Err(format!("flatten_product_children: node {id} out of bounds")),
     }
@@ -638,22 +648,10 @@ fn product_flatten(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
     (g, notes)
 }
 
-fn node_provenance(n: &CgirNode) -> Span {
-    match n {
-        CgirNode::OpticLeaf { provenance, .. }
-        | CgirNode::Compose { provenance, .. }
-        | CgirNode::Product { provenance, .. }
-        | CgirNode::ProductFlat { provenance, .. }
-        | CgirNode::QueryGet { provenance, .. }
-        | CgirNode::QuerySet { provenance, .. }
-        | CgirNode::QueryMap { provenance, .. }
-        | CgirNode::FusedLoop { provenance, .. } => *provenance,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use optic_cgir::verify;
     use optic_hir::{HirExpr, OwnershipDim, Rational};
     use optic_syntax::{BinOp, Span};
     use std::collections::BTreeMap;
@@ -1275,8 +1273,9 @@ mod tests {
         };
         let err = optimize(g).expect_err("invalid compose wiring must fail verify");
         assert!(
-            err.contains("compose type wiring invalid"),
-            "focus mismatch caught by CGIR verify: {err}"
+            err.rule.contains("compose type wiring invalid"),
+            "focus mismatch caught by CGIR verify: {}",
+            err.rule
         );
     }
 
@@ -1662,5 +1661,270 @@ mod tests {
             out.fusion_notes
         );
         assert!(matches!(out.graph.nodes[6], CgirNode::Product { .. }));
+    }
+
+    #[test]
+    fn substitute_map_body_agrees_with_hir_var_without_focus_field() {
+        let e = HirExpr::Bin {
+            op: BinOp::Add,
+            left: Box::new(HirExpr::Var("x".into(), Span::dummy())),
+            right: Box::new(HirExpr::CursorIndex {
+                cursor: "x".into(),
+                field: "healths".into(),
+                span: Span::dummy(),
+            }),
+            span: Span::dummy(),
+        };
+        let repl = HirExpr::Var("_bind".into(), Span::dummy());
+        let map_sub = substitute_map_body(&e, "x", &repl);
+        let hir_sub = hir::substitute_hir_var(&e, "x", &repl);
+        assert_eq!(format!("{map_sub:?}"), format!("{hir_sub:?}"));
+    }
+
+    #[test]
+    fn substitute_map_body_replaces_focus_field_whole_node() {
+        let e = HirExpr::FocusField {
+            param: "x".into(),
+            path: vec!["healths".into()],
+            span: Span::dummy(),
+        };
+        let repl = HirExpr::Var("_bind".into(), Span::dummy());
+        let map_sub = substitute_map_body(&e, "x", &repl);
+        assert!(matches!(map_sub, HirExpr::Var(ref v, _) if v == "_bind"));
+        let hir_sub = hir::substitute_hir_var(&e, "x", &repl);
+        assert!(matches!(hir_sub, HirExpr::FocusField { .. }));
+    }
+
+    fn mk_prism(
+        id: NodeId,
+        name: &str,
+        costate: &str,
+        focus: &str,
+        sum: Arc<hir::OpticSummary>,
+    ) -> CgirNode {
+        CgirNode::PrismLeaf {
+            id,
+            name: name.into(),
+            costate: costate.into(),
+            focus: focus.into(),
+            grade: sum.get_grade.clone(),
+            preview_fn: String::new(),
+            review_fn: String::new(),
+            preview_param: "s".into(),
+            preview_body: Arc::new(HirExpr::CursorIndex {
+                cursor: "cursor".into(),
+                field: "healths".into(),
+                span: Span::dummy(),
+            }),
+            preview_returns_option: false,
+            preview_wrap_some: false,
+            review_state_param: Some("s".into()),
+            review_value_param: Some("a".into()),
+            review_value_body: Some(Arc::new(HirExpr::Var("a".into(), Span::dummy()))),
+            summary: sum,
+            provenance: Span::dummy(),
+            m7_reserved: false,
+        }
+    }
+
+    #[test]
+    fn prism_query_map_unchanged_by_compose_fusion() {
+        let sum = Arc::new(hir::OpticSummary {
+            name: Some("AliveFilter".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("AliveFilter".into(), 0);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_prism(0, "AliveFilter", "Entities", "f32", Arc::clone(&sum)),
+                CgirNode::QueryMap {
+                    id: 1,
+                    optic_name: "AliveFilter".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "h".into(),
+                    map_body: Arc::new(HirExpr::Var("h".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![1],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("prism map should optimize");
+        assert_eq!(out.graph.roots, vec![1]);
+        assert!(out.fusion_notes.is_empty());
+    }
+
+    #[test]
+    fn compose_fusion_blocked_on_prism_in_compose() {
+        let sum_lhs = Arc::new(hir::OpticSummary {
+            name: Some("H".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let sum_prism = Arc::new(hir::OpticSummary {
+            name: Some("P".into()),
+            costate: "f32".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: sum_lhs.get_grade.clone(),
+            put_grade: sum_lhs.put_grade.clone(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let mut resolved = std::collections::HashMap::new();
+        resolved.insert("seq".into(), 2);
+        let g = CgirGraph {
+            nodes: vec![
+                mk_leaf(0, "H", "Entities", "f32", Arc::clone(&sum_lhs)),
+                mk_prism(1, "P", "f32", "f32", Arc::clone(&sum_prism)),
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: sum_lhs.get_grade.clone(),
+                    provenance: Span::dummy(),
+                },
+                CgirNode::QueryMap {
+                    id: 3,
+                    optic_name: "seq".into(),
+                    costate: "entities".into(),
+                    cursor: "c".into(),
+                    map_param: "h".into(),
+                    map_body: Arc::new(HirExpr::Var("h".into(), Span::dummy())),
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![3],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: resolved,
+            region_map: hir::RegionMap::default(),
+        };
+        let out = optimize(g).expect("compose+prism should still verify unfused");
+        assert_eq!(out.graph.roots, vec![3]);
+        assert!(
+            out.fusion_notes.iter().any(|d| {
+                d.code == optic_diagnostics::FUS_COMPOSE_LEGALITY_BLOCKED
+                    && d.evidence["reason"] == "prism_in_compose"
+            }),
+            "compose+prism must emit FUS-502 prism_in_compose"
+        );
+    }
+
+    #[test]
+    fn flatten_product_children_accepts_prism_leaf() {
+        let sum = Arc::new(hir::OpticSummary {
+            name: Some("P".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![
+                mk_prism(0, "P", "Entities", "f32", Arc::clone(&sum)),
+                mk_leaf(1, "H", "Entities", "f32", sum),
+                CgirNode::Product {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: hir::ConcreteGrade {
+                        cache: 1,
+                        ownership: OwnershipDim {
+                            share: Rational::one(),
+                            read_only: false,
+                            must_use: false,
+                        },
+                    },
+                    alias_safe: true,
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![2],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: empty_resolved(),
+            region_map: hir::RegionMap::default(),
+        };
+        let children = flatten_product_children(&g, 2).expect("prism in product");
+        assert_eq!(children, vec![0, 1]);
     }
 }

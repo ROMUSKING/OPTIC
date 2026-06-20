@@ -1,0 +1,4 @@
+CGIR (2 nodes, roots [1])
+  [0] PrismLeaf(AliveFilter,m7_reserved=false)  provenance=Build
+  [1] QueryMap(AliveFilter)  provenance=Build
+

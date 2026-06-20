@@ -1,0 +1,13 @@
+-- M7 prism set query (review as write path)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+fn main() {
+    entities.query(AliveFilter).set(42.0);
+}

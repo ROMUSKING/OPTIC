@@ -236,6 +236,7 @@ Program {
                                 },
                             },
                         ),
+                        partial: false,
                         span: Span {
                             source: SourceId(
                                 1,
@@ -532,6 +533,7 @@ Program {
                                 end: 372,
                             },
                         },
+                        partial: false,
                         span: Span {
                             source: SourceId(
                                 1,
@@ -736,6 +738,7 @@ Program {
                                 end: 500,
                             },
                         },
+                        partial: false,
                         span: Span {
                             source: SourceId(
                                 1,

@@ -54,7 +54,7 @@ pub struct FocusReport {
     pub focus_fields: Vec<String>,
 }
 
-/// Reject deferred surface features (prisms, host/foreign boundaries) before M7.
+/// Reject deferred surface features (traversal, host/foreign boundaries) before M7.
 pub fn collect_unsupported_surface(prog: &syn::Program) -> Vec<Diagnostic> {
     let mut diags = vec![];
     for item in &prog.items {
@@ -73,16 +73,6 @@ pub fn collect_unsupported_surface(prog: &syn::Program) -> Vec<Diagnostic> {
                         decl.span,
                         "unsafe_optic",
                         "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
-                        Some(&decl.name.node),
-                    ));
-                } else if decl.type_ctor == syn::OpticTypeCtor::GradedPrism
-                    || decl.preview.is_some()
-                    || decl.review.is_some()
-                {
-                    diags.push(diag::type_unsupported_v0_diag(
-                        decl.span,
-                        "prism",
-                        "prism syntax (`GradedPrism`, `preview`/`review`) is not supported in narrow v0 (M7+)",
                         Some(&decl.name.node),
                     ));
                 } else if decl.type_ctor == syn::OpticTypeCtor::GradedTraversal {
@@ -113,6 +103,8 @@ pub fn typeck_pass(hir: hir::HirProgram) -> (TypedHir, Vec<Diagnostic>) {
             hir::HirItem::Optic { decl, .. } => {
                 diags.extend(validate_optic_types(decl, &known_types));
                 diags.extend(validate_grade_syntax(&decl.grade, &decl.name.node));
+                diags.extend(validate_optic_clause_mixing(decl));
+                diags.extend(validate_prism_clauses(decl));
                 diags.extend(check_optic_body_types(decl, &region_map));
             }
             hir::HirItem::Let {
@@ -582,12 +574,13 @@ pub fn explain_grade(typed: &TypedHir, node: &str) -> TypeckResult<GradeReport> 
                 return Ok(build_grade_report(node, Some(&decl.grade), summary));
             }
             hir::HirItem::Let {
-                name,
-                ty,
-                summary,
-                ..
+                name, ty, summary, ..
             } if name == node => {
-                return Ok(build_grade_report(node, ty.as_ref().map(|t| &t.grade), summary));
+                return Ok(build_grade_report(
+                    node,
+                    ty.as_ref().map(|t| &t.grade),
+                    summary,
+                ));
             }
             _ => {}
         }
@@ -667,11 +660,7 @@ fn focus_fields_from_decl(decl: &syn::OpticDecl) -> Vec<String> {
     }
     if let Some(put) = &decl.put {
         if let Some(path) = focus_assign_path_surface(&put.state_param.node, &put.body) {
-            out.push(format!(
-                "{}.{}",
-                put.state_param.node,
-                path.join(".")
-            ));
+            out.push(format!("{}.{}", put.state_param.node, path.join(".")));
         }
     }
     out.sort();
@@ -739,11 +728,7 @@ pub fn explain_focus(typed: &TypedHir, node: &str) -> TypeckResult<FocusReport> 
                     focus_fields: focus_fields_from_decl(decl),
                 });
             }
-            hir::HirItem::Let {
-                name,
-                summary,
-                ..
-            } if name == node => {
+            hir::HirItem::Let { name, summary, .. } if name == node => {
                 return Ok(FocusReport {
                     node: node.into(),
                     costate: summary.costate.clone(),
@@ -814,7 +799,11 @@ fn declared_grade_snapshot(g: &syn::GradeExpr, inferred: &ConcreteGrade) -> Grad
         "default"
     };
     GradeSnapshot {
-        cache: if elided { inferred.cache } else { declared.cache },
+        cache: if elided {
+            inferred.cache
+        } else {
+            declared.cache
+        },
         cache_source: cache_source.into(),
         ownership_share: format!(
             "{}/{}",
@@ -952,10 +941,7 @@ fn validate_grade_syntax(g: &syn::GradeExpr, optic: &str) -> Vec<Diagnostic> {
                 }
             }
             syn::GradeDim::Named { name, span } => {
-                if !matches!(
-                    name.as_str(),
-                    "LinearGrade" | "AffineGrade" | "SharedGrade"
-                ) {
+                if !matches!(name.as_str(), "LinearGrade" | "AffineGrade" | "SharedGrade") {
                     out.push(diag::type_grade_syntax_diag(
                         *span,
                         &format!("unknown grade dimension `{name}`"),
@@ -980,6 +966,64 @@ fn valid_ownership_rational(txt: &str) -> bool {
     n > 0 && d > 0
 }
 
+fn validate_optic_clause_mixing(decl: &syn::OpticDecl) -> Vec<Diagnostic> {
+    let optic = decl.name.node.as_str();
+    let mut out = vec![];
+    if decl.is_prism() {
+        if let Some(get) = &decl.get {
+            out.push(diag::type_clause_mix_diag(
+                get.span,
+                "GradedPrism cannot use get clause (use preview instead)",
+                "get",
+                optic,
+            ));
+        }
+        if let Some(put) = &decl.put {
+            out.push(diag::type_clause_mix_diag(
+                put.span,
+                "GradedPrism cannot use put clause (use review instead)",
+                "put",
+                optic,
+            ));
+        }
+    } else if decl.type_ctor == syn::OpticTypeCtor::GradedOptic {
+        if let Some(preview) = &decl.preview {
+            out.push(diag::type_clause_mix_diag(
+                preview.span,
+                "GradedOptic cannot use preview clause (use get instead)",
+                "preview",
+                optic,
+            ));
+        }
+        if let Some(review) = &decl.review {
+            out.push(diag::type_clause_mix_diag(
+                review.span,
+                "GradedOptic cannot use review clause (use put instead)",
+                "review",
+                optic,
+            ));
+        }
+    }
+    out
+}
+
+fn validate_prism_clauses(decl: &syn::OpticDecl) -> Vec<Diagnostic> {
+    if !decl.is_prism() {
+        return vec![];
+    }
+    let optic = decl.name.node.as_str();
+    let mut out = vec![];
+    if decl.preview.is_none() {
+        out.push(diag::type_body_uninferable_diag(
+            decl.span, "preview", optic,
+        ));
+    }
+    if decl.review.is_none() {
+        out.push(diag::type_body_uninferable_diag(decl.span, "review", optic));
+    }
+    out
+}
+
 fn check_optic_body_types(decl: &syn::OpticDecl, region_map: &hir::RegionMap) -> Vec<Diagnostic> {
     let mut out = vec![];
     let optic = decl.name.node.as_str();
@@ -990,11 +1034,7 @@ fn check_optic_body_types(decl: &syn::OpticDecl, region_map: &hir::RegionMap) ->
             Ok(actual) => {
                 if types_differ(&focus, &actual) {
                     out.push(diag::type_body_mismatch_diag(
-                        get.span,
-                        &focus,
-                        &actual,
-                        "get",
-                        optic,
+                        get.span, &focus, &actual, "get", optic,
                     ));
                 }
             }
@@ -1003,20 +1043,58 @@ fn check_optic_body_types(decl: &syn::OpticDecl, region_map: &hir::RegionMap) ->
             }
         }
     }
+    if let Some(preview) = decl.preview.as_ref() {
+        match infer_surface_expr_type(&preview.body, &preview.param.node, &costate, region_map) {
+            Ok(actual) => {
+                if !preview_type_matches_focus(&focus, &actual) {
+                    out.push(diag::type_body_mismatch_diag(
+                        preview.span,
+                        &focus,
+                        &actual,
+                        "preview",
+                        optic,
+                    ));
+                }
+            }
+            Err(()) => {
+                out.push(diag::type_body_uninferable_diag(
+                    preview.span,
+                    "preview",
+                    optic,
+                ));
+            }
+        }
+    }
     if let Some(put) = &decl.put {
         match infer_put_write_target_type(put, &put.state_param.node, &costate, region_map) {
             Ok(actual) => {
                 if types_differ(&focus, &actual) {
                     out.push(diag::type_body_mismatch_diag(
-                        put.span,
-                        &focus,
-                        &actual,
-                        "put",
-                        optic,
+                        put.span, &focus, &actual, "put", optic,
                     ));
                 }
             }
             Err(()) => out.push(diag::type_body_uninferable_diag(put.span, "put", optic)),
+        }
+    }
+    if let Some(review) = &decl.review {
+        match infer_put_write_target_type(review, &review.state_param.node, &costate, region_map) {
+            Ok(actual) => {
+                if types_differ(&focus, &actual) {
+                    out.push(diag::type_body_mismatch_diag(
+                        review.span,
+                        &focus,
+                        &actual,
+                        "review",
+                        optic,
+                    ));
+                }
+            }
+            Err(()) => out.push(diag::type_body_uninferable_diag(
+                review.span,
+                "review",
+                optic,
+            )),
         }
     }
     out
@@ -1024,6 +1102,38 @@ fn check_optic_body_types(decl: &syn::OpticDecl, region_map: &hir::RegionMap) ->
 
 fn types_differ(expected: &str, actual: &str) -> bool {
     normalize_type_name(expected) != normalize_type_name(actual)
+}
+
+fn is_option_type_name(t: &str) -> bool {
+    let t = normalize_type_name(t);
+    t.starts_with("Option<") && t.ends_with('>')
+}
+
+fn option_inner_type(t: &str) -> Option<String> {
+    let t = normalize_type_name(t);
+    t.strip_prefix("Option<")
+        .and_then(|inner| inner.strip_suffix('>'))
+        .map(|s| s.to_string())
+}
+
+fn preview_type_matches_focus(focus: &str, actual: &str) -> bool {
+    if !types_differ(focus, actual) {
+        return true;
+    }
+    option_inner_type(actual).is_some_and(|inner| !types_differ(focus, &inner))
+}
+
+/// True when a prism preview body is inferred to return `Option<focus>`.
+pub fn preview_body_returns_option(
+    body: &syn::Expr,
+    param: &str,
+    costate: &str,
+    region_map: &hir::RegionMap,
+) -> bool {
+    infer_surface_expr_type(body, param, costate, region_map)
+        .ok()
+        .as_deref()
+        .is_some_and(is_option_type_name)
 }
 
 fn normalize_type_name(t: &str) -> String {
@@ -1042,7 +1152,8 @@ fn infer_put_write_target_type(
     let body = &put.body;
     if let syn::Expr::Block { stmts, result, .. } = body {
         for stmt in stmts {
-            if let Some(t) = infer_assign_target_type(&stmt.expr, state_param, costate, region_map) {
+            if let Some(t) = infer_assign_target_type(&stmt.expr, state_param, costate, region_map)
+            {
                 return Ok(t);
             }
         }
@@ -1082,9 +1193,7 @@ fn infer_surface_expr_type(
     match e {
         syn::Expr::Atom(syn::AtomExpr::Float(_, _)) => Ok("f32".into()),
         syn::Expr::Atom(syn::AtomExpr::Int(_, _)) => Ok("i32".into()),
-        syn::Expr::Atom(syn::AtomExpr::Ident(id)) if id.node == param => {
-            Ok(costate.into())
-        }
+        syn::Expr::Atom(syn::AtomExpr::Ident(id)) if id.node == param => Ok(costate.into()),
         syn::Expr::Atom(syn::AtomExpr::Tuple(elems, _)) => {
             let parts: Result<Vec<_>, _> = elems
                 .iter()
@@ -1096,7 +1205,9 @@ fn infer_surface_expr_type(
             infer_surface_expr_type(inner, param, costate, region_map)
         }
         syn::Expr::Field(fe) => infer_field_expr_type(fe, param, costate, region_map),
-        syn::Expr::Binary { right, .. } => infer_surface_expr_type(right, param, costate, region_map),
+        syn::Expr::Binary { right, .. } => {
+            infer_surface_expr_type(right, param, costate, region_map)
+        }
         syn::Expr::Block { result, .. } => result
             .as_ref()
             .map(|r| infer_surface_expr_type(r, param, costate, region_map))
@@ -1114,9 +1225,7 @@ fn infer_field_expr_type(
     match fe {
         syn::FieldExpr::Index { base, .. } => {
             if let syn::FieldExpr::FieldAccess {
-                base: inner,
-                field,
-                ..
+                base: inner, field, ..
             } = &**base
             {
                 if let syn::FieldExpr::Base(syn::AtomExpr::Ident(id), _) = &**inner {
@@ -1427,7 +1536,10 @@ fn main() { entities.query(X).get(); }
         let report = explain_grade(&typed, "HealthView").expect("explain");
         assert_eq!(report.optic, "HealthView");
         assert_eq!(report.inferred.cache, 2);
-        assert_eq!(report.declared.ownership_alias.as_deref(), Some("AffineGrade"));
+        assert_eq!(
+            report.declared.ownership_alias.as_deref(),
+            Some("AffineGrade")
+        );
         assert!(report.regions.get_reads.contains(&"healths".to_string()));
     }
 
@@ -1438,8 +1550,8 @@ fn main() { entities.query(X).get(); }
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, diags) = typeck_pass(hirp);
         assert!(diags.iter().any(|d| d.code == diag::GRADE_DECL_TIGHT));
-        let report =
-            explain_grade_with_diags(&typed, "BadCache", &diags).expect("explain despite other errors");
+        let report = explain_grade_with_diags(&typed, "BadCache", &diags)
+            .expect("explain despite other errors");
         assert_eq!(report.inferred.cache, 3);
     }
 
@@ -1465,17 +1577,14 @@ fn main() { entities.query(X).get(); }
     }
 
     #[test]
-    fn test_collect_unsupported_surface_prism() {
-        let src = include_str!("../../../examples/unsupported_prism.opt");
+    fn test_collect_unsupported_surface_prism_allowed() {
+        let src = include_str!("../../../examples/alive_filter.opt");
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, diag::TYPE_UNSUPPORTED_V0);
-        assert_eq!(
-            diags[0].evidence["feature"].as_str(),
-            Some("prism")
+        assert!(
+            diags.is_empty(),
+            "GradedPrism must not be rejected via TYP-010: {diags:?}"
         );
-        assert_eq!(diags[0].evidence["name"].as_str(), Some("AliveFilter"));
     }
 
     #[test]
@@ -1502,50 +1611,128 @@ optic Scan: GradedTraversal<Entities, f32, _> {
 "#;
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert!(diags.iter().any(|d| d.evidence["feature"].as_str() == Some("traversal")));
+        assert!(diags
+            .iter()
+            .any(|d| d.evidence["feature"].as_str() == Some("traversal")));
     }
 
     #[test]
-    fn test_explain_focus_lenient_when_other_prism_in_file() {
+    fn test_explain_focus_prism_lowers_and_reports() {
+        let src = include_str!("../../../examples/alive_filter.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let unsupported = collect_unsupported_surface(&prog);
+        assert!(unsupported.is_empty());
+        let hirp = optic_hir::lower(prog).expect("lower");
+        assert!(
+            hirp.items.iter().any(
+                |i| matches!(i, hir::HirItem::Optic { decl, .. } if decl.name.node == "AliveFilter")
+            ),
+            "prism optic must lower into HIR"
+        );
+        let (typed, diags) = typeck_pass(hirp);
+        let report = explain_focus_with_diags(&typed, "AliveFilter", &diags).expect("prism focus");
+        assert_eq!(report.root_path, "entities.healths[id]");
+    }
+
+    #[test]
+    fn test_validate_prism_rejects_get_clause() {
         let src = r#"
 data Entities { healths: SoA<f32> }
-optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+optic BadPrism: GradedPrism<Entities, f32, _> {
     get s => s.healths[s.id]
-    put (s, v) => { s.healths[s.id] = v }
-}
-optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
     preview s => s.healths[s.id]
     review (s, a) => { s.healths[s.id] = a }
 }
 "#;
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
-        let unsupported = collect_unsupported_surface(&prog);
         let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
         assert!(
-            !hirp
-                .items
-                .iter()
-                .any(|i| matches!(i, hir::HirItem::Optic { decl, .. } if decl.name.node == "AliveFilter")),
-            "unsupported prism must not lower into HIR"
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_GRADE_SYNTAX
+                    && d.evidence["fragment"].as_str() == Some("get")
+                    && d.evidence["feature"].as_str() == Some("clause_mix")
+            }),
+            "GradedPrism + get must emit TYP-003 clause_mix: {diags:?}"
         );
-        let (typed, diags) = typeck_pass(hirp);
-        let mut combined = diags;
-        combined.extend(unsupported);
-        let report = explain_focus_with_diags(&typed, "HealthView", &combined).expect("lenient");
-        assert_eq!(report.root_path, "entities.healths[id]");
     }
 
     #[test]
-    fn test_explain_focus_blocks_typ010_on_target() {
-        let src = include_str!("../../../examples/unsupported_prism.opt");
+    fn test_validate_optic_rejects_preview_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadLens: GradedOptic<Entities, f32, _> {
+    preview s => s.healths[s.id]
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+"#;
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
-        let unsupported = collect_unsupported_surface(&prog);
         let hirp = optic_hir::lower(prog).expect("lower");
-        let (typed, diags) = typeck_pass(hirp);
-        let mut combined = diags;
-        combined.extend(unsupported);
-        let err = explain_focus_with_diags(&typed, "AliveFilter", &combined).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::TYPE_UNSUPPORTED_V0));
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_GRADE_SYNTAX
+                    && d.evidence["fragment"].as_str() == Some("preview")
+            }),
+            "GradedOptic + preview must emit TYP-003: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_prism_missing_preview_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadPrism: GradedPrism<Entities, f32, _> {
+    review (s, a) => { s.healths[s.id] = a }
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_BODY_UNINFERABLE
+                    && d.evidence["clause"].as_str() == Some("preview")
+            }),
+            "missing preview must emit TYP-004: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_prism_missing_review_clause() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic BadPrism: GradedPrism<Entities, f32, _> {
+    preview s => s.healths[s.id]
+}
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            diags.iter().any(|d| {
+                d.code == diag::TYPE_BODY_UNINFERABLE
+                    && d.evidence["clause"].as_str() == Some("review")
+            }),
+            "missing review must emit TYP-004: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_prism_preview_review_body_typeck() {
+        let src = include_str!("../../../examples/alive_filter.opt");
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (_, diags) = typeck_pass(hirp);
+        assert!(
+            !diags.iter().any(|d| d.code == diag::TYPE_BODY_MISMATCH),
+            "preview/review must match focus: {diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.code == diag::TYPE_BODY_UNINFERABLE),
+            "preview/review bodies must be inferable: {diags:?}"
+        );
     }
 
     #[test]

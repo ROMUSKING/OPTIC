@@ -1,4 +1,4 @@
--- Appendix B negative: prism syntax rejected in narrow v0 (M7+)
+-- Appendix B parse fixture: prism surface syntax (see alive_filter.opt for positive e2e)
 data Entities {
     flags: BitSet,
     healths: SoA<f32>,

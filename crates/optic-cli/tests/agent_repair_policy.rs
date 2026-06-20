@@ -29,7 +29,10 @@ fn agent_repair_gra110_evidence_drives_cache_patch() {
         &format!("CacheGrade<{inferred}>"),
     );
     assert_ne!(src, patched);
-    assert!(compile_check(&patched).is_ok(), "patched source should pass check");
+    assert!(
+        compile_check(&patched).is_ok(),
+        "patched source should pass check"
+    );
 }
 
 /// ALI-201: split parallel product into sequential compose per ranked_fix hint.
@@ -48,9 +51,15 @@ fn agent_repair_ali201_evidence_drives_sequential_patch() {
     let top = d["ranked_fixes"][0]["description"]
         .as_str()
         .expect("ranked_fixes[0]");
-    assert!(top.contains("sequential"), "top fix should suggest sequential passes");
+    assert!(
+        top.contains("sequential"),
+        "top fix should suggest sequential passes"
+    );
     let src = std::fs::read_to_string(example("invalid_alias.opt")).expect("read source");
-    let patched = src.replace("WriteHealth *** AlsoWriteHealth", "WriteHealth >>> AlsoWriteHealth");
+    let patched = src.replace(
+        "WriteHealth *** AlsoWriteHealth",
+        "WriteHealth >>> AlsoWriteHealth",
+    );
     assert_ne!(src, patched);
     let err = compile_check(&patched).expect_err("sequential patch may surface other errors");
     assert!(

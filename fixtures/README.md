@@ -36,10 +36,11 @@ Review diffs before committing.
 | Command | Notes |
 |---------|-------|
 | `opticc check` | Full pipeline; rejects TYP-010 |
-| `opticc dump-ast` / `dump-hir` / `dump-summary` | Same TYP-010 gate as `check` |
+| `opticc dump-ast` / `dump-hir` / `dump-summary` / `dump-cgir` | Same TYP-010 gate as `check` |
 | `opticc dump-summary --node NAME` | Optic/let name lookup (**precedence over numeric**) |
 | `opticc dump-summary --node N` | Numeric CGIR node id (fallback when name not found) |
-| `opticc dump-cgir --node N` | Numeric node id only (no name resolution) |
+| `opticc dump-cgir --node NAME` | Optic/let name via `resolved_optics` (**precedence over numeric**) |
+| `opticc dump-cgir --node N` | Numeric CGIR node id (fallback when name not found) |
 | `opticc explain-focus` / `explain-grade` | Per-node lenience for other items' errors |
 | `opticc doctor [file]` / `bench [file]` | Optional single-file mode |
 
@@ -55,7 +56,15 @@ Explain-grade JSON: `fixtures/diagnostics/explain_grade_*.json` (success: Health
 
 Explain-focus JSON: `fixtures/diagnostics/explain_focus_*.json` (success: HealthView, nested let; errors: EXP-001, TYP-002/010 target blocking).
 
-Appendix B negative (TYP-010): `unsupported_prism.json`, `unsupported_traversal.json`, `host_boundary.json` — prism, traversal, `unsafe optic`, and `extern` rejected before lower/HIR/dump (except `dump-tokens`).
+Appendix B negative (TYP-010): `unsupported_traversal.json`, `host_boundary.json` — traversal, `unsafe optic`, and `extern` rejected before lower/HIR/dump (except `dump-tokens`).
+
+`unsupported_prism.json` — **GRA-110** witness (`CacheGrade<1>` tighter than inferred cache for preview+review regions); prism surface is supported (see `alive_filter.opt`).
+
+`cgi003_prism_compose.json` — **CGI-003** witness (`prism_in_compose`) from `compose_prism.opt`.
+
+Prism e2e positives: `prism_get.opt` (get query), `prism_set.opt` (set query), `partial_prism.opt` (`partial preview` → Option codegen path).
+
+CGI-006 witness: `cgi006_prism_leaf.json` — structured M7 reserved node diagnostic (library/unit test; no `.opt` pipeline example).
 
 CLI binary name: **`opticc`** (book appendix B uses `optic`).
 

@@ -54,12 +54,10 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     let leaf_nodes: Vec<_> = graph
         .nodes
         .iter()
-        .filter_map(|n| {
-            if let CgirNode::OpticLeaf { name, summary, .. } = n {
-                Some((name.clone(), summary))
-            } else {
-                None
-            }
+        .filter_map(|n| match n {
+            CgirNode::OpticLeaf { name, summary, .. }
+            | CgirNode::PrismLeaf { name, summary, .. } => Some((name.clone(), summary)),
+            _ => None,
         })
         .collect();
 
@@ -99,19 +97,23 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     match &query_mode {
         QueryMode::Get { root } => {
             let optic_name = query_optic_name(graph, *root)?;
-            let field = primary_field_for_optic(graph, &optic_name)?;
-            out.push_str(&format!(
-                "pub fn run_example(entities: &mut {struct_name}) {{\n"
-            ));
-            out.push_str(&format!("    let n = entities.{}.len();\n", field));
-            out.push_str("    for id_0 in 0..n {\n");
-            out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-            out.push_str(&format!(
-                "        let _v = cursor_0.arena.{}[cursor_0.id];\n",
-                field
-            ));
-            out.push_str("        println!(\"get: {}\", _v);\n");
-            out.push_str("    }\n}\n\n");
+            if let Some(prism_id) = resolved_prism_leaf(graph, &optic_name) {
+                emit_prism_query_get(&mut out, graph, prism_id, &struct_name)?;
+            } else {
+                let field = primary_field_for_optic(graph, &optic_name)?;
+                out.push_str(&format!(
+                    "pub fn run_example(entities: &mut {struct_name}) {{\n"
+                ));
+                out.push_str(&format!("    let n = entities.{}.len();\n", field));
+                out.push_str("    for id_0 in 0..n {\n");
+                out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+                out.push_str(&format!(
+                    "        let _v = cursor_0.arena.{}[cursor_0.id];\n",
+                    field
+                ));
+                out.push_str("        println!(\"get: {}\", _v);\n");
+                out.push_str("    }\n}\n\n");
+            }
         }
         QueryMode::Set { root } => {
             let CgirNode::QuerySet {
@@ -124,19 +126,23 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
                     "invalid set root: expected QuerySet at node {root}"
                 ));
             };
-            let field = primary_field_for_optic(graph, optic_name)?;
             let lit = validate_f32_literal(value_repr)?;
-            out.push_str(&format!(
-                "pub fn run_example(entities: &mut {struct_name}) {{\n"
-            ));
-            out.push_str(&format!("    let n = entities.{}.len();\n", field));
-            out.push_str("    for id_0 in 0..n {\n");
-            out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-            out.push_str(&format!(
-                "        cursor_0.arena.{}[cursor_0.id] = {lit};\n",
-                field
-            ));
-            out.push_str("    }\n}\n\n");
+            if let Some(prism_id) = resolved_prism_leaf(graph, optic_name) {
+                emit_prism_query_set(&mut out, graph, prism_id, &lit, &struct_name)?;
+            } else {
+                let field = primary_field_for_optic(graph, optic_name)?;
+                out.push_str(&format!(
+                    "pub fn run_example(entities: &mut {struct_name}) {{\n"
+                ));
+                out.push_str(&format!("    let n = entities.{}.len();\n", field));
+                out.push_str("    for id_0 in 0..n {\n");
+                out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+                out.push_str(&format!(
+                    "        cursor_0.arena.{}[cursor_0.id] = {lit};\n",
+                    field
+                ));
+                out.push_str("    }\n}\n\n");
+            }
         }
         QueryMode::MapProduct { root } => {
             let CgirNode::QueryMap {
@@ -194,6 +200,7 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
         }
         QueryMode::MapDecay { root } => {
             let CgirNode::QueryMap {
+                optic_name,
                 map_body,
                 map_param,
                 ..
@@ -201,30 +208,41 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
             else {
                 return Err("invalid map root".into());
             };
-            let field = all_regions
-                .first()
-                .map(|r| lookup_region_field(&graph.region_map, r))
-                .transpose()?
-                .ok_or_else(|| "map decay requires at least one read region".to_string())?;
-            let bind = lookup_region_bind(
-                &graph.region_map,
-                all_regions.first().expect("non-empty all_regions"),
-            )?;
-            out.push_str(&format!(
-                "pub fn run_example(entities: &mut {struct_name}) {{\n"
-            ));
-            out.push_str(&format!("    let n = entities.{field}.len();\n"));
-            out.push_str("    for id_0 in 0..n {\n");
-            out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-            out.push_str(&format!(
-                "        let {bind} = cursor_0.arena.{field}[cursor_0.id];\n"
-            ));
-            validate_user_ident(map_param, "map parameter")?;
-            let body_rust = emit_map_body(map_body.as_ref(), map_param, &bind)?;
-            out.push_str(&format!(
-                "        let _new = {body_rust};\n        cursor_0.arena.{field}[cursor_0.id] = _new;\n"
-            ));
-            out.push_str("    }\n}\n\n");
+            if let Some(prism_id) = resolved_prism_leaf(graph, optic_name) {
+                emit_prism_map_decay(
+                    &mut out,
+                    graph,
+                    prism_id,
+                    map_body.as_ref(),
+                    map_param,
+                    &struct_name,
+                )?;
+            } else {
+                let field = all_regions
+                    .first()
+                    .map(|r| lookup_region_field(&graph.region_map, r))
+                    .transpose()?
+                    .ok_or_else(|| "map decay requires at least one read region".to_string())?;
+                let bind = lookup_region_bind(
+                    &graph.region_map,
+                    all_regions.first().expect("non-empty all_regions"),
+                )?;
+                out.push_str(&format!(
+                    "pub fn run_example(entities: &mut {struct_name}) {{\n"
+                ));
+                out.push_str(&format!("    let n = entities.{field}.len();\n"));
+                out.push_str("    for id_0 in 0..n {\n");
+                out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+                out.push_str(&format!(
+                    "        let {bind} = cursor_0.arena.{field}[cursor_0.id];\n"
+                ));
+                validate_user_ident(map_param, "map parameter")?;
+                let body_rust = emit_map_body(map_body.as_ref(), map_param, &bind)?;
+                out.push_str(&format!(
+                    "        let _new = {body_rust};\n        cursor_0.arena.{field}[cursor_0.id] = _new;\n"
+                ));
+                out.push_str("    }\n}\n\n");
+            }
         }
         QueryMode::MapCompose { root, compose_id } => {
             emit_compose_map(&mut out, graph, *root, *compose_id, &struct_name)?;
@@ -344,9 +362,181 @@ fn collect_regions_from_node(graph: &CgirGraph, nid: NodeId) -> Vec<String> {
             out.extend(collect_regions_from_node(graph, *rhs));
             out
         }
-        Some(CgirNode::OpticLeaf { summary, .. }) => summary.get_reads.clone(),
+        Some(CgirNode::OpticLeaf { summary, .. }) | Some(CgirNode::PrismLeaf { summary, .. }) => {
+            summary.get_reads.clone()
+        }
         _ => vec![],
     }
+}
+
+fn resolved_prism_leaf(graph: &CgirGraph, optic_name: &str) -> Option<NodeId> {
+    let nid = graph.resolved_optics.get(optic_name).copied()?;
+    match graph.nodes.get(nid as usize) {
+        Some(CgirNode::PrismLeaf { .. }) => Some(nid),
+        _ => None,
+    }
+}
+
+fn leaf_summary<'a>(
+    graph: &'a CgirGraph,
+    id: NodeId,
+) -> Result<&'a optic_hir::OpticSummary, String> {
+    optic_cgir::leaf_summary_by_id(graph, id)
+        .ok_or_else(|| format!("node {id} is not an optic leaf"))
+}
+
+fn prism_preview_returns_option(graph: &CgirGraph, prism_id: NodeId) -> Result<bool, String> {
+    match graph.nodes.get(prism_id as usize) {
+        Some(CgirNode::PrismLeaf {
+            preview_returns_option,
+            ..
+        }) => Ok(*preview_returns_option),
+        _ => Err(format!("node {prism_id} not PrismLeaf")),
+    }
+}
+
+fn prism_preview_wrap_some(graph: &CgirGraph, prism_id: NodeId) -> Result<bool, String> {
+    match graph.nodes.get(prism_id as usize) {
+        Some(CgirNode::PrismLeaf {
+            preview_wrap_some, ..
+        }) => Ok(*preview_wrap_some),
+        _ => Err(format!("node {prism_id} not PrismLeaf")),
+    }
+}
+
+fn emit_prism_preview_rust(
+    graph: &CgirGraph,
+    prism_id: NodeId,
+    cursor: &str,
+    focus_bind: Option<&str>,
+) -> Result<String, String> {
+    let raw = emit_leaf_preview(graph, prism_id, cursor, focus_bind)?;
+    if prism_preview_wrap_some(graph, prism_id)? {
+        Ok(format!("Some({raw})"))
+    } else {
+        Ok(raw)
+    }
+}
+
+fn emit_prism_query_get(
+    out: &mut String,
+    graph: &CgirGraph,
+    prism_id: NodeId,
+    struct_name: &str,
+) -> Result<(), String> {
+    let summary = leaf_summary(graph, prism_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| "prism get requires at least one preview read region".to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let partial = prism_preview_returns_option(graph, prism_id)?;
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    if partial {
+        out.push_str(&format!(
+            "        if let Some({bind}) = {preview_expr} {{\n            println!(\"get: {{}}\", {bind});\n        }}\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "        let {bind} = {preview_expr};\n        println!(\"get: {{}}\", {bind});\n"
+        ));
+    }
+    out.push_str("    }\n}\n\n");
+    Ok(())
+}
+
+fn emit_prism_query_set(
+    out: &mut String,
+    graph: &CgirGraph,
+    prism_id: NodeId,
+    lit: &str,
+    struct_name: &str,
+) -> Result<(), String> {
+    let summary = leaf_summary(graph, prism_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| "prism set requires at least one preview read region".to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let partial = prism_preview_returns_option(graph, prism_id)?;
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    if partial {
+        out.push_str(&format!(
+            "        if let Some({bind}) = {preview_expr} {{\n"
+        ));
+        out.push_str(&format!("            let _set_lit = {lit};\n"));
+        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
+        out.push_str(&format!("            let _review_out = {review_expr};\n"));
+        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "            ")?;
+        out.push_str("        }\n");
+    } else {
+        out.push_str(&format!("        let _set_lit = {lit};\n"));
+        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
+        out.push_str(&format!("        let _review_out = {review_expr};\n"));
+        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "        ")?;
+    }
+    out.push_str("    }\n}\n\n");
+    Ok(())
+}
+
+fn emit_prism_map_decay(
+    out: &mut String,
+    graph: &CgirGraph,
+    prism_id: NodeId,
+    map_body: &HirExpr,
+    map_param: &str,
+    struct_name: &str,
+) -> Result<(), String> {
+    let summary = leaf_summary(graph, prism_id)?;
+    let reg = summary
+        .get_reads
+        .first()
+        .ok_or_else(|| "prism map requires at least one preview read region".to_string())?;
+    let field = lookup_region_field(&graph.region_map, reg)?;
+    let bind = lookup_region_bind(&graph.region_map, reg)?;
+    validate_user_ident(map_param, "map parameter")?;
+    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let partial = prism_preview_returns_option(graph, prism_id)?;
+    out.push_str(&format!(
+        "pub fn run_example(entities: &mut {struct_name}) {{\n"
+    ));
+    out.push_str(&format!("    let n = entities.{field}.len();\n"));
+    out.push_str("    for id_0 in 0..n {\n");
+    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    if partial {
+        out.push_str(&format!(
+            "        if let Some({bind}) = {preview_expr} {{\n"
+        ));
+        let body_rust = emit_map_body(map_body, map_param, &bind)?;
+        out.push_str(&format!("            let _new = {body_rust};\n"));
+        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
+        out.push_str(&format!("            let _review_out = {review_expr};\n"));
+        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "            ")?;
+        out.push_str("        }\n");
+    } else {
+        out.push_str(&format!("        let {bind} = {preview_expr};\n"));
+        let body_rust = emit_map_body(map_body, map_param, &bind)?;
+        out.push_str(&format!("        let _new = {body_rust};\n"));
+        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
+        out.push_str(&format!("        let _review_out = {review_expr};\n"));
+        emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "        ")?;
+    }
+    out.push_str("    }\n}\n\n");
+    Ok(())
 }
 
 fn emit_map_body(body: &HirExpr, map_param: &str, load_bind: &str) -> Result<String, String> {
@@ -522,22 +712,13 @@ fn default_scalar_init_at(ty: &str, row: usize, map: &RegionMap) -> Result<Strin
 }
 
 fn primary_field_for_optic(graph: &CgirGraph, name: &str) -> Result<String, String> {
-    let reg = graph
-        .nodes
-        .iter()
-        .find_map(|n| {
-            if let CgirNode::OpticLeaf {
-                name: leaf_name,
-                summary,
-                ..
-            } = n
-            {
-                if leaf_name == name {
-                    return summary.get_reads.first().cloned();
-                }
-            }
-            None
-        })
+    let Some(&nid) = graph.resolved_optics.get(name) else {
+        return Err(format!("optic `{name}` not resolved in CGIR graph"));
+    };
+    let reg = leaf_summary(graph, nid)?
+        .get_reads
+        .first()
+        .cloned()
         .ok_or_else(|| format!("optic `{name}` has no get_reads region"))?;
     lookup_region_field(&graph.region_map, &reg)
 }
@@ -589,102 +770,45 @@ fn costate_struct_name(graph: &CgirGraph) -> String {
 }
 
 fn validate_leaf_params(leaf: &CgirNode) -> Result<(), String> {
-    let CgirNode::OpticLeaf {
-        get_param,
-        put_state_param,
-        put_value_param,
-        ..
-    } = leaf
-    else {
-        return Err("validate_leaf_params expects OpticLeaf".into());
-    };
-    validate_user_ident(get_param, "optic get parameter")?;
-    if let Some(s) = put_state_param {
-        validate_user_ident(s, "optic put state parameter")?;
-    }
-    if let Some(v) = put_value_param {
-        validate_user_ident(v, "optic put value parameter")?;
-    }
-    Ok(())
-}
-
-/// Structural HirExpr substitution (same pattern as map fusion in optic-opt).
-fn substitute_hir_var(e: &HirExpr, name: &str, repl: &str) -> HirExpr {
-    match e {
-        HirExpr::Var(v, sp) if v == name => HirExpr::Var(repl.into(), *sp),
-        HirExpr::Var(v, sp) => HirExpr::Var(v.clone(), *sp),
-        HirExpr::LitInt(n, sp) => HirExpr::LitInt(*n, *sp),
-        HirExpr::LitFloat(f, sp) => HirExpr::LitFloat(*f, *sp),
-        HirExpr::Bin {
-            op,
-            left,
-            right,
-            span,
-        } => HirExpr::Bin {
-            op: *op,
-            left: Box::new(substitute_hir_var(left, name, repl)),
-            right: Box::new(substitute_hir_var(right, name, repl)),
-            span: *span,
-        },
-        HirExpr::Paren(inner, sp) => {
-            HirExpr::Paren(Box::new(substitute_hir_var(inner, name, repl)), *sp)
-        }
-        HirExpr::Tuple(elems, sp) => HirExpr::Tuple(
-            elems
-                .iter()
-                .map(|el| substitute_hir_var(el, name, repl))
-                .collect(),
-            *sp,
-        ),
-        HirExpr::TupleProj { base, index, span } => HirExpr::TupleProj {
-            base: Box::new(substitute_hir_var(base, name, repl)),
-            index: *index,
-            span: *span,
-        },
-        HirExpr::CursorIndex {
-            cursor,
-            field,
-            span,
-        } => HirExpr::CursorIndex {
-            cursor: cursor.clone(),
-            field: field.clone(),
-            span: *span,
-        },
-        HirExpr::CursorField {
-            cursor,
-            field,
-            span,
-        } => HirExpr::CursorField {
-            cursor: cursor.clone(),
-            field: field.clone(),
-            span: *span,
-        },
-        HirExpr::FocusField { param, path, span } => {
-            if param == name {
-                HirExpr::FocusField {
-                    param: repl.into(),
-                    path: path.clone(),
-                    span: *span,
-                }
-            } else {
-                HirExpr::FocusField {
-                    param: param.clone(),
-                    path: path.clone(),
-                    span: *span,
-                }
+    match leaf {
+        CgirNode::OpticLeaf {
+            get_param,
+            put_state_param,
+            put_value_param,
+            ..
+        } => {
+            validate_user_ident(get_param, "optic get parameter")?;
+            if let Some(s) = put_state_param {
+                validate_user_ident(s, "optic put state parameter")?;
             }
+            if let Some(v) = put_value_param {
+                validate_user_ident(v, "optic put value parameter")?;
+            }
+            Ok(())
         }
-        HirExpr::Unsupported { reason, span } => HirExpr::Unsupported {
-            reason: reason.clone(),
-            span: *span,
-        },
+        CgirNode::PrismLeaf {
+            preview_param,
+            review_state_param,
+            review_value_param,
+            ..
+        } => {
+            validate_user_ident(preview_param, "optic preview parameter")?;
+            if let Some(s) = review_state_param {
+                validate_user_ident(s, "optic review state parameter")?;
+            }
+            if let Some(v) = review_value_param {
+                validate_user_ident(v, "optic review value parameter")?;
+            }
+            Ok(())
+        }
+        _ => Err("validate_leaf_params expects OpticLeaf or PrismLeaf".into()),
     }
 }
 
 fn substitute_hir_vars(e: &HirExpr, subs: &[(&str, &str)]) -> HirExpr {
     let mut out = e.clone();
     for (name, repl) in subs {
-        out = substitute_hir_var(&out, name, repl);
+        out = optic_hir::substitute_hir_ident(&out, name, repl);
     }
     out
 }
@@ -827,6 +951,17 @@ fn emit_compose_chain_loop(
     if chain.is_empty() {
         return Err("compose chain is empty".into());
     }
+    if chain.iter().any(|&leaf| {
+        matches!(
+            graph.nodes.get(leaf as usize),
+            Some(CgirNode::PrismLeaf { .. })
+        )
+    }) {
+        return Err(
+            "compose chain with PrismLeaf is not supported in narrow v0 codegen (use prism query directly)"
+                .into(),
+        );
+    }
     let n_field = compose_primary_field(graph, chain[0])?;
     if let Some(names) = fused_names {
         out.push_str(&format!("// optic(fused): [{names}]\n"));
@@ -893,7 +1028,9 @@ fn fused_provenance_names(
 ) -> String {
     let mut names = vec![];
     for &id in original_ids {
-        if let Some(CgirNode::OpticLeaf { name, .. }) = graph.nodes.get(id as usize) {
+        if let Some(CgirNode::OpticLeaf { name, .. } | CgirNode::PrismLeaf { name, .. }) =
+            graph.nodes.get(id as usize)
+        {
             if !names.contains(name) {
                 names.push(name.clone());
             }
@@ -907,13 +1044,7 @@ fn fused_provenance_names(
 }
 
 fn compose_primary_field(graph: &CgirGraph, entry_leaf: NodeId) -> Result<String, String> {
-    let CgirNode::OpticLeaf { summary, .. } = graph
-        .nodes
-        .get(entry_leaf as usize)
-        .ok_or_else(|| format!("compose entry leaf {entry_leaf} missing"))?
-    else {
-        return Err(format!("compose entry leaf {entry_leaf} not a leaf"));
-    };
+    let summary = leaf_summary(graph, entry_leaf)?;
     let reg = summary
         .get_reads
         .first()
@@ -922,7 +1053,7 @@ fn compose_primary_field(graph: &CgirGraph, entry_leaf: NodeId) -> Result<String
 }
 
 fn is_focus_relative_put(graph: &CgirGraph, leaf_id: NodeId) -> bool {
-    let Some(CgirNode::OpticLeaf { summary, .. }) = graph.nodes.get(leaf_id as usize) else {
+    let Ok(summary) = leaf_summary(graph, leaf_id) else {
         return false;
     };
     summary
@@ -932,13 +1063,7 @@ fn is_focus_relative_put(graph: &CgirGraph, leaf_id: NodeId) -> bool {
 }
 
 fn focus_put_field(graph: &CgirGraph, leaf_id: NodeId) -> Result<String, String> {
-    let CgirNode::OpticLeaf { summary, .. } = graph
-        .nodes
-        .get(leaf_id as usize)
-        .ok_or_else(|| format!("leaf {leaf_id} missing"))?
-    else {
-        return Err(format!("node {leaf_id} not OpticLeaf"));
-    };
+    let summary = leaf_summary(graph, leaf_id)?;
     if summary.put_writes.is_empty() {
         return Err(format!("leaf {leaf_id} has no put_writes"));
     }
@@ -963,6 +1088,32 @@ fn focus_put_field(graph: &CgirGraph, leaf_id: NodeId) -> Result<String, String>
     }
 }
 
+fn emit_leaf_preview(
+    graph: &CgirGraph,
+    id: NodeId,
+    cursor: &str,
+    focus_bind: Option<&str>,
+) -> Result<String, String> {
+    let leaf = graph
+        .nodes
+        .get(id as usize)
+        .ok_or_else(|| format!("leaf {id} missing"))?;
+    validate_leaf_params(leaf)?;
+    let CgirNode::PrismLeaf {
+        preview_body,
+        preview_param,
+        ..
+    } = leaf
+    else {
+        return Err(format!("node {id} not PrismLeaf"));
+    };
+    let mut body = preview_body.as_ref().clone();
+    if let Some(bind) = focus_bind {
+        body = optic_hir::substitute_hir_ident(&body, preview_param, bind);
+    }
+    emit_pure_hir_expr(&body, cursor)
+}
+
 fn emit_leaf_get(
     graph: &CgirGraph,
     id: NodeId,
@@ -974,19 +1125,21 @@ fn emit_leaf_get(
         .get(id as usize)
         .ok_or_else(|| format!("leaf {id} missing"))?;
     validate_leaf_params(leaf)?;
-    let CgirNode::OpticLeaf {
-        get_body,
-        get_param,
-        ..
-    } = leaf
-    else {
-        return Err(format!("node {id} not OpticLeaf"));
-    };
-    let mut body = get_body.as_ref().clone();
-    if let Some(bind) = focus_bind {
-        body = substitute_hir_var(&body, get_param, bind);
+    match leaf {
+        CgirNode::PrismLeaf { .. } => emit_leaf_preview(graph, id, cursor, focus_bind),
+        CgirNode::OpticLeaf {
+            get_body,
+            get_param,
+            ..
+        } => {
+            let mut body = get_body.as_ref().clone();
+            if let Some(bind) = focus_bind {
+                body = optic_hir::substitute_hir_ident(&body, get_param, bind);
+            }
+            emit_pure_hir_expr(&body, cursor)
+        }
+        _ => Err(format!("node {id} not OpticLeaf or PrismLeaf")),
     }
-    emit_pure_hir_expr(&body, cursor)
 }
 
 fn emit_leaf_put_value(
@@ -1000,20 +1153,34 @@ fn emit_leaf_put_value(
         .get(id as usize)
         .ok_or_else(|| format!("leaf {id} missing"))?;
     validate_leaf_params(leaf)?;
-    let CgirNode::OpticLeaf {
-        put_value_body,
-        put_state_param,
-        put_value_param,
-        ..
-    } = leaf
-    else {
-        return Err(format!("node {id} not OpticLeaf"));
+    let (put_value_body, put_state_param, put_value_param) = match leaf {
+        CgirNode::OpticLeaf {
+            put_value_body,
+            put_state_param,
+            put_value_param,
+            ..
+        } => (
+            put_value_body.as_ref(),
+            put_state_param.as_deref(),
+            put_value_param.as_deref(),
+        ),
+        CgirNode::PrismLeaf {
+            review_value_body,
+            review_state_param,
+            review_value_param,
+            ..
+        } => (
+            review_value_body.as_ref(),
+            review_state_param.as_deref(),
+            review_value_param.as_deref(),
+        ),
+        _ => return Err(format!("node {id} not OpticLeaf or PrismLeaf")),
     };
     let Some(body) = put_value_body else {
         return Ok(value_bind.to_string());
     };
-    let state = put_state_param.as_deref().unwrap_or("x");
-    let value = put_value_param.as_deref().unwrap_or("v");
+    let state = put_state_param.unwrap_or("x");
+    let value = put_value_param.unwrap_or("v");
     let subbed = substitute_hir_vars(body.as_ref(), &[(state, state_bind), (value, value_bind)]);
     emit_pure_hir_expr(&subbed, "_unused")
 }
@@ -1025,13 +1192,18 @@ fn emit_leaf_put_stores(
     value_bind: &str,
     out: &mut String,
 ) -> Result<(), String> {
-    let CgirNode::OpticLeaf { summary, .. } = graph
-        .nodes
-        .get(id as usize)
-        .ok_or_else(|| format!("leaf {id} missing"))?
-    else {
-        return Err(format!("node {id} not OpticLeaf"));
-    };
+    emit_leaf_review_stores(graph, id, cursor, value_bind, out, "        ")
+}
+
+fn emit_leaf_review_stores(
+    graph: &CgirGraph,
+    id: NodeId,
+    cursor: &str,
+    value_bind: &str,
+    out: &mut String,
+    indent: &str,
+) -> Result<(), String> {
+    let summary = leaf_summary(graph, id)?;
     let regions: Vec<_> = if summary.put_writes.is_empty() {
         summary
             .get_reads
@@ -1052,7 +1224,7 @@ fn emit_leaf_put_stores(
         let field = lookup_region_field(&graph.region_map, reg)?;
         validate_user_ident(&field, "region field")?;
         out.push_str(&format!(
-            "        {cursor}.arena.{field}[{cursor}.id] = {value_bind};\n"
+            "{indent}{cursor}.arena.{field}[{cursor}.id] = {value_bind};\n"
         ));
         stores += 1;
     }
@@ -1184,6 +1356,41 @@ mod tests {
     #[test]
     fn golden_rust_nested_field_triple() {
         assert_rust_golden("nested_field_triple.opt");
+    }
+
+    #[test]
+    fn golden_rust_alive_filter() {
+        assert_rust_golden("alive_filter.opt");
+    }
+
+    #[test]
+    fn golden_rust_prism_get() {
+        assert_rust_golden("prism_get.opt");
+    }
+
+    #[test]
+    fn golden_rust_prism_set() {
+        assert_rust_golden("prism_set.opt");
+    }
+
+    #[test]
+    fn golden_rust_partial_prism() {
+        assert_rust_golden("partial_prism.opt");
+    }
+
+    #[test]
+    fn substitute_hir_ident_parity_with_hir_crate() {
+        let body = HirExpr::Bin {
+            op: BinOp::Add,
+            left: Box::new(HirExpr::Var("v".into(), Span::dummy())),
+            right: Box::new(HirExpr::Var("x".into(), Span::dummy())),
+            span: Span::dummy(),
+        };
+        let local = substitute_hir_vars(&body, &[("v", "_updated"), ("x", "_intermediate")]);
+        let mut via_hir = body;
+        via_hir = optic_hir::substitute_hir_ident(&via_hir, "v", "_updated");
+        via_hir = optic_hir::substitute_hir_ident(&via_hir, "x", "_intermediate");
+        assert_eq!(format!("{local:?}"), format!("{via_hir:?}"));
     }
 
     fn mk_region_map(cols: &[(&str, &str)]) -> RegionMap {
@@ -2160,5 +2367,102 @@ mod tests {
             assert!(emitted.contains(needle), "missing {needle}");
             assert!(expected.contains(needle), "fixture missing {needle}");
         }
+    }
+
+    #[test]
+    fn emit_compose_chain_rejects_prism_leaf() {
+        let summary = Arc::new(OpticSummary {
+            name: Some("AliveFilter".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec!["healths".into()],
+            get_grade: ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: Determinism::Pure,
+            put_determinism: Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let lens = CgirNode::OpticLeaf {
+            id: 0,
+            name: "HealthView".into(),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            grade: summary.get_grade.clone(),
+            get_fn: String::new(),
+            put_fn: String::new(),
+            get_param: "s".into(),
+            get_body: Arc::new(HirExpr::LitFloat(1.0, Span::dummy())),
+            put_state_param: None,
+            put_value_param: None,
+            put_value_body: None,
+            summary: Arc::clone(&summary),
+            provenance: Span::dummy(),
+        };
+        let prism = CgirNode::PrismLeaf {
+            id: 1,
+            name: "AliveFilter".into(),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            grade: summary.get_grade.clone(),
+            preview_fn: String::new(),
+            review_fn: String::new(),
+            preview_param: "s".into(),
+            preview_body: Arc::new(HirExpr::LitFloat(1.0, Span::dummy())),
+            preview_returns_option: false,
+            preview_wrap_some: false,
+            review_state_param: None,
+            review_value_param: None,
+            review_value_body: None,
+            summary,
+            provenance: Span::dummy(),
+            m7_reserved: false,
+        };
+        let g = CgirGraph {
+            nodes: vec![
+                lens,
+                prism,
+                CgirNode::Compose {
+                    id: 2,
+                    lhs: 0,
+                    rhs: 1,
+                    grade: ConcreteGrade {
+                        cache: 1,
+                        ownership: OwnershipDim {
+                            share: Rational::one(),
+                            read_only: false,
+                            must_use: false,
+                        },
+                    },
+                    provenance: Span::dummy(),
+                },
+            ],
+            roots: vec![],
+            provenance_index: BTreeMap::new(),
+            resolved_optics: Default::default(),
+            region_map: mk_region_map(&[("healths", "Vec<f32>")]),
+        };
+        let mut out = String::new();
+        let body = HirExpr::Var("h".into(), Span::dummy());
+        let err = emit_compose_chain_loop(&mut out, &g, 2, &body, "h", None, "Entities")
+            .expect_err("compose+prism must fail codegen");
+        assert!(err.contains("PrismLeaf"));
     }
 }

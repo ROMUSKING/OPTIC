@@ -1,0 +1,29 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-003",
+      "confidence": 1.0,
+      "evidence": {
+        "compose_id": 2.0,
+        "leaf_id": 1.0,
+        "reason": "prism_in_compose"
+      },
+      "minimal_fix_options": [],
+      "next_commands": [
+        "opticc dump-cgir file.opt --check"
+      ],
+      "phase": "cgir",
+      "primary_span": {
+        "end": 427.0,
+        "source": 1.0,
+        "start": 285.0
+      },
+      "ranked_fixes": [],
+      "related_spans": [],
+      "rule": "compose chain with PrismLeaf is not supported in narrow v0",
+      "severity": "error",
+      "title": "CGIR invariant violation"
+    }
+  ],
+  "ok": false
+}

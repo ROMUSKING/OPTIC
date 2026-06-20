@@ -2,16 +2,20 @@
 //!
 //! Re-exports pipeline entrypoints for embedding without depending on each crate.
 
-pub use optic_cgir::{build as build_cgir, CgirGraph};
+pub use optic_cgir::{
+    build as build_cgir, dump_node_pretty, find_node_by_id, is_m7_reserved, leaf_summary_by_id,
+    m7_reserved_kind, node_span, node_summary, resolve_cgir_node, verify_to_diagnostic, CgirGraph,
+    ResolveCgirNodeError, MAX_NODE_NAME_BYTES,
+};
 pub use optic_codegen_rust::emit as emit_rust;
 pub use optic_diagnostics::Diagnostic;
 pub use optic_hir::{lower, ConcreteGrade, HirProgram, OpticSummary};
 pub use optic_opt::optimize;
 pub use optic_syntax::{parse, ParseErrorKind, Program, SourceId, Span};
 pub use optic_typeck::{
-    check, collect_unsupported_surface, explain_focus, explain_focus_with_diags,
-    explain_grade, explain_grade_with_diags, has_unsupported_surface, infer_grade_from_summary,
-    typeck_pass, unsupported_for_node, FocusReport, GradeReport, TypedHir,
+    check, collect_unsupported_surface, explain_focus, explain_focus_with_diags, explain_grade,
+    explain_grade_with_diags, has_unsupported_surface, infer_grade_from_summary, typeck_pass,
+    unsupported_for_node, FocusReport, GradeReport, TypedHir,
 };
 
 /// Default source size cap (matches CLI appendix B guard).
@@ -129,10 +133,7 @@ pub fn read_source_capped(
     if buf.len() as u64 > max_bytes {
         return Err(vec![optic_diagnostics::parse_diag(
             Span::dummy(),
-            format!(
-                "source {} exceeds {max_bytes} byte limit",
-                path.display()
-            ),
+            format!("source {} exceeds {max_bytes} byte limit", path.display()),
         )]);
     }
     String::from_utf8(buf).map_err(|e| {
@@ -187,10 +188,8 @@ fn compile_check_with_limit_and_id(
 ) -> Result<CheckOutcome, Vec<Diagnostic>> {
     let typed = compile_through_check(src, max_bytes, source_id)?;
     let cg = build_cgir(&typed).map_err(|diags| diags)?;
-    let outcome =
-        optimize(cg).map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
-    optic_cgir::verify(&outcome.graph)
-        .map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
+    let outcome = optimize(cg).map_err(|d| vec![d])?;
+    optic_cgir::verify_to_diagnostic(&outcome.graph).map_err(|d| vec![d])?;
     emit_rust(&outcome.graph, "optic_runtime")
         .map_err(|e| vec![optic_diagnostics::codegen_failed_diag(&e)])?;
     Ok(CheckOutcome {
@@ -231,10 +230,8 @@ pub fn compile_cgir_with_limit(
             fusion_notes: vec![],
         });
     }
-    let outcome =
-        optimize(cg).map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
-    optic_cgir::verify(&outcome.graph)
-        .map_err(|e| vec![optic_diagnostics::fusion_verify_diag(&e)])?;
+    let outcome = optimize(cg).map_err(|d| vec![d])?;
+    optic_cgir::verify_to_diagnostic(&outcome.graph).map_err(|d| vec![d])?;
     Ok(CgirOutcome {
         graph: outcome.graph,
         fusion_notes: outcome.fusion_notes,
@@ -331,13 +328,20 @@ mod tests {
     /// PLAN §4: parse → dump_ast → re-parse same source yields stable AST shape/counts.
     #[test]
     fn smoke_ast_roundtrip_stable_item_counts() {
-        for name in ["health_get.opt", "compose_triple.opt", "nested_position.opt"] {
+        for name in [
+            "health_get.opt",
+            "compose_triple.opt",
+            "nested_position.opt",
+        ] {
             let src = example_src(name);
             let prog1 = parse(&src, SourceId(1)).expect("parse");
             let dump1 = optic_syntax::dump_ast(&prog1);
             let prog2 = parse(&src, SourceId(1)).expect("re-parse");
             let dump2 = optic_syntax::dump_ast(&prog2);
-            assert_eq!(dump1, dump2, "{name}: dump_ast must be stable across re-parse");
+            assert_eq!(
+                dump1, dump2,
+                "{name}: dump_ast must be stable across re-parse"
+            );
             assert_eq!(
                 count_ast_items(&prog1),
                 count_ast_items(&prog2),
@@ -387,8 +391,15 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(names1, names2, "{name}: optic names must match across lowers");
-            assert_eq!(hir1.items.len(), hir2.items.len(), "{name}: HIR item count stable");
+            assert_eq!(
+                names1, names2,
+                "{name}: optic names must match across lowers"
+            );
+            assert_eq!(
+                hir1.items.len(),
+                hir2.items.len(),
+                "{name}: HIR item count stable"
+            );
             if name == "health_get.opt" {
                 assert_eq!(
                     optic_hir::dump_hir(&hir1),
@@ -504,19 +515,15 @@ mod tests {
 
     #[test]
     fn facade_compile_check_from_path_positive() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/health_get.opt");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/health_get.opt");
         let outcome = compile_check_from_path(&path).expect("compile from path");
         assert!(!outcome.typed_hir.items.is_empty());
     }
 
     #[test]
     fn facade_rejects_typ010_on_compile_check() {
-        for name in [
-            "unsupported_prism.opt",
-            "unsupported_traversal.opt",
-            "host_boundary.opt",
-        ] {
+        for name in ["unsupported_traversal.opt", "host_boundary.opt"] {
             let src = example_src(name);
             let err = compile_check(&src).unwrap_err();
             assert!(
@@ -528,7 +535,7 @@ mod tests {
 
     #[test]
     fn facade_rejects_typ010_on_dump_hir_and_ast() {
-        for name in ["unsupported_prism.opt", "host_boundary.opt"] {
+        for name in ["host_boundary.opt"] {
             let src = example_src(name);
             let hir_err = dump_hir_src(&src).unwrap_err();
             assert!(
@@ -544,20 +551,17 @@ mod tests {
     }
 
     #[test]
-    fn facade_explain_focus_lenient_with_prism_sibling() {
-        let src = r#"
-data Entities { healths: SoA<f32> }
-optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
-    get s => s.healths[s.id]
-    put (s, v) => { s.healths[s.id] = v }
-}
-optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
-    preview s => s.healths[s.id]
-    review (s, a) => { s.healths[s.id] = a }
-}
-"#;
-        let report = explain_focus_from_src(src, "HealthView").expect("lenient explain-focus");
-        assert_eq!(report.root_path, "entities.healths[id]");
+    fn facade_compile_check_alive_filter_prism() {
+        let src = example_src("alive_filter.opt");
+        let outcome = compile_check(&src).expect("alive_filter must compile");
+        assert!(
+            outcome
+                .typed_hir
+                .items
+                .iter()
+                .any(|i| matches!(i, optic_hir::HirItem::Optic { decl, .. } if decl.name.node == "AliveFilter")),
+            "AliveFilter prism must be in typed HIR"
+        );
     }
 
     #[test]
@@ -579,20 +583,70 @@ optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
 
     #[test]
     fn agent_repair_smoke_frozen_json_witnesses() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/diagnostics");
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/diagnostics");
         let check_cases = [
-            ("invalid_grade.json", "GRA-110", &["annotated", "inferred", "optic"][..]),
-            ("invalid_alias.json", "ALI-201", &["conflicting_regions"][..]),
-            ("typ001_unknown_type.json", "TYP-001", &["type_name", "role", "optic"][..]),
-            ("typ001_unknown_focus.json", "TYP-001", &["type_name", "role", "optic"][..]),
-            ("typ002_body_mismatch.json", "TYP-002", &["expected_type", "actual_type", "optic"][..]),
-            ("typ002_put_mismatch.json", "TYP-002", &["expected_type", "actual_type", "optic"][..]),
-            ("typ003_grade_syntax.json", "TYP-003", &["fragment", "optic"][..]),
-            ("typ003_unknown_dim.json", "TYP-003", &["fragment", "optic"][..]),
-            ("typ004_uninferable_body.json", "TYP-004", &["clause", "optic"][..]),
-            ("unsupported_prism.json", "TYP-010", &["feature", "detail", "name"][..]),
-            ("unsupported_traversal.json", "TYP-010", &["feature", "detail", "name"][..]),
+            (
+                "invalid_grade.json",
+                "GRA-110",
+                &["annotated", "inferred", "optic"][..],
+            ),
+            (
+                "invalid_alias.json",
+                "ALI-201",
+                &["conflicting_regions"][..],
+            ),
+            (
+                "typ001_unknown_type.json",
+                "TYP-001",
+                &["type_name", "role", "optic"][..],
+            ),
+            (
+                "typ001_unknown_focus.json",
+                "TYP-001",
+                &["type_name", "role", "optic"][..],
+            ),
+            (
+                "typ002_body_mismatch.json",
+                "TYP-002",
+                &["expected_type", "actual_type", "optic"][..],
+            ),
+            (
+                "typ002_put_mismatch.json",
+                "TYP-002",
+                &["expected_type", "actual_type", "optic"][..],
+            ),
+            (
+                "typ003_grade_syntax.json",
+                "TYP-003",
+                &["fragment", "optic"][..],
+            ),
+            (
+                "typ003_unknown_dim.json",
+                "TYP-003",
+                &["fragment", "optic"][..],
+            ),
+            (
+                "typ004_uninferable_body.json",
+                "TYP-004",
+                &["clause", "optic"][..],
+            ),
+            (
+                "unsupported_prism.json",
+                "GRA-110",
+                &["annotated", "inferred", "optic"][..],
+            ),
+            (
+                "unsupported_traversal.json",
+                "TYP-010",
+                &["feature", "detail", "name"][..],
+            ),
             ("host_boundary.json", "TYP-010", &["feature", "detail"][..]),
+            (
+                "cgi006_prism_leaf.json",
+                "CGI-006",
+                &["kind", "node_id", "reason", "milestone"][..],
+            ),
         ];
         for (file, code, evidence_keys) in check_cases {
             let path = dir.join(file);
@@ -636,6 +690,7 @@ optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
         let explain_focus_cases = [
             ("explain_focus_healthview.json", true),
             ("explain_focus_nested.json", true),
+            ("explain_focus_alive_filter.json", true),
             ("explain_focus_unknown_node.json", false),
             ("explain_focus_typ002_fail.json", false),
             ("explain_focus_typ010_fail.json", false),
@@ -652,5 +707,87 @@ optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<1>> {
                 assert!(!diags.is_empty(), "{file} must have diagnostics");
             }
         }
+    }
+
+    #[test]
+    fn optimize_prism_leaf_graph_maps_cgi006() {
+        use optic_cgir::{CgirGraph, CgirNode};
+        use optic_hir::{Determinism, HirExpr, OpticSummary, OwnershipDim, PathLift, Rational};
+        use optic_syntax::Span;
+        use std::sync::Arc;
+
+        let summary = Arc::new(OpticSummary {
+            name: Some("AliveFilter".into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: optic_hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: optic_hir::ConcreteGrade {
+                cache: 1,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            get_determinism: Determinism::Pure,
+            put_determinism: Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![CgirNode::PrismLeaf {
+                id: 0,
+                name: "AliveFilter".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: summary.get_grade.clone(),
+                preview_fn: String::new(),
+                review_fn: String::new(),
+                preview_param: "s".into(),
+                preview_body: Arc::new(HirExpr::LitInt(1, Span::dummy())),
+                preview_returns_option: false,
+                preview_wrap_some: false,
+                review_state_param: None,
+                review_value_param: None,
+                review_value_body: None,
+                summary,
+                provenance: Span::dummy(),
+                m7_reserved: true,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let diag = optimize(g).expect_err("optimize must fail verify on PrismLeaf");
+        assert_eq!(diag.code, optic_diagnostics::CGIR_M7_RESERVED);
+        assert_eq!(diag.evidence["kind"], "PrismLeaf");
+    }
+
+    #[test]
+    fn facade_compile_emit_alive_filter() {
+        let src = example_src("alive_filter.opt");
+        let rust = compile_emit(&src).expect("alive_filter must compile_emit");
+        assert!(rust.contains("run_example"));
+        assert!(!rust.contains("if let Some"));
+    }
+
+    #[test]
+    fn facade_explain_focus_alive_filter() {
+        let src = example_src("alive_filter.opt");
+        let report = explain_focus_from_src(&src, "AliveFilter").expect("prism focus report");
+        assert_eq!(report.node, "AliveFilter");
+        assert_eq!(report.root_path, "entities.healths[id]");
     }
 }

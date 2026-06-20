@@ -39,8 +39,27 @@ fn explain_fus502() {
 }
 
 #[test]
+fn explain_cgi006_catalog() {
+    let out = opticc()
+        .args(["explain", "CGI-006"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&out);
+    assert!(stdout.contains("M7/M8 reserved CGIR node materialized"));
+    for variant in ["PrismLeaf", "TraversalLeaf", "Tap", "Record"] {
+        assert!(stdout.contains(variant), "missing {variant}");
+    }
+    assert!(stdout.contains("docs/observability-v0.md"));
+    assert!(stdout.contains("explain TYP-010"));
+    assert!(stdout.contains("M8; rejected in v0 via CGI-006"));
+}
+
+#[test]
 fn explain_cgi_codes() {
-    for code in ["CGI-003", "CGI-004", "CGI-005", "RES-001"] {
+    for code in ["CGI-003", "CGI-004", "CGI-005", "CGI-006", "RES-001"] {
         opticc()
             .args(["explain", code])
             .assert()

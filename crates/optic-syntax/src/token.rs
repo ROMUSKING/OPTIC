@@ -16,6 +16,7 @@ pub enum TokenKind {
     KwGet,
     KwPut,
     KwPreview,
+    KwPartial,
     KwReview,
     KwLet,
     KwFn,

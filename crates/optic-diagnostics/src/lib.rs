@@ -85,6 +85,8 @@ pub const CGIR_MULTI_QUERY: &str = "CGI-001";
 pub const CGIR_UNRESOLVED_OPTIC: &str = "CGI-002";
 pub const CGIR_UNSUPPORTED_EXPR: &str = "CGI-003";
 pub const CGIR_VERIFY_FAILED: &str = "CGI-004";
+pub const CGIR_CODEGEN_FAILED: &str = "CGI-005";
+pub const CGIR_M7_RESERVED: &str = "CGI-006";
 pub const FUS_COMPOSE_BLOCKED: &str = "FUS-501";
 pub const FUS_COMPOSE_LEGALITY_BLOCKED: &str = "FUS-502";
 pub const TYPE_UNKNOWN: &str = "TYP-001";
@@ -232,7 +234,7 @@ pub fn grade_compose_diag(
 
 pub fn codegen_failed_diag(rule: &str) -> Diagnostic {
     Diagnostic {
-        code: "CGI-005".into(),
+        code: CGIR_CODEGEN_FAILED.into(),
         title: "codegen failed".into(),
         severity: Severity::Error,
         phase: Phase::Codegen,
@@ -364,6 +366,134 @@ pub fn fusion_verify_diag(rule: &str) -> Diagnostic {
     }
 }
 
+/// Reason subcode for CGI-006 M7/M8 reserved node violations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum M7ReservedReason {
+    Materialized,
+    MissingReservedFlag,
+}
+
+/// Structured CGI-006 when an M7/M8 reserved CGIR node is materialized in narrow v0.
+pub fn cgir_m7_reserved_diag(
+    kind: &str,
+    node_id: u32,
+    span: Span,
+    reason: M7ReservedReason,
+) -> Diagnostic {
+    let milestone = match kind {
+        "Tap" | "Record" => "M8",
+        _ => "M7",
+    };
+    let rule = match reason {
+        M7ReservedReason::Materialized => format!(
+            "{milestone} reserved node `{kind}` must not appear in narrow v0 graphs (node {node_id})"
+        ),
+        M7ReservedReason::MissingReservedFlag => format!(
+            "{milestone} reserved node `{kind}` missing m7_reserved=true (node {node_id})"
+        ),
+    };
+    let reason_key = match reason {
+        M7ReservedReason::Materialized => "materialized",
+        M7ReservedReason::MissingReservedFlag => "missing_m7_reserved_flag",
+    };
+    let title = format!("{milestone} reserved CGIR node materialized");
+    Diagnostic {
+        code: CGIR_M7_RESERVED.into(),
+        title,
+        severity: Severity::Error,
+        phase: Phase::Cgir,
+        primary_span: span,
+        related_spans: vec![],
+        rule,
+        evidence: json!({
+            "kind": kind,
+            "node_id": node_id,
+            "reason": reason_key,
+            "milestone": milestone,
+        }),
+        minimal_fix_options: vec![
+            "remove stub M7/M8 reserved nodes from CGIR graphs".into(),
+            "defer traversal/observability lowering until supported".into(),
+        ],
+        ranked_fixes: ranked(&[
+            "remove stub M7/M8 reserved nodes from CGIR graphs",
+            "defer traversal/observability lowering until supported",
+        ]),
+        confidence: 1.0,
+        next_commands: vec![
+            "opticc explain CGI-006".into(),
+            "opticc dump-cgir file.opt --check".into(),
+        ],
+    }
+}
+
+/// Map a `verify()` error string to the correct structured diagnostic (CGI-006 vs CGI-004).
+pub fn cgir_verify_failed_diag(rule: &str) -> Diagnostic {
+    const PREFIX: &str = "CGI-006: M7 reserved node `";
+    const PREFIX_M8: &str = "CGI-006: M8 reserved node `";
+    for prefix in [PREFIX, PREFIX_M8] {
+        if let Some(after_kind) = rule.strip_prefix(prefix) {
+            if let Some((kind, rest)) = after_kind.split_once('`') {
+                let reason = if rest.contains("missing m7_reserved=true") {
+                    M7ReservedReason::MissingReservedFlag
+                } else {
+                    M7ReservedReason::Materialized
+                };
+                if let Some(id_str) = rest
+                    .rsplit("(node ")
+                    .next()
+                    .and_then(|s| s.strip_suffix(')'))
+                {
+                    if let Ok(node_id) = id_str.trim().parse::<u32>() {
+                        return cgir_m7_reserved_diag(kind, node_id, Span::dummy(), reason);
+                    }
+                }
+            }
+        }
+    }
+    fusion_verify_diag(rule)
+}
+
+#[cfg(test)]
+mod cgir_verify_tests {
+    use super::*;
+
+    #[test]
+    fn cgir_verify_failed_diag_classifies_m7_materialized() {
+        let d = cgir_verify_failed_diag(
+            "CGI-006: M7 reserved node `PrismLeaf` materialized in narrow v0 (node 3)",
+        );
+        assert_eq!(d.code, CGIR_M7_RESERVED);
+        assert_eq!(d.evidence["kind"], "PrismLeaf");
+        assert_eq!(d.evidence["node_id"], 3);
+        assert_eq!(d.evidence["reason"], "materialized");
+    }
+
+    #[test]
+    fn cgir_verify_failed_diag_classifies_m8_materialized() {
+        let d = cgir_verify_failed_diag(
+            "CGI-006: M8 reserved node `Tap` materialized in narrow v0 (node 1)",
+        );
+        assert_eq!(d.code, CGIR_M7_RESERVED);
+        assert_eq!(d.evidence["milestone"], "M8");
+    }
+
+    #[test]
+    fn cgir_verify_failed_diag_classifies_missing_flag() {
+        let d = cgir_verify_failed_diag(
+            "CGI-006: M8 reserved node `Tap` missing m7_reserved=true (node 0)",
+        );
+        assert_eq!(d.code, CGIR_M7_RESERVED);
+        assert_eq!(d.evidence["reason"], "missing_m7_reserved_flag");
+    }
+
+    #[test]
+    fn cgir_verify_failed_diag_falls_back_to_cgi004() {
+        let d = cgir_verify_failed_diag("node 0: compose edge out of bounds");
+        assert_eq!(d.code, CGIR_VERIFY_FAILED);
+    }
+}
+
 pub fn type_unknown_diag(
     span: Span,
     type_name: &str,
@@ -487,12 +617,12 @@ pub fn type_unsupported_v0_diag(
         rule: detail.into(),
         evidence,
         minimal_fix_options: vec![
-            "use lens-like GradedOptic forms supported in v0".into(),
-            "defer prisms and host boundaries to M7+".into(),
+            "use lens-like GradedOptic or GradedPrism forms supported in v0".into(),
+            "defer traversal and host boundaries until M7+".into(),
         ],
         ranked_fixes: ranked(&[
-            "use lens-like GradedOptic forms supported in v0",
-            "defer prisms and host boundaries to M7+",
+            "use lens-like GradedOptic or GradedPrism forms supported in v0",
+            "defer traversal and host boundaries until M7+",
         ]),
         confidence: 1.0,
         next_commands: vec![
@@ -532,12 +662,34 @@ pub fn explain_focus_ok_json(report: &serde_json::Value) -> String {
         .unwrap_or_else(|_| r#"{"ok":true,"focus":{}}"#.into())
 }
 
-pub fn type_grade_syntax_diag(
-    span: Span,
-    detail: &str,
-    fragment: &str,
-    optic: &str,
-) -> Diagnostic {
+/// TYP-003 for mutually exclusive optic clause sets (lens get/put vs prism preview/review).
+pub fn type_clause_mix_diag(span: Span, detail: &str, fragment: &str, optic: &str) -> Diagnostic {
+    Diagnostic {
+        code: TYPE_GRADE_SYNTAX.into(),
+        title: "invalid optic clause combination".into(),
+        severity: Severity::Error,
+        phase: Phase::Type,
+        primary_span: span,
+        related_spans: vec![],
+        rule: detail.into(),
+        evidence: json!({ "fragment": fragment, "optic": optic, "feature": "clause_mix" }),
+        minimal_fix_options: vec![
+            "use get/put only on GradedOptic".into(),
+            "use preview/review only on GradedPrism".into(),
+        ],
+        ranked_fixes: ranked(&[
+            "use get/put only on GradedOptic",
+            "use preview/review only on GradedPrism",
+        ]),
+        confidence: 0.95,
+        next_commands: vec![
+            "opticc explain TYP-003".into(),
+            "opticc check file.opt --json".into(),
+        ],
+    }
+}
+
+pub fn type_grade_syntax_diag(span: Span, detail: &str, fragment: &str, optic: &str) -> Diagnostic {
     Diagnostic {
         code: TYPE_GRADE_SYNTAX.into(),
         title: "invalid grade annotation syntax".into(),
@@ -548,7 +700,8 @@ pub fn type_grade_syntax_diag(
         rule: detail.into(),
         evidence: json!({ "fragment": fragment, "optic": optic }),
         minimal_fix_options: vec![
-            "use CacheGrade<N>, LinearGrade, AffineGrade, SharedGrade, or OwnershipGrade<num/den>".into(),
+            "use CacheGrade<N>, LinearGrade, AffineGrade, SharedGrade, or OwnershipGrade<num/den>"
+                .into(),
             "use `_` for inferrable dimensions".into(),
         ],
         ranked_fixes: ranked(&[

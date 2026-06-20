@@ -1,0 +1,43 @@
+{
+  "diagnostics": [
+    {
+      "code": "CGI-006",
+      "confidence": 1.0,
+      "evidence": {
+        "kind": "PrismLeaf",
+        "milestone": "M7",
+        "node_id": 0.0,
+        "reason": "materialized"
+      },
+      "minimal_fix_options": [
+        "remove stub M7/M8 reserved nodes from CGIR graphs",
+        "defer traversal/observability lowering until supported"
+      ],
+      "next_commands": [
+        "opticc explain CGI-006",
+        "opticc dump-cgir file.opt --check"
+      ],
+      "phase": "cgir",
+      "primary_span": {
+        "end": 0.0,
+        "source": 0.0,
+        "start": 0.0
+      },
+      "ranked_fixes": [
+        {
+          "confidence": 1.0,
+          "description": "remove stub M7/M8 reserved nodes from CGIR graphs"
+        },
+        {
+          "confidence": 0.8999999761581421,
+          "description": "defer traversal/observability lowering until supported"
+        }
+      ],
+      "related_spans": [],
+      "rule": "M7 reserved node `PrismLeaf` must not appear in narrow v0 graphs (node 0)",
+      "severity": "error",
+      "title": "M7 reserved CGIR node materialized"
+    }
+  ],
+  "ok": false
+}

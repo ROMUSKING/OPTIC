@@ -149,7 +149,8 @@ pub struct RegionMap {
     pub costate_name: String,
     pub columns: std::collections::BTreeMap<String, ColumnInfo>,
     /// Nested record types: type name -> field -> Rust type.
-    pub record_fields: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    pub record_fields:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 impl RegionMap {
@@ -175,7 +176,9 @@ impl RegionMap {
         if self.columns.contains_key(root) {
             Ok(root.to_string())
         } else {
-            Err(format!("unknown region `{region}` — not declared in costate/data"))
+            Err(format!(
+                "unknown region `{region}` — not declared in costate/data"
+            ))
         }
     }
 
@@ -239,7 +242,10 @@ pub fn build_region_map(program: &HirProgram) -> Result<RegionMap, String> {
     // Pass 1a: reserve record type names (forward refs).
     for item in &program.items {
         if let HirItem::Data(d) = item {
-            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            let has_soa = d
+                .fields
+                .iter()
+                .any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
             if !has_soa {
                 map.record_fields.entry(d.name.node.clone()).or_default();
             }
@@ -248,7 +254,10 @@ pub fn build_region_map(program: &HirProgram) -> Result<RegionMap, String> {
     // Pass 1b: fill record field types.
     for item in &program.items {
         if let HirItem::Data(d) = item {
-            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            let has_soa = d
+                .fields
+                .iter()
+                .any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
             if !has_soa {
                 register_record_type(&mut map, d);
             }
@@ -257,7 +266,10 @@ pub fn build_region_map(program: &HirProgram) -> Result<RegionMap, String> {
     // Pass 2: SoA costate columns.
     for item in &program.items {
         if let HirItem::Data(d) = item {
-            let has_soa = d.fields.iter().any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
+            let has_soa = d
+                .fields
+                .iter()
+                .any(|f| matches!(f.ty, syn::TypeExpr::Soa(..)));
             if has_soa {
                 if soa_seen {
                     return Err(format!(
@@ -346,8 +358,7 @@ pub fn register_record_type(map: &mut RegionMap, decl: &syn::DataDecl) {
             fields.insert(field.name.node.clone(), ty);
         }
     }
-    map.record_fields
-        .insert(decl.name.node.clone(), fields);
+    map.record_fields.insert(decl.name.node.clone(), fields);
 }
 
 /// The central artifact (ch8): OpticSummary.
@@ -593,10 +604,7 @@ pub fn dump_hir(p: &HirProgram) -> String {
             HirItem::Let { name, summary, .. } => {
                 out.push_str(&format!(
                     "  Let {} lift={:?} reads={:?} writes={:?}\n",
-                    name,
-                    summary.lift.prefix,
-                    summary.get_reads,
-                    summary.put_writes
+                    name, summary.lift.prefix, summary.get_reads, summary.put_writes
                 ));
             }
             HirItem::Query(q) => {
@@ -712,6 +720,26 @@ fn main() { entities.query(H).get().map(|h| h); }
     }
 
     #[test]
+    fn golden_hir_alive_filter() {
+        assert_hir_golden("alive_filter.opt");
+    }
+
+    #[test]
+    fn golden_hir_prism_get() {
+        assert_hir_golden("prism_get.opt");
+    }
+
+    #[test]
+    fn golden_hir_prism_set() {
+        assert_hir_golden("prism_set.opt");
+    }
+
+    #[test]
+    fn golden_hir_partial_prism() {
+        assert_hir_golden("partial_prism.opt");
+    }
+
+    #[test]
     fn test_fuse_map_chain_substitutes_body() {
         let src = r#"
 optic H: GradedOptic<E,f32,_> { get s=>s.healths[s.id] put(s,v)=>{s.healths[s.id]=v} }
@@ -811,6 +839,30 @@ fn main() { entities.query(H).map(|h| h).map(|(x,y)| (x,y)); }
             unsupported,
             "incompatible map chain must lower to Unsupported"
         );
+    }
+
+    #[test]
+    fn substitute_hir_ident_matches_var_replacement_contract() {
+        let e = HirExpr::Bin {
+            op: syn::BinOp::Add,
+            left: Box::new(HirExpr::Var("x".into(), Span::dummy())),
+            right: Box::new(HirExpr::CursorIndex {
+                cursor: "x".into(),
+                field: "healths".into(),
+                span: Span::dummy(),
+            }),
+            span: Span::dummy(),
+        };
+        let subbed = substitute_hir_ident(&e, "x", "_bind");
+        assert!(hir_expr_refs_var(&e, "x"));
+        assert!(!hir_expr_refs_var(&subbed, "x"));
+        match subbed {
+            HirExpr::Bin { left, right, .. } => {
+                assert!(matches!(*left, HirExpr::Var(ref v, _) if v == "_bind"));
+                assert!(matches!(*right, HirExpr::Var(ref v, _) if v == "_bind"));
+            }
+            other => panic!("unexpected substitution shape: {other:?}"),
+        }
     }
 
     #[test]
@@ -1061,6 +1113,16 @@ fn focus_relative_lift_from_decl(decl: &syn::OpticDecl) -> PathLift {
                 }
             }
         }
+    } else if let Some(review) = &decl.review {
+        if let Some(mut review_path) =
+            focus_field_path_from_put(&review.state_param.node, &review.body)
+        {
+            for seg in review_path.drain(..) {
+                if !path.contains(&seg) {
+                    path.push(seg);
+                }
+            }
+        }
     }
     PathLift { prefix: path }
 }
@@ -1143,6 +1205,9 @@ fn build_summary_from_decl(
     if let Some(put) = &decl.put {
         put_reads = collect_regions(&put.body, "read");
         put_writes = collect_regions(&put.body, "write");
+    } else if let Some(review) = &decl.review {
+        put_reads = collect_regions(&review.body, "read");
+        put_writes = collect_regions(&review.body, "write");
     }
 
     let grade = extract_grade_from_ann(&decl.grade);
@@ -1356,7 +1421,6 @@ fn compute_summary_for_optic(
     }
 }
 
-
 fn default_summary(name: &str) -> OpticSummary {
     OpticSummary {
         name: Some(name.into()),
@@ -1528,7 +1592,6 @@ fn collect_queries_from_expr(
     Ok(())
 }
 
-
 fn lower_query_methods_to_kind(methods: &[syn::QueryMethod]) -> QueryKind {
     if methods.is_empty() {
         return QueryKind::Get;
@@ -1645,7 +1708,26 @@ fn substitute_closure_params(e: &HirExpr, cl: &syn::Closure, repl: &HirExpr) -> 
     substitute_hir_var(e, inner, repl)
 }
 
-fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
+/// True when `name` appears as a free variable reference in `e`.
+pub fn hir_expr_refs_var(e: &HirExpr, name: &str) -> bool {
+    match e {
+        HirExpr::Var(v, _) => v == name,
+        HirExpr::Bin { left, right, .. } => {
+            hir_expr_refs_var(left, name) || hir_expr_refs_var(right, name)
+        }
+        HirExpr::Paren(inner, _) => hir_expr_refs_var(inner, name),
+        HirExpr::Tuple(elems, _) => elems.iter().any(|el| hir_expr_refs_var(el, name)),
+        HirExpr::TupleProj { base, .. } => hir_expr_refs_var(base, name),
+        HirExpr::FocusField { param, .. } => param == name,
+        HirExpr::CursorField { cursor, .. } | HirExpr::CursorIndex { cursor, .. } => {
+            cursor == name
+        }
+        HirExpr::LitInt(_, _) | HirExpr::LitFloat(_, _) | HirExpr::Unsupported { .. } => false,
+    }
+}
+
+/// Structural substitution replacing free occurrences of `name` with `repl`.
+pub fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
     match e {
         HirExpr::CursorField {
             cursor,
@@ -1713,6 +1795,11 @@ fn substitute_hir_var(e: &HirExpr, name: &str, repl: &HirExpr) -> HirExpr {
             span: *span,
         },
     }
+}
+
+/// Like [`substitute_hir_var`] but substitutes an identifier string (codegen path).
+pub fn substitute_hir_ident(e: &HirExpr, name: &str, repl: &str) -> HirExpr {
+    substitute_hir_var(e, name, &HirExpr::Var(repl.into(), Span::dummy()))
 }
 
 /// Minimal expr lowering to HirExpr for bodies (map bodies, values) per ch8 cursor forms + 8.9.2.1.

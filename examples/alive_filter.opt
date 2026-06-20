@@ -1,0 +1,13 @@
+-- Appendix B acceptance: GradedPrism preview/review + map query (M7)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+fn main() {
+    entities.query(AliveFilter).map(|h| h - 10.0);
+}

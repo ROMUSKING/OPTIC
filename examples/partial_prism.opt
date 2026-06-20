@@ -1,0 +1,13 @@
+-- M7 partial prism: `partial preview` marks Option<focus> codegen path
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic PartialFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    partial preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+fn main() {
+    entities.query(PartialFilter).map(|h| h - 10.0);
+}

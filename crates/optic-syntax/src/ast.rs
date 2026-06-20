@@ -19,12 +19,14 @@ pub enum OpticTypeCtor {
 }
 
 impl OpticDecl {
-    /// True when the surface form is deferred to M7+ (prism, unsafe boundary, traversal).
+    /// True when the surface form is deferred to M7+ (traversal, unsafe boundary).
     pub fn is_unsupported_v0(&self) -> bool {
-        self.unsafe_boundary
-            || self.type_ctor != OpticTypeCtor::GradedOptic
-            || self.preview.is_some()
-            || self.review.is_some()
+        self.unsafe_boundary || self.type_ctor == OpticTypeCtor::GradedTraversal
+    }
+
+    /// True when the optic is a graded prism (preview/review surface).
+    pub fn is_prism(&self) -> bool {
+        self.type_ctor == OpticTypeCtor::GradedPrism
     }
 }
 
@@ -93,6 +95,8 @@ pub struct ExternDecl {
 pub struct GetClause {
     pub param: Ident,
     pub body: Expr,
+    /// When true (via `partial preview`), preview is treated as `Option<focus>` in codegen.
+    pub partial: bool,
     pub span: Span,
 }
 

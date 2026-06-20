@@ -43,6 +43,89 @@ fn parse_positions_line(out: &str, label: &str) -> Vec<(f32, f32)> {
 }
 
 #[test]
+fn run_alive_filter_prism_mutates() {
+    let assert = opticc()
+        .args(["run", &example("alive_filter.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+
+    // Total-preview prism map must not use tautological `if let Some(x) = Some(...)`.
+    let transpile = opticc()
+        .args(["transpile", &example("alive_filter.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("alive_filter.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(
+        !rust.contains("if let Some"),
+        "total preview must not emit if-let Some guard"
+    );
+    assert!(
+        !rust.contains("Some(cursor"),
+        "total preview must not double-wrap Some(...)"
+    );
+    assert!(
+        rust.contains("let _healths = cursor_0.arena.healths[cursor_0.id]"),
+        "total preview should bind field read directly"
+    );
+}
+
+#[test]
+fn run_prism_get_prints_values() {
+    let assert = opticc()
+        .args(["run", &example("prism_get.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(parse_get_lines(&out), vec![100.0, 80.0, 50.0]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_prism_set_mutates() {
+    let assert = opticc()
+        .args(["run", &example("prism_set.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![42.0, 42.0, 42.0]);
+    assert!(out.contains("RUN VERIFIED"));
+}
+
+#[test]
+fn run_partial_prism_emits_if_let_some() {
+    let assert = opticc()
+        .args(["run", &example("partial_prism.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(parse_entities_line(&out, "before:"), vec![100.0, 80.0, 50.0]);
+    assert_eq!(parse_entities_line(&out, "after:"), vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+    let transpile = opticc()
+        .args(["transpile", &example("partial_prism.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("partial_prism.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(rust.contains("if let Some"), "partial preview must use if-let");
+    assert!(rust.contains("Some(cursor"), "partial preview must wrap Some(...)");
+}
+
+#[test]
 fn run_health_decay_mutates() {
     let assert = opticc()
         .args(["run", &example("health_decay.opt").to_string_lossy()])

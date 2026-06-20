@@ -24,7 +24,7 @@ This appendix gathers the operational surfaces an implementer, tool author, or c
 | `optic dump-summary file.opt --node NAME` | Show one optic summary |
 | `optic dump-cgir file.opt` | Print post-fusion CGIR |
 | `optic dump-cgir file.opt --before-fusion` | Print pre-fusion CGIR |
-| `optic dump-cgir file.opt --node N` | Print one node and its provenance |
+| `optic dump-cgir file.opt --node NAME\|N` | Print one node and its provenance (name via `resolved_optics`, then numeric id) |
 | `optic dump-cgir file.opt --check` | Run invariant checks on CGIR |
 | `optic transpile file.opt` | Emit Rust |
 | `optic doctor file.opt` | Run consistency checks and suggest next actions |

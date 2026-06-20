@@ -13,6 +13,7 @@ pub struct CgirGraph {
     pub roots: Vec<NodeId>,
     pub provenance_index: std::collections::BTreeMap<NodeId, FusionProvenance>,
     /// Query-resolvable optic names -> CGIR node id (leaves, products, composes, aliases).
+    /// **Last-wins:** later let/compose/product bindings may re-insert the same name key.
     pub resolved_optics: std::collections::HashMap<String, NodeId>,
     /// Region→column/type map from HIR data declarations (SUG-003).
     pub region_map: hir::RegionMap,
@@ -118,7 +119,63 @@ pub enum CgirNode {
         /// Present when compose fusion materializes a single-loop body (ch10).
         compose_body: Option<ComposeFusedBody>,
     },
-    // reserved for later
+    /// M7 prism leaf — preview/review lowered when `m7_reserved=false`.
+    PrismLeaf {
+        id: NodeId,
+        name: String,
+        costate: String,
+        focus: String,
+        grade: hir::ConcreteGrade,
+        preview_fn: String,
+        review_fn: String,
+        preview_param: String,
+        preview_body: Arc<hir::HirExpr>,
+        /// True when preview body returns `Option<focus>` (partial prism).
+        preview_returns_option: bool,
+        /// When true, codegen wraps preview expr in `Some(...)` before `if let Some`.
+        preview_wrap_some: bool,
+        review_state_param: Option<String>,
+        review_value_param: Option<String>,
+        review_value_body: Option<Arc<hir::HirExpr>>,
+        summary: Arc<hir::OpticSummary>,
+        provenance: Span,
+        /// Stub nodes use `true` (CGI-006); lowered prisms use `false`.
+        m7_reserved: bool,
+    },
+    /// M7+ reserved — bulk get/set traversal leaf (not lowered in narrow v0).
+    TraversalLeaf {
+        id: NodeId,
+        name: String,
+        costate: String,
+        focus: String,
+        grade: hir::ConcreteGrade,
+        get_fn: String,
+        set_fn: String,
+        get_param: String,
+        get_body: Arc<hir::HirExpr>,
+        set_state_param: Option<String>,
+        set_value_param: Option<String>,
+        set_value_body: Option<Arc<hir::HirExpr>>,
+        summary: Arc<hir::OpticSummary>,
+        provenance: Span,
+        m7_reserved: bool,
+    },
+    /// M8+ observability tap placeholder (book ch14.5); CGI-006 if materialized in v0.
+    Tap {
+        id: NodeId,
+        optic_name: String,
+        label: String,
+        provenance: Span,
+        m7_reserved: bool,
+    },
+    /// M8+ observability record placeholder (book ch14.5); CGI-006 if materialized in v0.
+    Record {
+        id: NodeId,
+        optic_name: String,
+        event: String,
+        provenance: Span,
+        m7_reserved: bool,
+    },
 }
 
 /// Lower `A >>> B >>> C` to a nested Compose tree (ch8/ch10).
@@ -159,9 +216,12 @@ fn build_seq_chain(
     }
 }
 
+// Narrow v0: verify rejects M7/M8 reserved nodes (CGI-006) before compose wiring is checked.
 fn compose_emit_focus_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a str> {
     match g.nodes.get(id as usize)? {
-        CgirNode::OpticLeaf { summary, .. } => Some(summary.focus.as_str()),
+        CgirNode::OpticLeaf { summary, .. }
+        | CgirNode::PrismLeaf { summary, .. }
+        | CgirNode::TraversalLeaf { summary, .. } => Some(summary.focus.as_str()),
         CgirNode::Compose { rhs, .. } => compose_emit_focus_summary(g, *rhs),
         _ => None,
     }
@@ -169,7 +229,9 @@ fn compose_emit_focus_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a st
 
 fn compose_recv_costate_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a str> {
     match g.nodes.get(id as usize)? {
-        CgirNode::OpticLeaf { summary, .. } => Some(summary.costate.as_str()),
+        CgirNode::OpticLeaf { summary, .. }
+        | CgirNode::PrismLeaf { summary, .. }
+        | CgirNode::TraversalLeaf { summary, .. } => Some(summary.costate.as_str()),
         CgirNode::Compose { lhs, .. } => compose_recv_costate_summary(g, *lhs),
         _ => None,
     }
@@ -192,6 +254,14 @@ fn hir_expr_unsupported(e: &hir::HirExpr) -> Option<(&Span, String)> {
     }
 }
 
+/// First PrismLeaf in a compose spine, if any (narrow v0 rejects compose+prism).
+pub fn compose_chain_prism_leaf(g: &CgirGraph, compose_id: NodeId) -> Option<NodeId> {
+    let chain = compose_leaf_chain(g, compose_id)?;
+    chain
+        .into_iter()
+        .find(|&lid| matches!(g.nodes.get(lid as usize), Some(CgirNode::PrismLeaf { .. })))
+}
+
 fn compose_chain_unsupported_body(
     g: &CgirGraph,
     compose_id: NodeId,
@@ -199,27 +269,44 @@ fn compose_chain_unsupported_body(
     let chain = compose_leaf_chain(g, compose_id)?;
     for &lid in &chain {
         let leaf = g.nodes.get(lid as usize)?;
-        if let CgirNode::OpticLeaf {
-            name,
-            get_body,
-            put_value_body,
-            ..
-        } = leaf
-        {
-            if let Some((span, reason)) = hir_expr_unsupported(get_body) {
-                return Some((*span, format!("optic `{name}` get body: {reason}"), lid));
-            }
-            if let Some(body) = put_value_body {
-                if let Some((span, reason)) = hir_expr_unsupported(body) {
-                    return Some((*span, format!("optic `{name}` put body: {reason}"), lid));
+        match leaf {
+            CgirNode::OpticLeaf {
+                name,
+                get_body,
+                put_value_body,
+                ..
+            } => {
+                if let Some((span, reason)) = hir_expr_unsupported(get_body) {
+                    return Some((*span, format!("optic `{name}` get body: {reason}"), lid));
+                }
+                if let Some(body) = put_value_body {
+                    if let Some((span, reason)) = hir_expr_unsupported(body) {
+                        return Some((*span, format!("optic `{name}` put body: {reason}"), lid));
+                    }
                 }
             }
-        } else {
-            return Some((
-                Span::dummy(),
-                "compose chain must be optic leaves".into(),
-                lid,
-            ));
+            CgirNode::PrismLeaf {
+                name,
+                preview_body,
+                review_value_body,
+                ..
+            } => {
+                if let Some((span, reason)) = hir_expr_unsupported(preview_body) {
+                    return Some((*span, format!("optic `{name}` preview body: {reason}"), lid));
+                }
+                if let Some(body) = review_value_body {
+                    if let Some((span, reason)) = hir_expr_unsupported(body) {
+                        return Some((*span, format!("optic `{name}` review body: {reason}"), lid));
+                    }
+                }
+            }
+            _ => {
+                return Some((
+                    Span::dummy(),
+                    "compose chain must be optic or prism leaves".into(),
+                    lid,
+                ));
+            }
         }
     }
     None
@@ -230,10 +317,166 @@ pub fn find_node_by_id<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a CgirNode>
     g.nodes.iter().find(|n| node_id(n) == id)
 }
 
+/// Maximum `--node` name length accepted by resolve helpers (local DoS guard).
+pub const MAX_NODE_NAME_BYTES: usize = 4096;
+
+/// Book milestone for a reserved CGIR variant (M7 prism/traversal, M8 observability).
+pub fn m7_reserved_milestone(kind: &str) -> &'static str {
+    match kind {
+        "Tap" | "Record" => "M8",
+        _ => "M7",
+    }
+}
+
+/// Kind string for M7/M8 reserved CGIR variants, if any.
+pub fn m7_reserved_kind(node: &CgirNode) -> Option<&'static str> {
+    match node {
+        CgirNode::PrismLeaf { .. } => Some("PrismLeaf"),
+        CgirNode::TraversalLeaf { .. } => Some("TraversalLeaf"),
+        CgirNode::Tap { .. } => Some("Tap"),
+        CgirNode::Record { .. } => Some("Record"),
+        _ => None,
+    }
+}
+
+/// True when `node` is an M7/M8 reserved variant materialized in a CGIR graph.
+pub fn is_m7_reserved(node: &CgirNode) -> bool {
+    m7_reserved_kind(node).is_some()
+}
+
+fn m7_reserved_flag(node: &CgirNode) -> Option<bool> {
+    match node {
+        CgirNode::PrismLeaf { m7_reserved, .. }
+        | CgirNode::TraversalLeaf { m7_reserved, .. }
+        | CgirNode::Tap { m7_reserved, .. }
+        | CgirNode::Record { m7_reserved, .. } => Some(*m7_reserved),
+        _ => None,
+    }
+}
+
+/// Provenance span carried on a CGIR node.
+pub fn node_span(node: &CgirNode) -> Span {
+    match node {
+        CgirNode::OpticLeaf { provenance, .. }
+        | CgirNode::Compose { provenance, .. }
+        | CgirNode::Product { provenance, .. }
+        | CgirNode::ProductFlat { provenance, .. }
+        | CgirNode::QueryGet { provenance, .. }
+        | CgirNode::QuerySet { provenance, .. }
+        | CgirNode::QueryMap { provenance, .. }
+        | CgirNode::FusedLoop { provenance, .. }
+        | CgirNode::PrismLeaf { provenance, .. }
+        | CgirNode::TraversalLeaf { provenance, .. }
+        | CgirNode::Tap { provenance, .. }
+        | CgirNode::Record { provenance, .. } => *provenance,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResolveCgirNodeError {
+    NameTooLong,
+    UnknownName { candidates: Vec<String> },
+    UnknownId { id: u32 },
+    StaleName { name: String, id: u32 },
+}
+
+/// Resolve `--node` for dump-cgir: optic/let name via `resolved_optics`, then numeric NodeId.
+pub fn resolve_cgir_node(g: &CgirGraph, node: &str) -> Result<NodeId, ResolveCgirNodeError> {
+    if node.len() > MAX_NODE_NAME_BYTES {
+        return Err(ResolveCgirNodeError::NameTooLong);
+    }
+    if let Some(&id) = g.resolved_optics.get(node) {
+        if find_node_by_id(g, id).is_some() {
+            return Ok(id);
+        }
+        return Err(ResolveCgirNodeError::StaleName {
+            name: node.to_string(),
+            id,
+        });
+    }
+    if let Ok(id) = node.parse::<u32>() {
+        if find_node_by_id(g, id).is_some() {
+            return Ok(id);
+        }
+        return Err(ResolveCgirNodeError::UnknownId { id });
+    }
+    let mut candidates: Vec<_> = g.resolved_optics.keys().cloned().collect();
+    candidates.sort();
+    Err(ResolveCgirNodeError::UnknownName { candidates })
+}
+
+/// Typed M7/M8 reserved-node violation detected in a CGIR graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct M7Violation {
+    pub kind: &'static str,
+    pub node_id: NodeId,
+    pub span: Span,
+    pub reason: optic_diagnostics::M7ReservedReason,
+}
+
+/// True when an M7/M8 reserved node is allowed in narrow v0 (properly lowered prism).
+pub fn is_allowed_m7_node(node: &CgirNode) -> bool {
+    matches!(
+        node,
+        CgirNode::PrismLeaf {
+            m7_reserved: false,
+            ..
+        }
+    )
+}
+
+/// Scan a graph for the first M7/M8 reserved node violation (graph-aware, no string parsing).
+pub fn find_m7_violation(g: &CgirGraph) -> Option<M7Violation> {
+    for node in &g.nodes {
+        if is_allowed_m7_node(node) {
+            continue;
+        }
+        let kind = m7_reserved_kind(node)?;
+        let node_id = node_id(node);
+        let span = node_span(node);
+        let reason = if m7_reserved_flag(node) == Some(false) {
+            optic_diagnostics::M7ReservedReason::MissingReservedFlag
+        } else {
+            optic_diagnostics::M7ReservedReason::Materialized
+        };
+        return Some(M7Violation {
+            kind,
+            node_id,
+            span,
+            reason,
+        });
+    }
+    None
+}
+
+fn m7_violation_err(v: &M7Violation) -> String {
+    let milestone = m7_reserved_milestone(v.kind);
+    match v.reason {
+        optic_diagnostics::M7ReservedReason::Materialized => format!(
+            "CGI-006: {milestone} reserved node `{}` materialized in narrow v0 (node {})",
+            v.kind, v.node_id
+        ),
+        optic_diagnostics::M7ReservedReason::MissingReservedFlag => format!(
+            "CGI-006: {milestone} reserved node `{}` missing m7_reserved=true (node {})",
+            v.kind, v.node_id
+        ),
+    }
+}
+
+/// Map `verify()` failure to a structured diagnostic (CGI-006 vs CGI-004).
+pub fn verify_to_diagnostic(g: &CgirGraph) -> Result<(), optic_diagnostics::Diagnostic> {
+    if let Some(v) = find_m7_violation(g) {
+        return Err(optic_diagnostics::cgir_m7_reserved_diag(
+            v.kind, v.node_id, v.span, v.reason,
+        ));
+    }
+    verify(g).map_err(|e| optic_diagnostics::cgir_verify_failed_diag(&e))
+}
+
 /// Left-to-right leaf spine of a (possibly nested) Compose tree.
 pub fn compose_leaf_chain(g: &CgirGraph, id: NodeId) -> Option<Vec<NodeId>> {
     match g.nodes.get(id as usize)? {
-        CgirNode::OpticLeaf { .. } => Some(vec![id]),
+        CgirNode::OpticLeaf { .. } | CgirNode::PrismLeaf { .. } => Some(vec![id]),
         CgirNode::Compose { lhs, rhs, .. } => {
             let mut chain = compose_leaf_chain(g, *lhs)?;
             chain.extend(compose_leaf_chain(g, *rhs)?);
@@ -255,7 +498,7 @@ pub fn compose_exit_leaf(g: &CgirGraph, id: NodeId) -> Option<NodeId> {
 
 fn compose_subtree_ids(g: &CgirGraph, id: NodeId, out: &mut Vec<NodeId>) {
     match g.nodes.get(id as usize) {
-        Some(CgirNode::OpticLeaf { .. }) => out.push(id),
+        Some(CgirNode::OpticLeaf { .. }) | Some(CgirNode::PrismLeaf { .. }) => out.push(id),
         Some(CgirNode::Compose { lhs, rhs, .. }) => {
             compose_subtree_ids(g, *lhs, out);
             compose_subtree_ids(g, *rhs, out);
@@ -302,69 +545,154 @@ pub fn build(
             hir::HirItem::Optic { decl, summary } => {
                 let nid = id;
                 id += 1;
-                // real from summary per ch10.9 (OpticLeaf from named optic + summary)
-                let get_fn = if summary.get_reads.is_empty() {
-                    "cursor.arena".into()
-                } else {
-                    summary
-                        .get_reads
-                        .iter()
-                        .map(|r| format!("cursor.arena.{}[cursor.id]", r))
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                };
-                let put_fn = if summary.put_writes.is_empty() {
-                    "".into()
-                } else {
-                    summary
-                        .put_writes
-                        .iter()
-                        .map(|r| format!("cursor.arena.{}[cursor.id] = v", r))
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                };
                 let costate = type_expr_name(&decl.costate);
                 let focus = type_expr_name(&decl.focus);
-                let get = decl.get.as_ref().expect("optic leaf requires get clause");
-                let get_param = get.param.node.clone();
-                let get_body = Arc::new(validate_optic_body_expr(
-                    lower_optic_get_body(&get_param, &get.body),
-                    &region_map,
-                ));
-                let (put_state_param, put_value_param, put_value_body) =
-                    if let Some(put) = &decl.put {
-                        (
-                            Some(put.state_param.node.clone()),
-                            Some(put.value_param.node.clone()),
-                            Some(Arc::new(validate_optic_body_expr(
-                                lower_optic_put_value_body(
-                                    &put.state_param.node,
-                                    &put.value_param.node,
-                                    &put.body,
-                                ),
-                                &region_map,
-                            ))),
-                        )
+                debug_assert_eq!(summary.costate, costate);
+                debug_assert_eq!(summary.focus, focus);
+
+                if decl.is_prism() {
+                    let preview = decl.preview.as_ref().ok_or_else(|| {
+                        vec![optic_diagnostics::cgir_diag(
+                            "CGI-001",
+                            decl.span,
+                            "prism optic requires preview clause",
+                            serde_json::json!({ "optic": decl.name.node }),
+                        )]
+                    })?;
+                    let review = decl.review.as_ref().ok_or_else(|| {
+                        vec![optic_diagnostics::cgir_diag(
+                            "CGI-001",
+                            decl.span,
+                            "prism optic requires review clause",
+                            serde_json::json!({ "optic": decl.name.node }),
+                        )]
+                    })?;
+                    let preview_param = preview.param.node.clone();
+                    let preview_body = Arc::new(validate_optic_body_expr(
+                        lower_optic_get_body(&preview_param, &preview.body),
+                        &region_map,
+                    ));
+                    let review_state_param = review.state_param.node.clone();
+                    let review_value_param = review.value_param.node.clone();
+                    let review_value_body = Arc::new(validate_optic_body_expr(
+                        lower_optic_put_value_body(
+                            &review_state_param,
+                            &review_value_param,
+                            &review.body,
+                        ),
+                        &region_map,
+                    ));
+                    let inferred_option = optic_typeck::preview_body_returns_option(
+                        &preview.body,
+                        &preview_param,
+                        &costate,
+                        &region_map,
+                    );
+                    let preview_returns_option = preview.partial || inferred_option;
+                    let preview_wrap_some = preview.partial && !inferred_option;
+                    let preview_fn = if summary.get_reads.is_empty() {
+                        "None".into()
                     } else {
-                        (None, None, None)
+                        summary
+                            .get_reads
+                            .iter()
+                            .map(|r| format!("Some(cursor.arena.{}[cursor.id])", r))
+                            .collect::<Vec<_>>()
+                            .join("; ")
                     };
-                nodes.push(CgirNode::OpticLeaf {
-                    id: nid,
-                    name: decl.name.node.clone(),
-                    costate,
-                    focus,
-                    grade: summary.get_grade.clone(),
-                    get_fn,
-                    put_fn,
-                    get_param,
-                    get_body,
-                    put_state_param,
-                    put_value_param,
-                    put_value_body,
-                    summary: Arc::clone(summary), // summary: &Arc from &typed item; cheap vs prior data clone
-                    provenance: decl.span,
-                });
+                    let review_fn = if summary.put_writes.is_empty() {
+                        "".into()
+                    } else {
+                        summary
+                            .put_writes
+                            .iter()
+                            .map(|r| format!("cursor.arena.{}[cursor.id] = v", r))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    };
+                    nodes.push(CgirNode::PrismLeaf {
+                        id: nid,
+                        name: decl.name.node.clone(),
+                        costate,
+                        focus,
+                        grade: summary.get_grade.clone(),
+                        preview_fn,
+                        review_fn,
+                        preview_param,
+                        preview_body,
+                        preview_returns_option,
+                        preview_wrap_some,
+                        review_state_param: Some(review_state_param),
+                        review_value_param: Some(review_value_param),
+                        review_value_body: Some(review_value_body),
+                        summary: Arc::clone(summary),
+                        provenance: decl.span,
+                        m7_reserved: false,
+                    });
+                } else {
+                    // real from summary per ch10.9 (OpticLeaf from named optic + summary)
+                    let get_fn = if summary.get_reads.is_empty() {
+                        "cursor.arena".into()
+                    } else {
+                        summary
+                            .get_reads
+                            .iter()
+                            .map(|r| format!("cursor.arena.{}[cursor.id]", r))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    };
+                    let put_fn = if summary.put_writes.is_empty() {
+                        "".into()
+                    } else {
+                        summary
+                            .put_writes
+                            .iter()
+                            .map(|r| format!("cursor.arena.{}[cursor.id] = v", r))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    };
+                    let get = decl.get.as_ref().expect("optic leaf requires get clause");
+                    let get_param = get.param.node.clone();
+                    let get_body = Arc::new(validate_optic_body_expr(
+                        lower_optic_get_body(&get_param, &get.body),
+                        &region_map,
+                    ));
+                    let (put_state_param, put_value_param, put_value_body) =
+                        if let Some(put) = &decl.put {
+                            (
+                                Some(put.state_param.node.clone()),
+                                Some(put.value_param.node.clone()),
+                                Some(Arc::new(validate_optic_body_expr(
+                                    lower_optic_put_value_body(
+                                        &put.state_param.node,
+                                        &put.value_param.node,
+                                        &put.body,
+                                    ),
+                                    &region_map,
+                                ))),
+                            )
+                        } else {
+                            (None, None, None)
+                        };
+                    nodes.push(CgirNode::OpticLeaf {
+                        id: nid,
+                        name: decl.name.node.clone(),
+                        costate,
+                        focus,
+                        grade: summary.get_grade.clone(),
+                        get_fn,
+                        put_fn,
+                        get_param,
+                        get_body,
+                        put_state_param,
+                        put_value_param,
+                        put_value_body,
+                        summary: Arc::clone(summary),
+                        provenance: decl.span,
+                    });
+                }
                 optic_leaf_ids.insert(decl.name.node.clone(), nid);
+                // resolved_optics: last-wins on duplicate names (let aliases overwrite).
                 resolved_optics.insert(decl.name.node.clone(), nid);
                 prov.insert(
                     nid,
@@ -437,10 +765,34 @@ pub fn build(
                         );
                     }
                 }
-                hir::HirOptic::Seq { .. } => {
+                hir::HirOptic::Seq { span, .. } => {
                     if let Some(cid) =
                         build_seq_chain(optic, &mut nodes, &optic_leaf_ids, &mut id, &mut prov)
                     {
+                        let probe = CgirGraph {
+                            nodes: nodes.clone(),
+                            roots: vec![],
+                            provenance_index: prov.clone(),
+                            resolved_optics: resolved_optics.clone(),
+                            region_map: region_map.clone(),
+                        };
+                        if let Some(prism_leaf) = compose_chain_prism_leaf(&probe, cid) {
+                            let err_span = probe
+                                .nodes
+                                .get(prism_leaf as usize)
+                                .map(node_span)
+                                .unwrap_or(*span);
+                            return Err(vec![optic_diagnostics::cgir_diag(
+                                optic_diagnostics::CGIR_UNSUPPORTED_EXPR,
+                                err_span,
+                                "compose chain with PrismLeaf is not supported in narrow v0",
+                                serde_json::json!({
+                                    "compose_id": cid,
+                                    "leaf_id": prism_leaf,
+                                    "reason": "prism_in_compose",
+                                }),
+                            )]);
+                        }
                         optic_leaf_ids.insert(name.clone(), cid);
                         resolved_optics.insert(name.clone(), cid);
                     }
@@ -486,6 +838,23 @@ pub fn build(
                             resolved_optics: resolved_optics.clone(),
                             region_map: region_map.clone(),
                         };
+                        if let Some(prism_leaf) = compose_chain_prism_leaf(&probe, nid) {
+                            let span = probe
+                                .nodes
+                                .get(prism_leaf as usize)
+                                .map(node_span)
+                                .unwrap_or(q.span);
+                            return Err(vec![optic_diagnostics::cgir_diag(
+                                optic_diagnostics::CGIR_UNSUPPORTED_EXPR,
+                                span,
+                                "compose chain with PrismLeaf is not supported in narrow v0",
+                                serde_json::json!({
+                                    "compose_id": nid,
+                                    "leaf_id": prism_leaf,
+                                    "reason": "prism_in_compose",
+                                }),
+                            )]);
+                        }
                         if let Some((span, reason, leaf_id)) =
                             compose_chain_unsupported_body(&probe, nid)
                         {
@@ -772,18 +1141,35 @@ impl CgirNode {
             CgirNode::OpticLeaf { grade, .. }
             | CgirNode::Compose { grade, .. }
             | CgirNode::Product { grade, .. }
-            | CgirNode::ProductFlat { grade, .. } => grade.clone(),
+            | CgirNode::ProductFlat { grade, .. }
+            | CgirNode::PrismLeaf { grade, .. }
+            | CgirNode::TraversalLeaf { grade, .. } => grade.clone(),
             _ => default_grade_v0(),
         }
     }
 
-    fn summary(&self) -> Option<&Arc<hir::OpticSummary>> {
-        if let CgirNode::OpticLeaf { summary, .. } = self {
-            Some(summary)
-        } else {
-            None
+    /// OpticSummary on leaf nodes (OpticLeaf, PrismLeaf, TraversalLeaf).
+    pub fn summary(&self) -> Option<&Arc<hir::OpticSummary>> {
+        match self {
+            CgirNode::OpticLeaf { summary, .. }
+            | CgirNode::PrismLeaf { summary, .. }
+            | CgirNode::TraversalLeaf { summary, .. } => Some(summary),
+            _ => None,
         }
     }
+}
+
+/// Alias for [`CgirNode::summary`] (graph-agnostic node lookup).
+pub fn node_summary(node: &CgirNode) -> Option<&Arc<hir::OpticSummary>> {
+    node.summary()
+}
+
+/// Resolve a leaf's OpticSummary by graph node id.
+pub fn leaf_summary_by_id<'a>(
+    graph: &'a CgirGraph,
+    id: NodeId,
+) -> Option<&'a hir::OpticSummary> {
+    graph.nodes.get(id as usize)?.summary().map(|s| s.as_ref())
 }
 
 pub fn format_hir_expr(e: &hir::HirExpr) -> String {
@@ -849,6 +1235,9 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
         if root as usize >= n {
             return Err(format!("root {root} out of bounds (nodes={n})"));
         }
+    }
+    if let Some(v) = find_m7_violation(g) {
+        return Err(m7_violation_err(&v));
     }
     for (idx, node) in g.nodes.iter().enumerate() {
         match node {
@@ -1079,12 +1468,7 @@ fn cgir_structural_children(node: &CgirNode) -> Vec<NodeId> {
     }
 }
 
-fn acyclic_dfs(
-    g: &CgirGraph,
-    n: usize,
-    u: usize,
-    state: &mut [u8],
-) -> Result<(), String> {
+fn acyclic_dfs(g: &CgirGraph, n: usize, u: usize, state: &mut [u8]) -> Result<(), String> {
     if state[u] == 1 {
         return Err(format!("node {u}: cycle in structural CGIR edges"));
     }
@@ -1161,8 +1545,90 @@ pub fn node_id(node: &CgirNode) -> NodeId {
         | CgirNode::QueryGet { id, .. }
         | CgirNode::QuerySet { id, .. }
         | CgirNode::QueryMap { id, .. }
-        | CgirNode::FusedLoop { id, .. } => *id,
+        | CgirNode::FusedLoop { id, .. }
+        | CgirNode::PrismLeaf { id, .. }
+        | CgirNode::TraversalLeaf { id, .. }
+        | CgirNode::Tap { id, .. }
+        | CgirNode::Record { id, .. } => *id,
     }
+}
+
+fn format_node_kind(node: &CgirNode) -> String {
+    match node {
+        CgirNode::OpticLeaf { name, .. } => format!("OpticLeaf({name})"),
+        CgirNode::Compose { lhs, rhs, .. } => format!("Compose({lhs},{rhs})"),
+        CgirNode::Product {
+            lhs,
+            rhs,
+            alias_safe,
+            ..
+        } => format!("Product({lhs},{rhs},alias_safe={alias_safe})"),
+        CgirNode::ProductFlat {
+            children,
+            alias_safe,
+            ..
+        } => format!("ProductFlat({children:?},alias_safe={alias_safe})"),
+        CgirNode::QueryGet { optic_name, .. } => format!("QueryGet({optic_name})"),
+        CgirNode::QuerySet {
+            optic_name,
+            value_repr,
+            ..
+        } => format!("QuerySet({optic_name}, val={value_repr})"),
+        CgirNode::QueryMap { optic_name, .. } => format!("QueryMap({optic_name})"),
+        CgirNode::FusedLoop {
+            original_ids,
+            compose_body,
+            ..
+        } => {
+            if let Some(b) = compose_body {
+                format!(
+                    "FusedLoop(orig={original_ids:?},compose={},{})",
+                    b.lhs, b.rhs
+                )
+            } else {
+                format!("FusedLoop(orig={original_ids:?})")
+            }
+        }
+        CgirNode::PrismLeaf {
+            name, m7_reserved, ..
+        } => format!("PrismLeaf({name},m7_reserved={m7_reserved})"),
+        CgirNode::TraversalLeaf {
+            name, m7_reserved, ..
+        } => format!("TraversalLeaf({name},m7_reserved={m7_reserved})"),
+        CgirNode::Tap {
+            optic_name,
+            label,
+            m7_reserved,
+            ..
+        } => format!("Tap({optic_name},{label},m7_reserved={m7_reserved})"),
+        CgirNode::Record {
+            optic_name,
+            event,
+            m7_reserved,
+            ..
+        } => format!("Record({optic_name},{event},m7_reserved={m7_reserved})"),
+    }
+}
+
+/// Stable single-node CGIR dump (for `dump-cgir --node`).
+pub fn dump_node_pretty(g: &CgirGraph, id: NodeId) -> String {
+    let Some(node) = find_node_by_id(g, id) else {
+        return format!("node id {id} not found\n");
+    };
+    let kind = format_node_kind(node);
+    let prov = g
+        .provenance_index
+        .get(&id)
+        .map(|p| format!("{:?}", p.reason))
+        .unwrap_or_else(|| "none".into());
+    let mut out = format!("node id={id} {kind}\n  provenance={prov}\n");
+    if let CgirNode::OpticLeaf { summary, name, .. } = node {
+        out.push_str(&format!(
+            "  summary({name}): costate={} focus={}\n",
+            summary.costate, summary.focus
+        ));
+    }
+    out
 }
 
 pub fn dump_pretty(g: &CgirGraph) -> String {
@@ -1173,48 +1639,7 @@ pub fn dump_pretty(g: &CgirGraph) -> String {
         g.roots
     ));
     for (i, node) in g.nodes.iter().enumerate() {
-        let kind = match node {
-            CgirNode::OpticLeaf { name, .. } => format!("OpticLeaf({name})"),
-            CgirNode::Compose { lhs, rhs, .. } => format!("Compose({lhs},{rhs})"),
-            CgirNode::Product {
-                lhs,
-                rhs,
-                alias_safe,
-                ..
-            } => {
-                format!("Product({lhs},{rhs},alias_safe={alias_safe})")
-            }
-            CgirNode::ProductFlat {
-                children,
-                alias_safe,
-                ..
-            } => {
-                format!("ProductFlat({children:?},alias_safe={alias_safe})")
-            }
-            CgirNode::QueryGet { optic_name, .. } => format!("QueryGet({optic_name})"),
-            CgirNode::QuerySet {
-                optic_name,
-                value_repr,
-                ..
-            } => {
-                format!("QuerySet({optic_name}, val={value_repr})")
-            }
-            CgirNode::QueryMap { optic_name, .. } => format!("QueryMap({optic_name})"),
-            CgirNode::FusedLoop {
-                original_ids,
-                compose_body,
-                ..
-            } => {
-                if let Some(b) = compose_body {
-                    format!(
-                        "FusedLoop(orig={original_ids:?},compose={},{})",
-                        b.lhs, b.rhs
-                    )
-                } else {
-                    format!("FusedLoop(orig={original_ids:?})")
-                }
-            }
-        };
+        let kind = format_node_kind(node);
         let nid = node_id(node);
         let prov = g
             .provenance_index
@@ -1267,6 +1692,7 @@ mod tests {
                     body: optic_syntax::Expr::Atom(optic_syntax::AtomExpr::Ident(
                         optic_syntax::Spanned::new("s".into(), optic_syntax::Span::dummy()),
                     )),
+                    partial: false,
                     span: optic_syntax::Span::dummy(),
                 }),
                 put: None,
@@ -1459,7 +1885,7 @@ mod tests {
         // ch10.9: Arc<OpticSummary> shared from typed HIR into OpticLeaf without deep clone.
         let arc_sum = std::sync::Arc::new(hir::OpticSummary {
             name: Some("H".into()),
-            costate: "Entities".into(),
+            costate: "E".into(),
             focus: "f32".into(),
             lift: hir::PathLift::default(),
             get_reads: vec!["healths".into()],
@@ -1711,9 +2137,7 @@ mod tests {
             roots: vec![2],
             provenance_index: Default::default(),
             region_map: Default::default(),
-            resolved_optics: [("A".into(), 0), ("B".into(), 1)]
-                .into_iter()
-                .collect(),
+            resolved_optics: [("A".into(), 0), ("B".into(), 1)].into_iter().collect(),
         };
         let err = verify(&g).expect_err("cycle must fail verify");
         assert!(
@@ -1783,6 +2207,414 @@ mod tests {
                     _ => false,
                 }
             }));
+        }
+    }
+
+    fn minimal_summary(name: &str) -> Arc<hir::OpticSummary> {
+        Arc::new(hir::OpticSummary {
+            name: Some(name.into()),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            lift: hir::PathLift::default(),
+            get_reads: vec!["healths".into()],
+            put_reads: vec![],
+            put_writes: vec![],
+            get_grade: default_grade_v0(),
+            put_grade: default_grade_v0(),
+            get_determinism: hir::Determinism::Pure,
+            put_determinism: hir::Determinism::Pure,
+            serializable: true,
+            provenance: Span::dummy(),
+        })
+    }
+
+    fn leaf_graph() -> CgirGraph {
+        CgirGraph {
+            nodes: vec![CgirNode::OpticLeaf {
+                id: 42,
+                name: "HealthView".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: default_grade_v0(),
+                get_fn: String::new(),
+                put_fn: String::new(),
+                get_param: "s".into(),
+                get_body: Arc::new(hir::HirExpr::LitInt(0, Span::dummy())),
+                put_state_param: None,
+                put_value_param: None,
+                put_value_body: None,
+                summary: minimal_summary("HealthView"),
+                provenance: Span::dummy(),
+            }],
+            roots: vec![42],
+            provenance_index: Default::default(),
+            resolved_optics: [("HealthView".into(), 42)].into_iter().collect(),
+            region_map: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_is_m7_reserved_positive_and_negative() {
+        let summary = minimal_summary("AliveFilter");
+        let prism = CgirNode::PrismLeaf {
+            id: 0,
+            name: "AliveFilter".into(),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            grade: default_grade_v0(),
+            preview_fn: String::new(),
+            review_fn: String::new(),
+            preview_param: "s".into(),
+            preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+            preview_returns_option: false,
+            preview_wrap_some: false,
+            review_state_param: None,
+            review_value_param: None,
+            review_value_body: None,
+            summary: Arc::clone(&summary),
+            provenance: Span::dummy(),
+            m7_reserved: true,
+        };
+        assert!(is_m7_reserved(&prism));
+        assert_eq!(m7_reserved_kind(&prism), Some("PrismLeaf"));
+        let leaf = leaf_graph().nodes[0].clone();
+        assert!(!is_m7_reserved(&leaf));
+        assert_eq!(m7_reserved_kind(&leaf), None);
+    }
+
+    #[test]
+    fn test_find_m7_violation_detects_first_reserved_node() {
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "H".into(),
+                    label: "tap".into(),
+                    provenance: Span {
+                        source: optic_syntax::SourceId(1),
+                        start: 5,
+                        end: 10,
+                    },
+                    m7_reserved: true,
+                },
+                CgirNode::Record {
+                    id: 1,
+                    optic_name: "H".into(),
+                    event: "evt".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let v = find_m7_violation(&g).expect("Tap violation");
+        assert_eq!(v.kind, "Tap");
+        assert_eq!(v.node_id, 0);
+        assert_eq!(v.span.start, 5);
+        assert_eq!(v.reason, optic_diagnostics::M7ReservedReason::Materialized);
+        assert!(find_m7_violation(&leaf_graph()).is_none());
+    }
+
+    #[test]
+    fn test_dump_node_pretty_stable_format() {
+        let g = leaf_graph();
+        let out = dump_node_pretty(&g, 42);
+        assert!(out.contains("node id=42 OpticLeaf(HealthView)"));
+        assert!(out.contains("summary(HealthView)"));
+        assert!(!out.contains("#<"));
+    }
+
+    #[test]
+    fn test_verify_rejects_all_m7_reserved_variants() {
+        let summary = minimal_summary("AliveFilter");
+        let cases: Vec<(&str, CgirNode)> = vec![
+            (
+                "PrismLeaf",
+                CgirNode::PrismLeaf {
+                    id: 0,
+                    name: "AliveFilter".into(),
+                    costate: "Entities".into(),
+                    focus: "f32".into(),
+                    grade: default_grade_v0(),
+                    preview_fn: String::new(),
+                    review_fn: String::new(),
+                    preview_param: "s".into(),
+                    preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                    preview_returns_option: false,
+            preview_wrap_some: false,
+                    review_state_param: None,
+                    review_value_param: None,
+                    review_value_body: None,
+                    summary: Arc::clone(&summary),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ),
+            (
+                "TraversalLeaf",
+                CgirNode::TraversalLeaf {
+                    id: 0,
+                    name: "AllHealths".into(),
+                    costate: "Entities".into(),
+                    focus: "f32".into(),
+                    grade: default_grade_v0(),
+                    get_fn: String::new(),
+                    set_fn: String::new(),
+                    get_param: "s".into(),
+                    get_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                    set_state_param: None,
+                    set_value_param: None,
+                    set_value_body: None,
+                    summary: Arc::clone(&summary),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ),
+            (
+                "Tap",
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "HealthView".into(),
+                    label: "tap".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ),
+            (
+                "Record",
+                CgirNode::Record {
+                    id: 0,
+                    optic_name: "HealthView".into(),
+                    event: "evt".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ),
+        ];
+        for (kind, node) in cases {
+            let id = node_id(&node);
+            let g = CgirGraph {
+                nodes: vec![node],
+                roots: vec![id],
+                provenance_index: Default::default(),
+                resolved_optics: Default::default(),
+                region_map: Default::default(),
+            };
+            let err = verify(&g).expect_err("{kind} must be rejected");
+            assert!(err.contains("CGI-006"), "{kind}: {err}");
+            assert!(err.contains(kind));
+            assert!(err.contains(&format!("node {id}")));
+            let diag = verify_to_diagnostic(&g).expect_err("diag");
+            assert_eq!(diag.code, optic_diagnostics::CGIR_M7_RESERVED);
+            assert_eq!(diag.evidence["kind"].as_str(), Some(kind));
+            assert_eq!(diag.evidence["node_id"].as_u64(), Some(id as u64));
+            assert_eq!(diag.evidence["reason"], "materialized");
+            let expected_milestone = m7_reserved_milestone(kind);
+            assert_eq!(
+                diag.evidence["milestone"].as_str(),
+                Some(expected_milestone)
+            );
+        }
+    }
+
+    #[test]
+    fn test_verify_rejects_m7_reserved_without_flag() {
+        let g = CgirGraph {
+            nodes: vec![CgirNode::Tap {
+                id: 0,
+                optic_name: "HealthView".into(),
+                label: "tap".into(),
+                provenance: Span::dummy(),
+                m7_reserved: false,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let err = verify(&g).expect_err("m7_reserved=false must fail");
+        assert!(err.contains("CGI-006"));
+        assert!(err.contains("missing m7_reserved=true"));
+        assert!(err.contains("M8 reserved node `Tap`"));
+        let diag = verify_to_diagnostic(&g).expect_err("structured diag");
+        assert_eq!(diag.code, optic_diagnostics::CGIR_M7_RESERVED);
+        assert_eq!(diag.evidence["reason"], "missing_m7_reserved_flag");
+        assert_eq!(diag.evidence["milestone"], "M8");
+    }
+
+    #[test]
+    fn test_verify_allows_lowered_prism_leaf() {
+        let summary = minimal_summary("AliveFilter");
+        let g = CgirGraph {
+            nodes: vec![CgirNode::PrismLeaf {
+                id: 0,
+                name: "AliveFilter".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: default_grade_v0(),
+                preview_fn: "Some(cursor.arena.healths[cursor.id])".into(),
+                review_fn: "cursor.arena.healths[cursor.id] = v".into(),
+                preview_param: "s".into(),
+                preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                preview_returns_option: false,
+            preview_wrap_some: false,
+                review_state_param: Some("s".into()),
+                review_value_param: Some("a".into()),
+                review_value_body: Some(Arc::new(hir::HirExpr::LitInt(2, Span::dummy()))),
+                summary,
+                provenance: Span::dummy(),
+                m7_reserved: false,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        verify(&g).expect("lowered PrismLeaf must pass verify");
+        verify_to_diagnostic(&g).expect("lowered PrismLeaf must not emit CGI-006");
+    }
+
+    #[test]
+    fn test_dump_cgir_check_path_maps_cgi006() {
+        let summary = minimal_summary("AliveFilter");
+        let g = CgirGraph {
+            nodes: vec![CgirNode::PrismLeaf {
+                id: 0,
+                name: "AliveFilter".into(),
+                costate: "Entities".into(),
+                focus: "f32".into(),
+                grade: default_grade_v0(),
+                preview_fn: String::new(),
+                review_fn: String::new(),
+                preview_param: "s".into(),
+                preview_body: Arc::new(hir::HirExpr::LitInt(1, Span::dummy())),
+                preview_returns_option: false,
+            preview_wrap_some: false,
+                review_state_param: None,
+                review_value_param: None,
+                review_value_body: None,
+                summary,
+                provenance: Span::dummy(),
+                m7_reserved: true,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let diag = verify_to_diagnostic(&g).expect_err("dump-cgir --check equivalent");
+        assert_eq!(diag.code, optic_diagnostics::CGIR_M7_RESERVED);
+    }
+
+    #[test]
+    fn test_dump_pretty_m7_reserved_variants() {
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::Tap {
+                    id: 0,
+                    optic_name: "H".into(),
+                    label: "tap".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+                CgirNode::Record {
+                    id: 1,
+                    optic_name: "H".into(),
+                    event: "evt".into(),
+                    provenance: Span::dummy(),
+                    m7_reserved: true,
+                },
+            ],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let out = dump_pretty(&g);
+        assert!(out.contains("Tap(H,tap,m7_reserved=true)"));
+        assert!(out.contains("Record(H,evt,m7_reserved=true)"));
+    }
+
+    #[test]
+    fn test_build_rejects_compose_with_prism_leaf() {
+        let src = r#"
+data Entities { healths: SoA<f32> }
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get s => s.healths[s.id]
+    put (s, v) => { s.healths[s.id] = v }
+}
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+let chain = HealthView >>> AliveFilter;
+fn main() { entities.query(chain).map(|h| h); }
+"#;
+        let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
+        let hirp = optic_hir::lower(prog).expect("lower");
+        let (typed, _) = optic_typeck::typeck_pass(hirp);
+        let err = build(&typed).expect_err("compose+prism must fail CGIR build");
+        let diag = err
+            .iter()
+            .find(|d| d.code == optic_diagnostics::CGIR_UNSUPPORTED_EXPR)
+            .expect("CGI-003");
+        assert_eq!(diag.evidence["reason"], "prism_in_compose");
+    }
+
+    #[test]
+    fn test_resolve_cgir_node_name_before_numeric() {
+        let g = leaf_graph();
+        assert_eq!(resolve_cgir_node(&g, "HealthView").expect("name"), 42);
+        assert_eq!(resolve_cgir_node(&g, "42").expect("numeric"), 42);
+        assert_eq!(resolve_cgir_node(&g, "042").expect("leading zero"), 42);
+    }
+
+    #[test]
+    fn test_resolve_cgir_node_unknown_name_vs_id() {
+        let g = leaf_graph();
+        match resolve_cgir_node(&g, "Missing") {
+            Err(ResolveCgirNodeError::UnknownName { candidates }) => {
+                assert!(candidates.contains(&"HealthView".into()));
+            }
+            other => panic!("expected UnknownName, got {other:?}"),
+        }
+        match resolve_cgir_node(&g, "99999") {
+            Err(ResolveCgirNodeError::UnknownId { id }) => assert_eq!(id, 99999),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_cgir_node_edge_cases() {
+        let g = leaf_graph();
+        assert!(matches!(
+            resolve_cgir_node(&g, ""),
+            Err(ResolveCgirNodeError::UnknownName { .. })
+        ));
+        assert!(matches!(
+            resolve_cgir_node(&g, " HealthView"),
+            Err(ResolveCgirNodeError::UnknownName { .. })
+        ));
+        let long = "x".repeat(MAX_NODE_NAME_BYTES + 1);
+        assert!(matches!(
+            resolve_cgir_node(&g, &long),
+            Err(ResolveCgirNodeError::NameTooLong)
+        ));
+    }
+
+    #[test]
+    fn test_resolve_cgir_node_stale_name_mapping() {
+        let mut g = leaf_graph();
+        g.resolved_optics.insert("Stale".into(), 99);
+        match resolve_cgir_node(&g, "Stale") {
+            Err(ResolveCgirNodeError::StaleName { name, id }) => {
+                assert_eq!(name, "Stale");
+                assert_eq!(id, 99);
+            }
+            other => panic!("expected StaleName for stale mapping, got {other:?}"),
         }
     }
 }

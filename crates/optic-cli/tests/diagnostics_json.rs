@@ -242,37 +242,65 @@ fn check_json_cgi004_multi_query_matches_fixture() {
 
 #[test]
 fn check_json_typ001_unknown_type_matches_fixture() {
-    assert_json_golden("typ001_unknown_type.opt", "typ001_unknown_type.json", "TYP-001");
+    assert_json_golden(
+        "typ001_unknown_type.opt",
+        "typ001_unknown_type.json",
+        "TYP-001",
+    );
 }
 
 #[test]
 fn check_json_typ002_body_mismatch_matches_fixture() {
-    assert_json_golden("typ002_body_mismatch.opt", "typ002_body_mismatch.json", "TYP-002");
+    assert_json_golden(
+        "typ002_body_mismatch.opt",
+        "typ002_body_mismatch.json",
+        "TYP-002",
+    );
 }
 
 #[test]
 fn check_json_typ003_grade_syntax_matches_fixture() {
-    assert_json_golden("typ003_grade_syntax.opt", "typ003_grade_syntax.json", "TYP-003");
+    assert_json_golden(
+        "typ003_grade_syntax.opt",
+        "typ003_grade_syntax.json",
+        "TYP-003",
+    );
 }
 
 #[test]
 fn check_json_typ003_unknown_dim_matches_fixture() {
-    assert_json_golden("typ003_unknown_dim.opt", "typ003_unknown_dim.json", "TYP-003");
+    assert_json_golden(
+        "typ003_unknown_dim.opt",
+        "typ003_unknown_dim.json",
+        "TYP-003",
+    );
 }
 
 #[test]
 fn check_json_typ004_uninferable_matches_fixture() {
-    assert_json_golden("typ004_uninferable_body.opt", "typ004_uninferable_body.json", "TYP-004");
+    assert_json_golden(
+        "typ004_uninferable_body.opt",
+        "typ004_uninferable_body.json",
+        "TYP-004",
+    );
 }
 
 #[test]
 fn check_json_typ001_unknown_focus_matches_fixture() {
-    assert_json_golden("typ001_unknown_focus.opt", "typ001_unknown_focus.json", "TYP-001");
+    assert_json_golden(
+        "typ001_unknown_focus.opt",
+        "typ001_unknown_focus.json",
+        "TYP-001",
+    );
 }
 
 #[test]
 fn check_json_typ002_put_mismatch_matches_fixture() {
-    assert_json_golden("typ002_put_mismatch.opt", "typ002_put_mismatch.json", "TYP-002");
+    assert_json_golden(
+        "typ002_put_mismatch.opt",
+        "typ002_put_mismatch.json",
+        "TYP-002",
+    );
 }
 
 #[test]
@@ -348,13 +376,31 @@ fn explain_focus_json_typ002_fail_matches_fixture() {
 }
 
 #[test]
-fn explain_focus_json_typ010_fail_matches_fixture() {
-    assert_explain_focus_json_golden(
-        "unsupported_prism.opt",
-        "AliveFilter",
-        "explain_focus_typ010_fail.json",
-        "TYP-010",
-    );
+fn explain_focus_json_alive_filter_matches_fixture() {
+    let assert = opticc()
+        .args([
+            "explain-focus",
+            &example("alive_filter.opt").to_string_lossy(),
+            "--node",
+            "AliveFilter",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let path = fixture("explain_focus_alive_filter.json");
+    let normalized = normalize_json_floats(stdout.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing explain-focus golden {} — run OPTIC_UPDATE_GOLDEN=1",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
 }
 
 fn assert_explain_focus_json_golden(example_file: &str, node: &str, json_name: &str, code: &str) {
@@ -387,12 +433,23 @@ fn assert_explain_focus_json_golden(example_file: &str, node: &str, json_name: &
 }
 
 #[test]
-fn check_json_unsupported_prism_matches_fixture() {
-    assert_json_golden(
-        "unsupported_prism.opt",
-        "unsupported_prism.json",
+fn check_json_compose_prism_cgi003_matches_fixture() {
+    assert_json_golden("compose_prism.opt", "cgi003_prism_compose.json", "CGI-003");
+}
+
+#[test]
+fn explain_focus_json_typ010_fail_matches_fixture() {
+    assert_explain_focus_json_golden(
+        "unsupported_traversal.opt",
+        "AllHealths",
+        "explain_focus_typ010_fail.json",
         "TYP-010",
     );
+}
+
+#[test]
+fn check_json_unsupported_prism_gra110_matches_fixture() {
+    assert_json_golden("unsupported_prism.opt", "unsupported_prism.json", "GRA-110");
 }
 
 #[test]
@@ -407,6 +464,83 @@ fn check_json_unsupported_traversal_matches_fixture() {
 #[test]
 fn check_json_host_boundary_matches_fixture() {
     assert_json_golden("host_boundary.opt", "host_boundary.json", "TYP-010");
+}
+
+#[test]
+fn cgi006_m7_reserved_structured_diag_matches_fixture() {
+    use optic_cgir::{verify_to_diagnostic, CgirGraph, CgirNode};
+    use std::sync::Arc;
+
+    let summary = Arc::new(optic_hir::OpticSummary {
+        name: Some("AliveFilter".into()),
+        costate: "Entities".into(),
+        focus: "f32".into(),
+        lift: optic_hir::PathLift::default(),
+        get_reads: vec!["healths".into()],
+        put_reads: vec![],
+        put_writes: vec![],
+        get_grade: optic_hir::ConcreteGrade {
+            cache: 1,
+            ownership: optic_hir::OwnershipDim {
+                share: optic_hir::Rational::one(),
+                read_only: false,
+                must_use: false,
+            },
+        },
+        put_grade: optic_hir::ConcreteGrade {
+            cache: 1,
+            ownership: optic_hir::OwnershipDim {
+                share: optic_hir::Rational::one(),
+                read_only: false,
+                must_use: false,
+            },
+        },
+        get_determinism: optic_hir::Determinism::Pure,
+        put_determinism: optic_hir::Determinism::Pure,
+        serializable: true,
+        provenance: optic_syntax::Span::dummy(),
+    });
+    let g = CgirGraph {
+        nodes: vec![CgirNode::PrismLeaf {
+            id: 0,
+            name: "AliveFilter".into(),
+            costate: "Entities".into(),
+            focus: "f32".into(),
+            grade: summary.get_grade.clone(),
+            preview_fn: String::new(),
+            review_fn: String::new(),
+            preview_param: "s".into(),
+            preview_body: Arc::new(optic_hir::HirExpr::LitInt(1, optic_syntax::Span::dummy())),
+            preview_returns_option: false,
+            preview_wrap_some: false,
+            review_state_param: None,
+            review_value_param: None,
+            review_value_body: None,
+            summary,
+            provenance: optic_syntax::Span::dummy(),
+            m7_reserved: true,
+        }],
+        roots: vec![0],
+        provenance_index: Default::default(),
+        resolved_optics: Default::default(),
+        region_map: Default::default(),
+    };
+    let diag = verify_to_diagnostic(&g).expect_err("PrismLeaf must fail verify");
+    assert_eq!(diag.code, "CGI-006");
+    let out = optic_diagnostics::diagnostics_to_json(&[diag]);
+    let path = fixture("cgi006_prism_leaf.json");
+    let normalized = normalize_json_floats(out.trim());
+    if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {
+        std::fs::write(&path, format!("{normalized}\n")).expect("write json golden");
+    } else {
+        assert!(
+            path.exists(),
+            "missing diagnostic golden {} — run OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli diagnostics_json",
+            path.display()
+        );
+        let expected = std::fs::read_to_string(&path).expect("read json golden");
+        assert_eq!(normalized, normalize_json_floats(expected.trim()));
+    }
 }
 
 #[test]
@@ -437,7 +571,6 @@ fn check_json_goldens_include_ranked_fixes_for_cataloged_codes() {
         ("typ003_grade_syntax.opt", "TYP-003"),
         ("typ003_unknown_dim.opt", "TYP-003"),
         ("typ004_uninferable_body.opt", "TYP-004"),
-        ("unsupported_prism.opt", "TYP-010"),
         ("unsupported_traversal.opt", "TYP-010"),
         ("host_boundary.opt", "TYP-010"),
     ];

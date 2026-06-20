@@ -30,7 +30,7 @@ Library entrypoints (`crates/optic`):
 | `compile_*_with_limit` | Same with explicit source byte cap |
 | `explain_grade_from_src` | Declared vs inferred grade (fails on target TYP-*; lenient for other items) |
 | `explain_focus_from_src` | PathLift / root-path report (per-node lenience for sibling errors) |
-| `collect_unsupported_surface` | Early TYP-010 rejection for prism/traversal/unsafe/extern |
+| `collect_unsupported_surface` | Early TYP-010 rejection for traversal/unsafe/extern |
 | `parse_src`, `lower_src`, `dump_ast_src`, `dump_hir_src` | Front-end helpers returning `Diagnostic` |
 | `Diagnostic` | Structured diagnostic from `optic-diagnostics` |
 | `DEFAULT_MAX_SOURCE_BYTES` | 4 MiB cap (matches CLI) |
@@ -46,8 +46,8 @@ Appendix B names the binary `optic`; this repo ships **`opticc`** as the CLI cra
 | `check file.opt [--json]` | Full pipeline through codegen dry-run |
 | `transpile file.opt [-o out.rs]` | Emit Rust |
 | `dump-tokens` / `dump-ast` / `dump-hir` | M0–M1 snapshots |
-| `dump-cgir [--before-fusion] [--check] [--node N]` | CGIR inspection (**numeric NodeId only**) |
-| `dump-summary [--node NAME\|N]` | OpticSummary: **name lookup first**, then numeric CGIR node id fallback |
+| `dump-cgir [--before-fusion] [--check] [--node NAME\|N]` | CGIR inspection: **optic/let name via `resolved_optics` first**, then numeric NodeId. Unknown names: EXP-001 with `resolved_optics` candidates (dump-summary uses HIR binding names). |
+| `dump-summary [--node NAME\|N]` | OpticSummary: **HIR name lookup first**, then numeric CGIR node id fallback |
 | `explain-grade file.opt --node NAME [--json]` | Declared vs inferred grade + regions |
 | `explain-focus file.opt --node NAME [--json]` | PathLift prefix + root-path for optic/let |
 | `explain CODE` | Diagnostic catalog entry |
@@ -64,16 +64,17 @@ Appendix B names the binary `optic`; this repo ships **`opticc`** as the CLI cra
 | PAR-010+ | parse | Reserved for future parse subcodes (v0 uses PAR-001 for syntax + depth) |
 | RES-001 | resolve | Unknown binding/optic |
 | HIR-101 | resolve | Duplicate SoA costate |
-| EXP-001 | type | `explain-grade` / `explain-focus`: unknown `--node` |
+| EXP-001 | type | Unknown `--node` name (`explain-grade`, `explain-focus`, `dump-summary`, `dump-cgir`; numeric id misses use plain `node id N not found`) |
 | TYP-001 | type | Unknown costate/focus type |
 | TYP-002 | type | Optic body type ≠ declared focus |
 | TYP-003 | type | Invalid grade annotation syntax |
 | TYP-004 | type | Cannot infer optic body type (v0) |
-| TYP-010 | type | Prism / traversal / host / foreign boundary syntax deferred to M7+ |
+| TYP-010 | type | Traversal / host / foreign boundary syntax deferred to M7+ |
 | GRA-110 | grade | Declared CacheGrade tighter than inferred |
 | GRA-104 | grade | Sequential `>>>` exceeds cache bound |
 | ALI-201 | alias | Product alias conflict |
 | CGI-001–005 | cgir/codegen | Graph/build/codegen failures |
+| CGI-006 | cgir | Unstubs M7/M8 reserved node (`TraversalLeaf`/`Tap`/`Record` or stub `PrismLeaf`) |
 | FUS-501 | fusion | Compose blocked — intermediate escapes |
 | FUS-502 | fusion | Compose blocked — legality precondition |
 
@@ -97,6 +98,18 @@ cargo run -p optic-cli -- bench --update
 ```
 
 Review diffs before commit. See `fixtures/README.md`.
+
+## M7 prism (done)
+
+- `GradedPrism` preview/review: HIR summaries → `PrismLeaf` (`m7_reserved=false`) → Rust codegen
+- `verify` allows properly lowered `PrismLeaf`; still rejects stub `PrismLeaf`, `TraversalLeaf`, `Tap`, `Record` (**CGI-006**)
+- Acceptance: `examples/alive_filter.opt` (tokens/ast/hir/cgir/rust/bench + `run` execution)
+
+## M7+ deferred
+
+- `GradedTraversal` lowering + traversal SIMD bridge
+- `unsafe optic` / `extern` host boundaries (**TYP-010**)
+- M8 observability (`Tap`/`Record`) — see `docs/observability-v0.md`
 
 ## Verification
 

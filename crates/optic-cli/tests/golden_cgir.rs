@@ -128,3 +128,43 @@ fn golden_cgir_pre_nested_field_triple() {
 fn golden_cgir_post_nested_field_triple() {
     assert_golden("cgir/post", "nested_field_triple.opt", false);
 }
+
+#[test]
+fn golden_cgir_pre_alive_filter() {
+    assert_golden("cgir/pre", "alive_filter.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_alive_filter() {
+    assert_golden("cgir/post", "alive_filter.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_prism_get() {
+    assert_golden("cgir/pre", "prism_get.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_prism_get() {
+    assert_golden("cgir/post", "prism_get.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_prism_set() {
+    assert_golden("cgir/pre", "prism_set.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_prism_set() {
+    assert_golden("cgir/post", "prism_set.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_partial_prism() {
+    assert_golden("cgir/pre", "partial_prism.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_partial_prism() {
+    assert_golden("cgir/post", "partial_prism.opt", false);
+}
