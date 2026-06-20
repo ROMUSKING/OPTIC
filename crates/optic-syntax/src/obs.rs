@@ -7,6 +7,7 @@
 pub const MAX_OBS_HOOK_LABEL_BYTES: usize = 128;
 
 /// Validate a decoded observability hook label (tap/record/profile/replay args).
+/// Also used defense-in-depth for unsafe/extern names on boundary surfaces (host/foreign lowering prep).
 pub fn validate_obs_hook_label(label: &str) -> Result<(), &'static str> {
     if label.is_empty() {
         return Err("observability hook label must not be empty");
@@ -73,5 +74,12 @@ mod tests {
     #[test]
     fn decode_rejects_include_escape() {
         assert!(decode_obs_hook_string_lit("\"a\\nb\"").is_err());
+    }
+
+    #[test]
+    fn validate_boundary_names_as_defense() {
+        // prep for unsafe/extern body/name sanitization (hook label policy reused)
+        assert!(validate_obs_hook_label("HostCopy").is_ok());
+        assert!(validate_obs_hook_label("host_helper").is_ok());
     }
 }

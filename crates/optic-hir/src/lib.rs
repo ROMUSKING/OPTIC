@@ -34,7 +34,7 @@ pub struct Rational {
 
 impl Rational {
     pub fn new(num: i64, den: u64) -> Self {
-        let g = gcd(num.abs() as u64, den);
+        let g = gcd(num.unsigned_abs(), den);
         Rational {
             num: num / g as i64,
             den: den / g,
@@ -106,9 +106,7 @@ fn lift_region(lift: &PathLift, parent_column: Option<&str>, region: &str) -> Re
         parts.push(col.to_string());
     }
     parts.extend(lift.prefix.iter().cloned());
-    if lift.prefix.last().map(|s| s.as_str()) != Some(region) {
-        parts.push(region.to_string());
-    } else if parts.is_empty() {
+    if lift.prefix.last().map(|s| s.as_str()) != Some(region) || parts.is_empty() {
         parts.push(region.to_string());
     }
     if parts.len() == 1 {
@@ -379,18 +377,13 @@ pub struct OpticSummary {
     pub provenance: Span,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Determinism {
+    #[default]
     Pure,
     Seeded,
     Recorded,
     Opaque,
-}
-
-impl Default for Determinism {
-    fn default() -> Self {
-        Determinism::Pure
-    }
 }
 
 /// HIR nodes (ch8 sketches).
@@ -487,6 +480,7 @@ pub struct HirProgram {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum HirItem {
     Data(syn::DataDecl),
     Optic {
@@ -536,9 +530,12 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
             }
             syn::Item::Optic(decl) => {
                 let decl = *decl;
-                if decl.is_unsupported_v0() {
-                    continue;
-                }
+                // Host/foreign boundary lowering prep (unsafe optic): lower to HIR Optic item
+                // so CGIR/code gen path (as OpticLeaf) + summaries (effects/grades) are ready.
+                // Surface gate (TYP-010 in collect_unsupported) still rejects in narrow v0 to
+                // preserve current behavior/goldens. See PLAN §9, docs/effect-coeffect-v0.md.
+                // Extern decls remain dropped (separate lowering deferred).
+                // (debug invariant for boundary now carried through HIR lower path; CGIR gate still active)
                 let summary = build_summary_from_decl(&decl, &optic_env);
                 let arc = Arc::new(summary);
                 optic_env.insert(decl.name.node.clone(), Arc::clone(&arc));
@@ -1181,7 +1178,7 @@ fn type_expr_name(te: &syn::TypeExpr) -> String {
     }
 }
 
-fn primary_read_clause<'a>(decl: &'a syn::OpticDecl) -> Option<&'a syn::GetClause> {
+fn primary_read_clause(decl: &syn::OpticDecl) -> Option<&syn::GetClause> {
     decl.get.as_ref().or(decl.preview.as_ref())
 }
 
@@ -1387,10 +1384,8 @@ pub fn extract_grade_from_ann(g: &syn::GradeExpr) -> ConcreteGrade {
     let mut read_only = false;
     for dim in &g.dims {
         match dim {
-            syn::GradeDim::Cache { n, .. } => {
-                if let Some(v) = n {
-                    cache_ann = Some(*v as u8);
-                }
+            syn::GradeDim::Cache { n: Some(v), .. } => {
+                cache_ann = Some(*v as u8);
             }
             syn::GradeDim::Named { name, .. } => match name.as_str() {
                 "LinearGrade" => share = Rational::one(),
@@ -1401,12 +1396,10 @@ pub fn extract_grade_from_ann(g: &syn::GradeExpr) -> ConcreteGrade {
                 }
                 _ => {}
             },
-            syn::GradeDim::Ownership { r, .. } => {
-                if let Some(txt) = r {
-                    if let Some((a, b)) = txt.split_once('/') {
-                        if let (Ok(n), Ok(d)) = (a.parse::<i64>(), b.parse::<u64>()) {
-                            share = Rational::new(n, d);
-                        }
+            syn::GradeDim::Ownership { r: Some(txt), .. } => {
+                if let Some((a, b)) = txt.split_once('/') {
+                    if let (Ok(n), Ok(d)) = (a.parse::<i64>(), b.parse::<u64>()) {
+                        share = Rational::new(n, d);
                     }
                 }
             }
@@ -1553,8 +1546,10 @@ fn default_summary(name: &str) -> OpticSummary {
 pub fn dedup_regions(v: Vec<Region>) -> Vec<Region> {
     let mut out = vec![];
     let mut seen = std::collections::HashSet::new();
+    debug_assert!(v.len() <= 128, "region sets small per v0 scale");
     for r in v {
-        if seen.insert(r.clone()) {
+        if !seen.contains(&r) {
+            seen.insert(r.clone());
             out.push(r);
         }
     }

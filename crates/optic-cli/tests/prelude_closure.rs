@@ -343,6 +343,37 @@ fn explain_typ003_catalog() {
 }
 
 #[test]
+fn profile_replay_cli_arms_exercise_obs701_and_deferred() {
+    // explicit coverage for new CLI profile/replay match arms + "deferred" text
+    // arms return success (print note + OBS diag but Ok(()) ); use example() helper for reliable path
+    let out1 = opticc()
+        .args([
+            "profile",
+            &example("unsupported_profile.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let stderr1 = String::from_utf8_lossy(&out1.get_output().stderr);
+    let stdout1 = String::from_utf8_lossy(&out1.get_output().stdout);
+    let combined1 = format!("{}{}", stderr1, stdout1);
+    assert!(combined1.contains("OBS-701"));
+    assert!(combined1.contains("profile/replay deferred (OBS-701) in narrow v0"));
+
+    let out2 = opticc()
+        .args([
+            "replay",
+            &example("unsupported_replay.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let stderr2 = String::from_utf8_lossy(&out2.get_output().stderr);
+    let stdout2 = String::from_utf8_lossy(&out2.get_output().stdout);
+    let combined2 = format!("{}{}", stderr2, stdout2);
+    assert!(combined2.contains("OBS-701"));
+    assert!(combined2.contains("profile/replay deferred (OBS-701) in narrow v0"));
+}
+
+#[test]
 fn explain_cgi003_catalog() {
     let assert = opticc().args(["explain", "CGI-003"]).assert().success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);

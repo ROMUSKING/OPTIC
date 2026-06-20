@@ -105,3 +105,15 @@ for them. Use `cargo test -p optic-cli diagnostics_json` or `integration` negati
 - Single-crate tests: `cargo test -p <crate> -- --quiet`
 - Full workspace with all failures: `cargo test --workspace --no-fail-fast`
 - CGIR goldens + verify: `cargo test -p optic-cli golden_cgir`
+
+## 2026-06-20 robustness sync note
+debug_assert guards + error hardening added (see PLAN); fixtures unchanged (parity preserved). Empty src/ vestige cleaned. All docs/PLAN/fixtures/README in sync.
+
+## 2026-06-20 continuation
+- Parser depth on decls (fn/let/optic/get/put...) + body test.
+- Host HIR prep + explicit bypass coverage test (gates unchanged).
+- profile/replay CLI arms coverage + runtime stubs.
+- Sanit enforced on costate + boundary names.
+- Harness = cli (env_clear+PATH).
+- No clones, redundant asserts cleaned; PLAN/docs match code; goldens untouched.
+- This pass: depth threading complete across decls, fusion explicit for obs nodes, harness PATH no-capture match, added sanit asserts; goldens/ behavior preserved.

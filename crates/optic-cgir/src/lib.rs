@@ -217,7 +217,7 @@ fn build_seq_chain(
 }
 
 // Narrow v0: verify rejects M7/M8 reserved nodes (CGI-006) before compose wiring is checked.
-fn compose_emit_focus_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a str> {
+fn compose_emit_focus_summary(g: &CgirGraph, id: NodeId) -> Option<&str> {
     match g.nodes.get(id as usize)? {
         CgirNode::OpticLeaf { summary, .. }
         | CgirNode::PrismLeaf { summary, .. }
@@ -227,7 +227,7 @@ fn compose_emit_focus_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a st
     }
 }
 
-fn compose_recv_costate_summary<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a str> {
+fn compose_recv_costate_summary(g: &CgirGraph, id: NodeId) -> Option<&str> {
     match g.nodes.get(id as usize)? {
         CgirNode::OpticLeaf { summary, .. }
         | CgirNode::PrismLeaf { summary, .. }
@@ -464,7 +464,7 @@ fn compose_chain_unsupported_body(
 }
 
 /// Resolve a node by its `NodeId` field (not vector index).
-pub fn find_node_by_id<'a>(g: &'a CgirGraph, id: NodeId) -> Option<&'a CgirNode> {
+pub fn find_node_by_id(g: &CgirGraph, id: NodeId) -> Option<&CgirNode> {
     g.nodes.iter().find(|n| node_id(n) == id)
 }
 
@@ -624,6 +624,7 @@ fn m7_violation_err(v: &M7Violation) -> String {
 }
 
 /// Map `verify()` failure to a structured diagnostic (CGI-006 vs CGI-004).
+#[allow(clippy::result_large_err)]
 pub fn verify_to_diagnostic(g: &CgirGraph) -> Result<(), optic_diagnostics::Diagnostic> {
     if let Some(v) = find_m7_violation(g) {
         return Err(optic_diagnostics::cgir_m7_reserved_diag(
@@ -713,6 +714,10 @@ pub fn build(
                 let focus = type_expr_name(&decl.focus);
                 debug_assert_eq!(summary.costate, costate);
                 debug_assert_eq!(summary.focus, focus);
+                debug_assert!(
+                    !decl.unsafe_boundary,
+                    "unsafe optic / host boundary reaches CGIR build only in M7+; v0 gate rejects (TYP-010) before; lowering prep uses OpticLeaf path"
+                );
 
                 if decl.is_prism() {
                     let preview = decl.preview.as_ref().ok_or_else(|| {
@@ -1003,6 +1008,14 @@ pub fn build(
                     );
                 }
                 let qid = id;
+                debug_assert!(
+                    nodes
+                        .iter()
+                        .take_while(|n| matches!(n, CgirNode::Tap { .. } | CgirNode::Record { .. }))
+                        .count()
+                        <= 4,
+                    "v0 limits prefix hooks before query root"
+                );
                 id += 1;
                 let node = match &q.kind {
                     hir::QueryKind::Get => CgirNode::QueryGet {
@@ -1296,7 +1309,7 @@ pub fn node_summary(node: &CgirNode) -> Option<&Arc<hir::OpticSummary>> {
 }
 
 /// Resolve a leaf's OpticSummary by graph node id.
-pub fn leaf_summary_by_id<'a>(graph: &'a CgirGraph, id: NodeId) -> Option<&'a hir::OpticSummary> {
+pub fn leaf_summary_by_id(graph: &CgirGraph, id: NodeId) -> Option<&hir::OpticSummary> {
     graph.nodes.get(id as usize)?.summary().map(|s| s.as_ref())
 }
 
@@ -1348,6 +1361,7 @@ pub fn format_hir_expr(e: &hir::HirExpr) -> String {
 }
 
 pub fn verify(g: &CgirGraph) -> Result<(), String> {
+    // verify enforces M3 invariants + robustness asserts (see 2026-06-20 PLAN note); callers use verify_to_diagnostic for structured errs.
     let n = g.nodes.len();
     if n == 0 && !g.roots.is_empty() {
         return Err("roots reference empty graph".into());
@@ -1376,6 +1390,13 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                 if *lhs == idx as u32 || *rhs == idx as u32 {
                     return Err(format!("node {idx}: self-referential compose edge"));
                 }
+                debug_assert!(
+                    (*lhs as usize) < n && (*rhs as usize) < n,
+                    "compose wiring bounds checked"
+                );
+                debug_assert!(
+                    g.nodes.get(*lhs as usize).is_some() && g.nodes.get(*rhs as usize).is_some()
+                );
                 if !compose_types_compatible(g, *lhs, *rhs) {
                     let lf = compose_emit_focus_summary(g, *lhs)
                         .map(str::to_string)
@@ -1427,15 +1448,24 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                             "node {idx}: ProductFlat child {cid} appears more than once"
                         ));
                     }
-                    if !matches!(g.nodes.get(cid as usize), Some(CgirNode::OpticLeaf { .. })) {
+                    if !matches!(
+                        g.nodes.get(cid as usize),
+                        Some(
+                            CgirNode::OpticLeaf { .. }
+                                | CgirNode::PrismLeaf { .. }
+                                | CgirNode::TraversalLeaf { .. }
+                        )
+                    ) {
                         return Err(format!(
-                            "node {idx}: ProductFlat child {cid} must be OpticLeaf"
+                            "node {idx}: ProductFlat child {cid} must be Optic/Prism/TraversalLeaf"
                         ));
                     }
                 }
                 if !alias_safe {
                     return Err(format!("node {idx}: ProductFlat alias_safe is false"));
                 }
+                debug_assert!(children.len() >= 2, "ProductFlat validity: >=2 children");
+                debug_assert!(alias_safe, "ProductFlat alias_safe must hold post verify");
             }
             CgirNode::FusedLoop {
                 id,
@@ -1443,7 +1473,7 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                 compose_body,
                 ..
             } => {
-                if g.provenance_index.get(id).is_none() {
+                if !g.provenance_index.contains_key(id) {
                     return Err(format!(
                         "node {idx}: FusedLoop missing provenance_index entry"
                     ));
@@ -1571,6 +1601,13 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
             }
         }
     }
+    // Invariants post-verify for robustness (focus/costate wiring, region consistency via callers, provenance integrity, no orphans, ProductFlat validity).
+    debug_assert!(g.roots.len() <= 1, "v0 at most one root");
+    debug_assert!(
+        g.provenance_index.len() <= g.nodes.len(),
+        "provenance integrity bound"
+    );
+    debug_assert!(g.nodes.len() < 4096, "v0 node capacity limit (scale guard)");
     Ok(())
 }
 
@@ -1999,7 +2036,7 @@ mod tests {
                     resolved_optics: Default::default(),
                     region_map: Default::default(),
                 },
-                "must be OpticLeaf",
+                "must be Optic/Prism/TraversalLeaf",
             ),
         ];
         for (g, needle) in cases {

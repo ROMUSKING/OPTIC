@@ -90,6 +90,10 @@ enum Commands {
         #[arg(long)]
         update: bool,
     },
+    /// Profile (OBS-701 in narrow v0; placeholder per appendix B / ch14.5)
+    Profile { file: PathBuf },
+    /// Replay (OBS-701 in narrow v0; placeholder per appendix B / ch14.5)
+    Replay { file: PathBuf },
     /// Update golden fixtures after review (appendix B)
     SnapshotUpdate {
         #[arg(long)]
@@ -206,6 +210,35 @@ fn main() -> anyhow::Result<()> {
                 bench_single_file(&path, update, cli.verbose)?;
             } else {
                 bench_examples(update, cli.verbose)?;
+            }
+        }
+        Commands::Profile { file } => {
+            let src = read_source(&file)?;
+            // delegates to compile which surfaces OBS-701; runtime hooks are stubs
+            match compile_check(&src) {
+                Ok(_) => println!("profile: no OBS-701 (unexpected)"),
+                Err(diags) => {
+                    for d in &diags {
+                        if d.code == "OBS-701" {
+                            eprintln!("{}", optic_diagnostics::emit_human(d));
+                        }
+                    }
+                    println!("profile/replay deferred (OBS-701) in narrow v0");
+                }
+            }
+        }
+        Commands::Replay { file } => {
+            let src = read_source(&file)?;
+            match compile_check(&src) {
+                Ok(_) => println!("replay: no OBS-701 (unexpected)"),
+                Err(diags) => {
+                    for d in &diags {
+                        if d.code == "OBS-701" {
+                            eprintln!("{}", optic_diagnostics::emit_human(d));
+                        }
+                    }
+                    println!("profile/replay deferred (OBS-701) in narrow v0");
+                }
             }
         }
         Commands::SnapshotUpdate { confirm } => {
@@ -720,12 +753,28 @@ fn hir_binding_candidates(hir: &optic_hir::HirProgram) -> Vec<String> {
 }
 
 fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
+    // dedicated per-invocation temp homes + propagate creates (matches harness/sandbox full pattern) (Issue 1)
+    let work = tempfile::tempdir().context("doctor temp dir")?;
+    let cargo_home = work.path().join("cargo-home");
+    let rustup_home = work.path().join("rustup-home");
+    std::fs::create_dir_all(&cargo_home).context("doctor cargo-home")?;
+    std::fs::create_dir_all(&rustup_home).context("doctor rustup-home")?;
     let rustc = Command::new(resolve_tool_bin("rustc"))
+        .env_clear()
         .env("PATH", trusted_tool_path())
+        .env("HOME", work.path())
+        .env("CARGO_HOME", &cargo_home)
+        .env("RUSTUP_HOME", &rustup_home)
+        .env("RUSTUP_TOOLCHAIN", "stable")
         .arg("--version")
         .output();
     let cargo = Command::new(resolve_tool_bin("cargo"))
+        .env_clear()
         .env("PATH", trusted_tool_path())
+        .env("HOME", work.path())
+        .env("CARGO_HOME", &cargo_home)
+        .env("RUSTUP_HOME", &rustup_home)
+        .env("RUSTUP_TOOLCHAIN", "stable")
         .arg("--version")
         .output();
     match (&rustc, &cargo) {
@@ -1243,7 +1292,9 @@ fn run_verification_harness(emitted: &str, file: &Path, verbose: bool) -> anyhow
     if verified {
         println!(
             "RUN VERIFIED ({})",
-            file.file_name().unwrap().to_string_lossy()
+            file.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file.display().to_string())
         );
     } else {
         anyhow::bail!(

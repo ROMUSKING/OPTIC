@@ -42,8 +42,10 @@ Inner optic/query codegen still runs; observability hooks are comment metadata o
 ## Deferred beyond v0 narrow
 
 - Profile counters and replay checkpoints (real runtime hooks)
-- CLI: `optic profile`, `optic replay` (appendix B placeholders)
+- CLI: `optic profile`, `optic replay` (appendix B placeholders; v0 stubs + subcommands only; real hooks deferred)
 - Grade-controlled erasure passes on observer nodes
+
+(2026-06-20: runtime no-op + CLI arms added (metadata/stubs); still OBS-701 gate)
 
 ## Related rejections
 

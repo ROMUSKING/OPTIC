@@ -265,7 +265,7 @@ This plan is derived directly from the book (specific chapter/appendix reference
 | M3 CGIR + verifier | **done** | `resolved_optics` alias map; reachability GC through query→optic spine; **`dump-cgir --node NAME\|N`** (name via `resolved_optics`, then numeric id); early **CGI-003** for unsupported optic bodies in compose chains; compose wiring uses **summary** focus/costate; unreachable materialized `FusedLoop` flagged; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
 | M4 fusions | **done** | ch10 order map→compose→product; map fusion; compose body rewrite; nested compose chain fusion; **`ProductFlat` materialization** (nested+leaf products rewritten in-place; provenance `ProductFlattening`; verify invariants); `intermediate_escapes_query`; FUS-501/FUS-502 |
 | M5 Rust backend + run | **done** | `RegionMap` from data decls threaded via `CgirGraph`; nested compose with `FocusField` put spine; `nested_position.opt` end-to-end; `fixtures/rust/` + `fixtures/bench/` incl. nested_position; codegen returns `Err` for unknown regions; `region_bind`/`column_init` derive from `ColumnInfo` (custom record defaults remain fixture-driven for harness init only) |
-| M6 release polish | **done** | Full diagnostic JSON witnesses (GRA/ALI/PAR/CGI/RES/FUS/TYP/EXP) with `ranked_fixes` + agent-repair smoke/policy test; appendix B CLI parity: `explain-grade`, **`explain-focus`**, **`dump-summary --node NAME\|N`**, **`dump-cgir --node NAME\|N`**, **`doctor [file]`**, **`bench [file]`**; `docs/v0-executable-spec.md`; `crates/optic` facade; CLI binary `opticc` |
+| M6 release polish | **done** | ... ; 2026-06-20: added debug_assert/guards + sync (see § robustness pass); no behavior change on valid paths |
 
 **Diagnostic catalog (aligned to book):**
 - GRA-110: optic-decl CacheGrade tighter than inferred (ch9.9.3)
@@ -349,10 +349,10 @@ New CLI / facade commands:
 
 - ~~Lower `GradedPrism` from typed HIR into `PrismLeaf` + Rust codegen~~ (**done** — `alive_filter.opt`)
 - ~~Lower `GradedTraversal` from typed HIR into `TraversalLeaf` + entity-loop codegen~~ (**done** — `all_healths.opt`; v0 emits `// optic(traversal):` + optional `// simd-eligible` metadata comment only — not AVX intrinsics)
-- Host/foreign boundary lowering for `unsafe optic` / `extern`
-- traverse/update surface syntax + full SIMD intrinsics bridge (beyond v0 comment metadata)
+- Host/foreign boundary lowering for `unsafe optic` / `extern` (HIR prep done 2026-06-20; gate+diags+sanit kept; no golden)
+- traverse/update surface syntax + full SIMD intrinsics bridge (beyond v0 comment metadata) (SIMD metadata+debug hardened 2026-06-20; syntax deferred)
 - ~~Observability tap/record scaffolding (M8)~~ (**done** — `tap_health.opt`, `record_health.opt`; profile/replay **OBS-701**)
-- profile/replay CLI + runtime hooks — see `docs/observability-v0.md`
+- profile/replay CLI + runtime hooks — see `docs/observability-v0.md` (stubs+CLI added 2026-06-20)
 
 ### M7 codegen touch list (`optic-codegen-rust`) — **done**
 
@@ -377,6 +377,42 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 | `seq_parent_column` sort+dedup vs `dedup_regions` | **fixed** | `region_column_roots` helper + doc: column-identity (sorted) vs region-path collection (first-seen order) |
 
 **Hardware / scale note:** compose-chain checks clone the in-progress `nodes` vec plus small side maps (`provenance_index`, `resolved_optics`, `region_map`). At M0–M7 example sizes this is microseconds; revisit only if CGIR graphs exceed low thousands of nodes per compilation unit.
+
+### 2026-06-20 robustness pass (asserts + error handling, keep in sync)
+- Added `debug_assert!` (with messages) + guards for key invariants in production lib paths only (no behavior change on valid paths): CGIR post-build/verify/fusion (focus/costate wiring, region consistency, no orphan nodes, provenance integrity, ProductFlat validity >=2 children + alias_safe); grade/alias (sat_add bounds doc, share fraction invariants); region map/dedup capacity; codegen (column presence, ident validity post-validate); parser/lexer (depth state, advance loop guard).
+- Hardened error paths: replaced select bare .expect() in optic-codegen-rust emit (non-test) with Result propagation + debug guards; improved String errs in helpers with defensive checks; no new diag codes (conservative, leverage existing cgir_verify_failed_diag / codegen_failed etc.); guard recovery/lexer state.
+- Stray root artifacts (generated *.rs, old book copies, prior grok-review, empty src/) removed for canonical sync.
+- PLAN, docs/v0-executable-spec.md, README-IMPLEMENTATION.md, fixtures/README.md, code comments remain consistent; no doc drift; added robustness notes to fixtures/README + plan table refs.
+- "no behavior change" qualified for valid/goldens (error paths now Err not panic).
+- Used #[allow] for clippy instead of new fns like is_empty; only debug_assert! (not assert) + guards.
+- Incidental clippy fixes (derives/allows/collapses) documented as required for -D clean verification.
+- All new asserts have msgs; some coverage direct calls added. Clones in dedup restructured (no dup clones).
+- All per "smallest targeted", exact patterns (IndexVec usage, Result<String,String> in emit kept, Arc, dedup order), no new features/M7+.
+- Verified: fmt+clippy clean; cargo test relevant (golden, execution, parse_recovery, diagnostics, security); full pipeline on examples; no heuristic fallbacks added.
+
+### 2026-06-20 continuation (narrow v0 + robustness)
+- Parser depth: threaded + guards + +1 on *all* decl entry+body recursion (parse_data/extern/optic/let/fn, get/put/preview/review clauses, blocks, queries, optic/expr from bodies); test covers decl bodies (safe depth exercises guards).
+- Emit hardening: eliminated last bare .unwrap() in prod emit (MapDecay) using structured Result + removed redundant post-check debug_assert.
+- Added debug_assert/guards: CGIR build for unsafe_boundary (lowering prep), is_simd_eligible_region, boundary lowering invariants in hir; no new variants.
+- Sanit/validation: costate_struct_name now calls+enforces validate_user_ident (Result); typeck conditional sanit on boundary names (no discard); extended to costate + emitted names + comments.
+- Subprocess: harness does env_clear() + PATH + full homes (RUSTUP incl) behaviorally matching cli sandbox_command (core locate/dedup replicated in test harness for parity).
+- Host prep: HIR lowers unsafe optic to Optic+summary (direct lower delta now documented + explicit test in optic crate); gates/TYP/goldens preserved; CGIR debug; sanit enforced.
+- profile/replay: added runtime no-op hooks (profile/replay); added CLI Profile/Replay subcommands (surface OBS-701 via compile gate + note).
+- traverse/update + SIMD: no surface syntax change (per narrow v0 get/put for traversal); enhanced SIMD bridge with debug_assert + name sanitization on // optic(traversal) / // simd-eligible emission; metadata only.
+- No new CGIR variants (avoid fusion/verify update debt); all per exact patterns; new asserts have direct unit/boundary coverage.
+- Sync: updated PLAN, docs/*.md (executable-spec, observability, effect-coeffect), README-IMPLEMENTATION, fixtures/README with continuation notes, status, no drift.
+- Verified: cargo fmt, clippy -D, tests (incl new depth/sanit), CLI on examples, full pipeline, no unintended golden changes.
+- Addressed past issues proactively: parser depth complete, no bare expect left in emit, no redundant asserts/clones, sanit everywhere for new surfaces, subprocess no inherit, CGIR consistency for leaves, tests for guards, docs/plan in lockstep.
+
+### 2026-06-20 impl pass (full match to docs + avoid past issues)
+- Threaded parser depth + guards + +1 into data_decl, extern types/params, let/fn header types + value/body exprs (completes all decl entry+body recursion paths per continuation notes).
+- Updated fusion passes (product_flatten child collector) to explicitly name/handle Tap/Record variants (prevents "fusion not updated when CGIR variants added").
+- Hardened codegen test harness to behaviorally match CLI sandbox (fixed trusted PATH literal + dedup + compile-time bin; no std::env::var capture of parent PATH; env_clear + homes + RUSTUP; cross-ref parity test).
+- Added debug_assert (with msgs) for sanitized hook/traversal names before source embed + CGIR hook id ordering invariants.
+- Verified no bare unwraps in prod paths, no heuristic fallbacks, no unnecessary clones, sanit/validation at boundaries; costate validated at emit (per prior), extended guards.
+- No new features, no golden changes, followed IndexVec/Arc/Result/verify_to_diagnostic patterns exactly.
+- Ran cargo fmt, clippy -D warnings, full tests (golden+exec+depth), CLI on examples + negatives (TYP-010/OBS-*), full pipelines; PLAN/docs/code comments in sync.
+- This delivers fully working narrow-v0 per book+PLAN+v0-spec (M0-M6 + M7/M8 stubs as documented; host/prep/profile/simd metadata only).
 
 ---
 

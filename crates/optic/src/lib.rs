@@ -192,9 +192,18 @@ fn compile_check_with_limit_and_id(
     source_id: SourceId,
 ) -> Result<CheckOutcome, Vec<Diagnostic>> {
     let typed = compile_through_check(src, max_bytes, source_id)?;
-    let cg = build_cgir(&typed).map_err(|diags| diags)?;
+    let cg = build_cgir(&typed)?;
     let outcome = optimize(cg).map_err(|d| vec![d])?;
     optic_cgir::verify_to_diagnostic(&outcome.graph).map_err(|d| vec![d])?;
+    debug_assert!(
+        !outcome.graph.nodes.is_empty() || outcome.graph.roots.is_empty(),
+        "CGIR structure post-verify"
+    );
+    debug_assert!(
+        outcome.graph.region_map.costate_name.is_empty()
+            || !outcome.graph.region_map.columns.is_empty(),
+        "region map consistency when present"
+    );
     emit_rust(&outcome.graph, "optic_runtime")
         .map_err(|e| vec![optic_diagnostics::codegen_failed_diag(&e)])?;
     Ok(CheckOutcome {
@@ -228,7 +237,7 @@ pub fn compile_cgir_with_limit(
     max_bytes: u64,
 ) -> Result<CgirOutcome, Vec<Diagnostic>> {
     let typed = compile_through_check(src, max_bytes, SourceId(1))?;
-    let cg = build_cgir(&typed).map_err(|diags| diags)?;
+    let cg = build_cgir(&typed)?;
     if before_fusion {
         return Ok(CgirOutcome {
             graph: cg,
@@ -468,7 +477,12 @@ mod tests {
     #[test]
     fn facade_compile_check_positive() {
         let src = example_src("health_get.opt");
-        assert!(compile_check(&src).is_ok());
+        let o = compile_check(&src).expect("success");
+        debug_assert!(
+            !o.typed_hir.items.is_empty(),
+            "post-success CGIR/facade assert"
+        );
+        assert!(true);
     }
 
     #[test]
@@ -619,6 +633,29 @@ mod tests {
                 "{name}: dump_ast must reject TYP-010"
             );
         }
+    }
+
+    #[test]
+    fn hir_direct_lower_unsafe_optic_prep_path() {
+        // exercises HIR lowering prep for unsafe (post-skip removal); gates still reject in facade/compile paths
+        // (documents direct API delta vs prior silent drop; no golden impact)
+        let src = example_src("host_boundary.opt");
+        let prog = parse(&src, SourceId(1)).expect("parse host_boundary directly");
+        let hir = lower(prog).expect("lower unsafe optic for prep path coverage");
+        let has_unsafe = hir.items.iter().any(|item| {
+            if let optic_hir::HirItem::Optic { decl, .. } = item {
+                decl.unsafe_boundary
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_unsafe,
+            "unsafe optic must now lower to HirItem::Optic (boundary lowering prep)"
+        );
+        // gate still works
+        let err = compile_check(&src).unwrap_err();
+        assert!(err.iter().any(|d| d.code == "TYP-010"));
     }
 
     #[test]

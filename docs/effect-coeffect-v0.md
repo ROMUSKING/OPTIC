@@ -28,9 +28,9 @@ These are enforced through `optic-typeck` and verified on CGIR compose/product w
 ## Deferred to M7+
 
 - Coinductive grade dimensions, staging grades, session types (book ch12–14)
-- `unsafe optic` and `extern` / foreign host boundaries (rejected **TYP-010** in v0)
+- `unsafe optic` and `extern` / foreign host boundaries (rejected **TYP-010** in v0; HIR lowering prep + explicit test + sanit 2026-06-20)
 - traverse/update surface syntax (book ch13; v0 uses get/put for `GradedTraversal`)
-- Full AVX intrinsics / LLVM SIMD bridge (beyond v0 metadata comment)
+- Full AVX intrinsics / LLVM SIMD bridge (beyond v0 metadata comment only)
 
 CGIR rejects stub `TraversalLeaf` (`m7_reserved=true`) and stub `Tap`/`Record` (`m7_reserved=true`) via **CGI-006**. Lowered observability nodes (`m7_reserved=false`) pass verify.
 

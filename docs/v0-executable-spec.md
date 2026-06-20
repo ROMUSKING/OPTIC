@@ -55,6 +55,7 @@ Appendix B names the binary `optic`; this repo ships **`opticc`** as the CLI cra
 | `run file.opt` | Transpile + sandboxed `cargo run` harness |
 | `bench [file.opt] [--update]` | Compare timing baselines (all examples or one file) |
 | `doctor [file.opt]` | Toolchain + runtime path; optional file runs `check` |
+| `profile file.opt`, `replay file.opt` | OBS-701 surface (stubs + CLI arms; defer real per observability-v0) |
 | `snapshot-update --confirm` | Regenerate goldens |
 
 ## Diagnostic catalog (v0 core)
@@ -114,9 +115,9 @@ Review diffs before commit. See `fixtures/README.md`.
 ## M7+ deferred
 
 - traverse/update surface syntax (v0 uses get/put clauses for `GradedTraversal`)
-- Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only)
-- `unsafe optic` / `extern` host boundaries (**TYP-010**)
-- profile/replay observability CLI — see `docs/observability-v0.md` (tap/record scaffolding done)
+- Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only; 2026-06-20 metadata bridge hardened)
+- `unsafe optic` / `extern` host boundaries (**TYP-010**; HIR lowering prep 2026-06-20)
+- profile/replay observability CLI — see `docs/observability-v0.md` (tap/record scaffolding done; stubs+CLI 2026-06-20)
 
 ## Verification
 
@@ -126,3 +127,11 @@ cargo run -p optic-cli -- check examples/*.opt
 ```
 
 Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`.
+
+## Robustness (2026-06-20 + continuation)
+- debug_assert! + guards for CGIR (incl unsafe boundary), simd, hir prep, parser (depth on decls+ all bodies listed in PLAN), emit.
+- Sanit/enforce: costate + boundary names validated; harness now full env_clear+PATH match to cli.
+- HIR unsafe lower prep exercised by explicit bypass test (delta vs prior documented; gates preserve).
+- No golden change; coverage added for CLI profile arms, prep paths, hardened errs, body depth.
+- Docs match code: depth on fn/let/optic/getput bodies, harness full clear, prep delta noted, "metadata/stubs/prep only".
+- 2026 impl pass: parser depth + fusion Tap/Record + harness sync + more asserts; fully matches docs.

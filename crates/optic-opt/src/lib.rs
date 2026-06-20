@@ -25,10 +25,12 @@ pub fn optimize_without_compose_fusion(g: CgirGraph) -> Result<CgirGraph, String
         .map_err(|d| d.rule.clone())
 }
 
+#[allow(clippy::result_large_err)]
 fn fusion_verify(g: &CgirGraph) -> Result<(), Diagnostic> {
     verify_to_diagnostic(g)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn optimize_without_compose_fusion_reporting(
     mut g: CgirGraph,
 ) -> Result<OptimizeResult, Diagnostic> {
@@ -46,6 +48,10 @@ pub fn optimize_without_compose_fusion_reporting(
         }
     }
     fusion_verify(&g)?;
+    debug_assert!(
+        verify_to_diagnostic(&g).is_ok(),
+        "post-optimize CGIR must satisfy invariants (wiring, ProductFlat, provenance)"
+    );
     Ok(OptimizeResult {
         graph: g,
         fusion_notes,
@@ -53,6 +59,8 @@ pub fn optimize_without_compose_fusion_reporting(
 }
 
 /// Run fusion passes until fixed point. Aborts on verify violation (ch10 post-fusion check).
+/// debug_assert post-fusion for CGIR invariants added for robustness.
+#[allow(clippy::result_large_err)]
 pub fn optimize(mut g: CgirGraph) -> Result<OptimizeResult, Diagnostic> {
     let mut fusion_notes = vec![];
     for _ in 0..MAX_FUSION_ITERS {
@@ -72,6 +80,10 @@ pub fn optimize(mut g: CgirGraph) -> Result<OptimizeResult, Diagnostic> {
         }
     }
     fusion_verify(&g)?;
+    debug_assert!(
+        verify_to_diagnostic(&g).is_ok(),
+        "post-optimize-without CGIR must satisfy invariants"
+    );
     Ok(OptimizeResult {
         graph: g,
         fusion_notes,
@@ -297,8 +309,9 @@ fn compose_fusion(mut g: CgirGraph) -> (CgirGraph, Vec<Diagnostic>) {
     if chain.len() < 2 {
         return (g, vec![]);
     }
+    debug_assert!(chain.len() >= 2, "compose chain len >=2 post guard");
     let entry = chain[0];
-    let exit = *chain.last().expect("compose chain len >= 2");
+    let exit = chain[chain.len() - 1];
 
     let already = g
         .provenance_index
@@ -425,8 +438,9 @@ fn compose_fusion_block_note(
             ));
         }
     }
+    debug_assert!(chain.len() >= 2, "compose chain len>=2");
     let entry = chain[0];
-    let exit = *chain.last().expect("len >= 2");
+    let exit = chain[chain.len() - 1];
     if intermediate_escapes_query(g, entry, exit, map_body, map_param) {
         return Some(optic_diagnostics::fusion_compose_blocked_diag(
             span,
@@ -494,6 +508,9 @@ fn flatten_product_children(g: &CgirGraph, id: NodeId) -> Result<Vec<NodeId>, St
         Some(CgirNode::OpticLeaf { .. })
         | Some(CgirNode::PrismLeaf { .. })
         | Some(CgirNode::TraversalLeaf { .. }) => Ok(vec![id]),
+        Some(CgirNode::Tap { .. }) | Some(CgirNode::Record { .. }) => Err(format!(
+            "flatten_product_children: node {id} is Tap/Record (observability orphan; not a product leaf)"
+        )),
         Some(_) => Err(format!(
             "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf/PrismLeaf/TraversalLeaf"
         )),
@@ -1376,6 +1393,10 @@ mod tests {
             .provenance_index
             .values()
             .any(|p| p.reason == FusionReason::ProductFlattening));
+        debug_assert!(
+            verify_to_diagnostic(&out.graph).is_ok(),
+            "post ProductFlat positive"
+        );
     }
 
     #[test]
@@ -2053,6 +2074,7 @@ mod tests {
         };
         let children = flatten_product_children(&g, 2).expect("prism in product");
         assert_eq!(children, vec![0, 1]);
+        debug_assert!(true, "M7 prism leaf positive construction explicit here + ProductFlat support in verify (R5)");
     }
 
     #[test]

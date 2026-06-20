@@ -43,6 +43,8 @@ Embedding helpers: `compile_check`, `compile_check_from_path`, `compile_emit`, `
 
 M7 done: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M8 scaffolding: `.tap`/`.record` query methods → `Tap`/`Record` CGIR (`m7_reserved=false`) + `// optic(tap|record):` comment hooks; profile/replay → **OBS-701**; trailing hooks → **OBS-702**. See `docs/observability-v0.md`, `examples/tap_health.opt`, `examples/record_health.opt`, `examples/tap_record_chain.opt`, `examples/compose_tap.opt`, `examples/unsupported_replay.opt`, `examples/trailing_tap.opt`, `examples/trailing_record.opt`.
 
+2026-06-20 continuation: host HIR prep (with direct-lower test), profile/replay CLI+stubs (tested), SIMD metadata, parser depth on decl bodies+test, sanit enforce on costate/names, harness full env_clear+PATH match cli, no clones/redundants; PLAN/docs exact match code state.
+
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 
 ## Fixtures
@@ -53,3 +55,5 @@ Frozen evidence under `fixtures/` (tokens, ast, hir, cgir, rust, diagnostics, be
 
 - Book `TYP-201` (compose focus mismatch) is not separately emitted in v0; optic **body** mismatches use **`TYP-002`**.
 - Parser recursion is capped at **`MAX_PARSE_DEPTH = 512`** (security; emits `PAR-001`).
+
+Robustness assertions (CGIR wiring/ProductFlat/grades/regions/codegen/parser, error propagation) + clippy allows (required) added 2026-06-20. Parser depth complete on all decl paths; fusion updated for obs nodes; harness env exact match. Keep in sync with PLAN + v0-executable-spec + fixtures/README. Stray root + empty src cleaned. All asserts have msgs.

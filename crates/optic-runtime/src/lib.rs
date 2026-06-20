@@ -50,6 +50,14 @@ pub fn len_of<T>(v: &[T]) -> usize {
     v.len()
 }
 
+/// Runtime hooks for profile/replay (M8+ observability; v0 stubs for CLI/runtime surface).
+/// Grade-controlled erasure / real impl deferred (see docs/observability-v0.md).
+#[inline]
+pub fn profile(_label: &str) {}
+
+#[inline]
+pub fn replay(_checkpoint: &str) {}
+
 impl<S: fmt::Debug> fmt::Debug for Cursor<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Cursor")

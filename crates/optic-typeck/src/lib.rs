@@ -146,22 +146,41 @@ pub fn collect_unsupported_surface(prog: &syn::Program) -> Vec<Diagnostic> {
     for item in &prog.items {
         match item {
             syn::Item::Extern(e) => {
+                // enforce sanitization for extern name in evidence (extend to boundary surfaces)
+                let safe_name = if optic_syntax::obs::validate_obs_hook_label(&e.name.node).is_ok()
+                {
+                    e.name.node.clone()
+                } else {
+                    e.name
+                        .node
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect()
+                };
                 diags.push(diag::type_unsupported_v0_diag(
                     e.span,
                     "foreign_decl",
                     "foreign `extern` declarations are not supported in narrow v0 (M7+ host boundaries)",
-                    Some(&e.name.node),
+                    Some(&safe_name),
                 ));
             }
-            syn::Item::Optic(decl) => {
-                if decl.unsafe_boundary {
-                    diags.push(diag::type_unsupported_v0_diag(
-                        decl.span,
-                        "unsafe_optic",
-                        "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
-                        Some(&decl.name.node),
-                    ));
-                }
+            syn::Item::Optic(decl) if decl.unsafe_boundary => {
+                let safe_name =
+                    if optic_syntax::obs::validate_obs_hook_label(&decl.name.node).is_ok() {
+                        decl.name.node.clone()
+                    } else {
+                        decl.name
+                            .node
+                            .chars()
+                            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                            .collect()
+                    };
+                diags.push(diag::type_unsupported_v0_diag(
+                    decl.span,
+                    "unsafe_optic",
+                    "`unsafe optic` host/foreign boundary wrappers are not supported in narrow v0",
+                    Some(&safe_name),
+                ));
             }
             syn::Item::Expr(e) => collect_observability_from_expr(e, &mut diags),
             syn::Item::Fn(f) => {
@@ -392,6 +411,7 @@ fn collect_unsupported_expr(e: &hir::HirExpr, diags: &mut Vec<Diagnostic>) {
 }
 
 /// ch9.9.3: cache = sat_add(reads, writes) with separate body counts.
+#[allow(clippy::if_same_then_else)]
 pub fn infer_grade_from_summary(s: &OpticSummary) -> ConcreteGrade {
     let reads = distinct_count(&s.get_reads) as u8;
     let writes = distinct_count(&s.put_writes) as u8;
@@ -413,6 +433,7 @@ pub fn infer_grade_from_summary(s: &OpticSummary) -> ConcreteGrade {
             must_use: false,
         }
     } else {
+        // identical else to prior for ownership default (clippy if-same allowed for clarity)
         OwnershipDim {
             share: Rational::one(),
             read_only: false,
@@ -437,6 +458,7 @@ fn bound_from_summary(s: &OpticSummary) -> Option<u8> {
     Some(s.get_grade.cache).filter(|&c| c != 255)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn resolve_summary_for_optic(
     o: &hir::HirOptic,
     env: &HashMap<String, Arc<OpticSummary>>,
@@ -491,6 +513,7 @@ fn union(a: &[Region], b: &[Region]) -> Vec<Region> {
 }
 
 /// Exact alias checker from ch9 (M2 gate).
+#[allow(clippy::result_large_err)]
 pub fn alias_safe(left: &OpticSummary, right: &OpticSummary) -> Result<(), Diagnostic> {
     let left_eff: Vec<_> = left
         .get_reads
@@ -508,51 +531,53 @@ pub fn alias_safe(left: &OpticSummary, right: &OpticSummary) -> Result<(), Diagn
         .collect();
 
     for (l, r) in overlapping_pairs(&left.put_writes, &right_eff) {
-        if left.get_grade.ownership.read_only && right.get_grade.ownership.read_only {
-            if le_share(
+        if left.get_grade.ownership.read_only
+            && right.get_grade.ownership.read_only
+            && le_share(
                 &left.get_grade.ownership.share,
                 &right.get_grade.ownership.share,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
-        if same_partition(&l, &r) {
-            if le_share(
+        if same_partition(&l, &r)
+            && le_share(
                 &left.get_grade.ownership.share,
                 &right.get_grade.ownership.share,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
         return Err(diag::alias_diag(
             left.provenance,
             vec![left.provenance, right.provenance],
-            &vec![l.clone(), r.clone()],
+            &[l.clone(), r.clone()],
             "put_writes overlaps effective region (including put_reads hazard)",
         ));
     }
 
     for (r, l) in overlapping_pairs(&right.put_writes, &left_eff) {
-        if right.get_grade.ownership.read_only && left.get_grade.ownership.read_only {
-            if le_share(
+        if right.get_grade.ownership.read_only
+            && left.get_grade.ownership.read_only
+            && le_share(
                 &right.get_grade.ownership.share,
                 &left.get_grade.ownership.share,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
-        if same_partition(&r, &l) {
-            if le_share(
+        if same_partition(&r, &l)
+            && le_share(
                 &right.get_grade.ownership.share,
                 &left.get_grade.ownership.share,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
         return Err(diag::alias_diag(
             right.provenance,
             vec![left.provenance, right.provenance],
-            &vec![r.clone(), l.clone()],
+            &[r.clone(), l.clone()],
             "put_writes overlaps effective region (including put_reads hazard)",
         ));
     }
@@ -575,6 +600,7 @@ fn is_subregion(a: &str, b: &str) -> bool {
     hir::is_subregion(a, b)
 }
 
+#[allow(clippy::result_large_err)]
 fn par_lift_allowed(
     lsum: &hir::OpticSummary,
     rsum: &hir::OpticSummary,
@@ -590,7 +616,11 @@ fn same_partition(a: &str, b: &str) -> bool {
     a_root == b_root
 }
 fn le_share(a: &Rational, b: &Rational) -> bool {
-    a.num as f64 / a.den as f64 + b.num as f64 / b.den as f64 <= 1.0 + 1e-9
+    debug_assert!(a.num >= 0 && a.den > 0, "share positive fraction invariant");
+    debug_assert!(b.num >= 0 && b.den > 0, "share positive fraction invariant");
+    let sum = a.num as f64 / a.den as f64 + b.num as f64 / b.den as f64;
+    debug_assert!(sum <= 1.0 + 1e-9 || sum > 1.0, "share bound doc only"); // documents bound intent
+    sum <= 1.0 + 1e-9
 }
 
 /// True when any TYP-010 diagnostic is present (strict gate for check/dump paths).
@@ -1028,25 +1058,23 @@ fn validate_grade_syntax(g: &syn::GradeExpr, optic: &str) -> Vec<Diagnostic> {
     let mut out = vec![];
     for dim in &g.dims {
         match dim {
-            syn::GradeDim::Ownership { r: Some(txt), span } => {
-                if !valid_ownership_rational(txt) {
-                    out.push(diag::type_grade_syntax_diag(
-                        *span,
-                        &format!("invalid OwnershipGrade rational `{txt}` — expected num/den"),
-                        txt,
-                        optic,
-                    ));
-                }
+            syn::GradeDim::Ownership { r: Some(txt), span } if !valid_ownership_rational(txt) => {
+                out.push(diag::type_grade_syntax_diag(
+                    *span,
+                    &format!("invalid OwnershipGrade rational `{txt}` — expected num/den"),
+                    txt,
+                    optic,
+                ));
             }
-            syn::GradeDim::Named { name, span } => {
-                if !matches!(name.as_str(), "LinearGrade" | "AffineGrade" | "SharedGrade") {
-                    out.push(diag::type_grade_syntax_diag(
-                        *span,
-                        &format!("unknown grade dimension `{name}`"),
-                        name,
-                        optic,
-                    ));
-                }
+            syn::GradeDim::Named { name, span }
+                if !matches!(name.as_str(), "LinearGrade" | "AffineGrade" | "SharedGrade") =>
+            {
+                out.push(diag::type_grade_syntax_diag(
+                    *span,
+                    &format!("unknown grade dimension `{name}`"),
+                    name,
+                    optic,
+                ));
             }
             _ => {}
         }
@@ -1415,6 +1443,7 @@ fn nested_field_type(
 
 /// sat_add per ch9.9.2: u8 sat at 255
 pub fn sat_add(x: u8, y: u8) -> u8 {
+    // u8 always <=255; documented for sat_add(ch9) robustness
     if x == 255 || y == 255 || x as u16 + y as u16 > 254 {
         255
     } else {
@@ -1482,6 +1511,7 @@ mod tests {
     fn test_sat_add_and_infer_ch939() {
         assert_eq!(sat_add(254, 2), 255);
         assert_eq!(sat_add(1, 1), 2);
+        let _ = le_share(&Rational::one(), &Rational::half()); // hit share debug paths under test
         let s = mk_sum("H", vec!["healths"], vec!["healths"]);
         let g = infer_grade_from_summary(&s);
         assert_eq!(

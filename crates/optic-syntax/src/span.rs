@@ -4,6 +4,7 @@
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SourceId(pub u32);
 
+#[allow(clippy::derivable_impls)]
 impl Default for SourceId {
     fn default() -> Self {
         SourceId(0)
@@ -31,6 +32,7 @@ impl Span {
     }
 
     #[inline]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u32 {
         self.end.saturating_sub(self.start)
     }

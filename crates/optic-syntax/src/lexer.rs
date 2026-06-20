@@ -22,7 +22,13 @@ impl<'src> Lexer<'src> {
     }
 
     pub fn lex(mut self) -> Vec<Token> {
+        let mut iter_guard = 0usize;
         while self.pos < self.src.len() {
+            iter_guard += 1;
+            debug_assert!(
+                iter_guard < self.src.len().saturating_add(2),
+                "lexer must strictly advance pos (guard against no-progress; +2 per R7)"
+            );
             // whitespace is ignored (per app D D.1 and ch7.9 disambiguation)
             if self.current_char().is_whitespace() {
                 self.advance();
@@ -183,7 +189,7 @@ impl<'src> Lexer<'src> {
                     && self.src[next_pos..]
                         .chars()
                         .next()
-                        .map_or(false, |c| c.is_ascii_digit())
+                        .is_some_and(|c| c.is_ascii_digit())
                 {
                     saw_dot = true;
                     self.advance(); // consume .
