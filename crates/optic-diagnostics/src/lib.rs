@@ -448,6 +448,12 @@ pub fn cgir_verify_failed_diag(rule: &str) -> Diagnostic {
             }
         }
     }
+    if rule.contains("exceeds limit") {
+        let mut d = fusion_verify_diag(rule);
+        d.title = "CGIR scale limit exceeded".into();
+        d.evidence = serde_json::json!({"reason": "v0 node count limit", "note": rule});
+        return d;
+    }
     fusion_verify_diag(rule)
 }
 

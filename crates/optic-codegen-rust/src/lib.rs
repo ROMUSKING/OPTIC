@@ -19,9 +19,7 @@ const RUST_KEYWORDS: &[&str] = &[
     "unsafe", "use", "where", "while",
 ];
 
-/// v0 scale guard (matches parse depth caps and example sizes; shared with other limits in future).
-/// (review nit: minor suggestion to centralize near MAX_PARSE_DEPTH etc. in future non-smallest pass; documented here)
-const MAX_CGIR_NODES_V0: usize = 4096;
+// v0 scale guard shared from optic-cgir (MAX_CGIR_NODES_V0) to eliminate magic/duplicate limits in codegen + harness paths.
 
 /// Reject user-derived names that would emit invalid Rust identifiers.
 fn is_valid_rust_ident(name: &str) -> bool {
@@ -50,8 +48,9 @@ fn validate_user_ident(name: &str, context: &str) -> Result<(), String> {
 
 pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     // emit uses validate + Result<String,String> per existing pattern; debug_asserts added for post-validate column/ident (2026-06-20 robustness).
+    // Hard enforcement is in cgir::verify (early); this is belt-and-suspenders.
     debug_assert!(
-        graph.nodes.len() < MAX_CGIR_NODES_V0,
+        graph.nodes.len() < optic_cgir::MAX_CGIR_NODES_V0,
         "CGIR node count within v0 scale (no OOM risk in emit)"
     );
     let mut out = String::with_capacity(1024);
@@ -96,7 +95,9 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     }
 
     let est = 1024 + leaf_names.len() * 128 + all_regions.len() * 64;
-    out.reserve(est.max(4096));
+    // internal string capacity (alloc detail, not the CGIR node scale limit)
+    const MIN_EMIT_STRING_CAPACITY: usize = 4096;
+    out.reserve(est.max(MIN_EMIT_STRING_CAPACITY));
 
     emit_record_types(&mut out, &graph.region_map, &struct_name)?;
     out.push_str(&format!("#[derive(Debug)]\npub struct {struct_name} {{\n"));
@@ -2341,7 +2342,7 @@ mod tests {
 
     fn run_emitted_and_capture_after(emitted: &str) -> Result<String, String> {
         let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
-        // NOTE: relies on emitted main's "after:  {:?}" Debug output for nested/record structs (see test asserts using contains on tuples/nums); parse_after_entities is fragile on it. Doc'd for maintenance (review suggestion).
+        // NOTE: parse_after_entities + some contains for nested/record; prefer structured parsers from cli/tests/execution.rs (parse_entities_line, parse_tag_values_line, parse_transform_*) for future-proofing vs Debug output.
         // align with validated_runtime_crate_path (canonicalize + workspace escape guard + lib check) for trust boundary (Issue A)
         let runtime_rel =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../optic-runtime");
@@ -2378,6 +2379,7 @@ mod tests {
         std::fs::create_dir_all(&rustup_home).map_err(|e| format!("rustup_home dir: {e}"))?;
         let cargo_bin: &str = env!("CARGO");
         let path = trusted_tool_path_sim();
+        // Dupe of cli sandbox env setup left (per smallest + Issue 11); parity test exists.
         let out = std::process::Command::new(cargo_bin)
             .env_clear()
             .env("PATH", path)

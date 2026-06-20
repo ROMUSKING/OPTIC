@@ -761,20 +761,21 @@ fn hir_binding_candidates(hir: &optic_hir::HirProgram) -> Vec<String> {
 
 fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
     // Use sandbox_command (env_clear + PATH + homes created inside) for exact parity with run/bench harness (dedup logic)
+    // Error paths now use .context()? (rustc --version etc) for propagation; non-success still generic bail. See Issue 6 review.
     let work = tempfile::tempdir().context("doctor temp dir")?;
     let rustc = sandbox_command("rustc", work.path())
         .arg("--version")
-        .output();
+        .output()
+        .context("rustc --version")?;
     let cargo = sandbox_command("cargo", work.path())
         .arg("--version")
-        .output();
-    match (&rustc, &cargo) {
-        (Ok(r), Ok(c)) if r.status.success() && c.status.success() => {
-            println!("rustc: {}", String::from_utf8_lossy(&r.stdout).trim());
-            println!("cargo: {}", String::from_utf8_lossy(&c.stdout).trim());
-        }
-        _ => anyhow::bail!("rustc/cargo not available"),
+        .output()
+        .context("cargo --version")?;
+    if !(rustc.status.success() && cargo.status.success()) {
+        anyhow::bail!("rustc/cargo not available");
     }
+    println!("rustc: {}", String::from_utf8_lossy(&rustc.stdout).trim());
+    println!("cargo: {}", String::from_utf8_lossy(&cargo.stdout).trim());
     let runtime = validated_runtime_crate_path()?;
     println!("optic-runtime: OK ({})", runtime.display());
     if let Some(path) = file {

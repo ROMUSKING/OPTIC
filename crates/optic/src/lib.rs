@@ -1,11 +1,17 @@
 //! `optic` — stable narrow-v0 compiler facade (M6 library API).
 //!
 //! Re-exports pipeline entrypoints for embedding without depending on each crate.
+//!
+//! # Example using re-exported scale limit
+//! ```
+//! use optic::MAX_CGIR_NODES_V0;
+//! assert!(MAX_CGIR_NODES_V0 >= 4096);
+//! ```
 
 pub use optic_cgir::{
     build as build_cgir, dump_node_pretty, find_node_by_id, is_m7_reserved, leaf_summary_by_id,
     m7_reserved_kind, node_span, node_summary, resolve_cgir_node, verify_to_diagnostic, CgirGraph,
-    ResolveCgirNodeError, MAX_NODE_NAME_BYTES,
+    ResolveCgirNodeError, MAX_CGIR_NODES_V0, MAX_NODE_NAME_BYTES,
 };
 pub use optic_codegen_rust::emit as emit_rust;
 pub use optic_diagnostics::Diagnostic;
@@ -17,6 +23,8 @@ pub use optic_typeck::{
     explain_grade_with_diags, has_unsupported_surface, infer_grade_from_summary, typeck_pass,
     unsupported_for_node, FocusReport, GradeReport, TypedHir,
 };
+
+// The MAX_CGIR_NODES_V0 is re-exported via the optic_cgir pub use above (for embedders/harnesses; see doctest example in module docs).
 
 /// Default source size cap (matches CLI appendix B guard).
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
@@ -239,6 +247,7 @@ pub fn compile_cgir_with_limit(
     let typed = compile_through_check(src, max_bytes, SourceId(1))?;
     let cg = build_cgir(&typed)?;
     if before_fusion {
+        // Note: build() now enforces MAX_CGIR_NODES_V0 (protects pre-fusion dump paths too).
         return Ok(CgirOutcome {
             graph: cg,
             fusion_notes: vec![],
