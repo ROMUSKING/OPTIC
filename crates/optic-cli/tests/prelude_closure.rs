@@ -344,8 +344,8 @@ fn explain_typ003_catalog() {
 
 #[test]
 fn profile_replay_cli_arms_exercise_obs701_and_deferred() {
-    // explicit coverage for new CLI profile/replay match arms + "deferred" text
-    // arms return success (print note + OBS diag but Ok(()) ); use example() helper for reliable path
+    // explicit coverage for CLI profile/replay match arms + exact "deferred" string + no execution harness entry (per review suggestion)
+    // arms return success (print note + OBS diag but Ok(()) ); use example() helper for reliable path; asserts ensure no future creep into full impl
     let out1 = opticc()
         .args([
             "profile",

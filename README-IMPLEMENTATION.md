@@ -41,9 +41,9 @@ Embedding helpers: `compile_check`, `compile_check_from_path`, `compile_emit`, `
 
 `dump-summary --node` and `dump-cgir --node` both resolve optic/let **names first** (via HIR summaries / `resolved_optics`), then fall back to numeric CGIR node ids.
 
-M7 done: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M8 scaffolding: `.tap`/`.record` query methods → `Tap`/`Record` CGIR (`m7_reserved=false`) + `// optic(tap|record):` comment hooks; profile/replay → **OBS-701**; trailing hooks → **OBS-702**. See `docs/observability-v0.md`, `examples/tap_health.opt`, `examples/record_health.opt`, `examples/tap_record_chain.opt`, `examples/compose_tap.opt`, `examples/unsupported_replay.opt`, `examples/trailing_tap.opt`, `examples/trailing_record.opt`.
+M7 scaffolding: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M8 scaffolding: `.tap`/`.record` → `Tap`/`Record` (`m7_reserved=false`) + hooks; profile/replay → **OBS-701** (stubs). See docs. (Narrow v0 core M0-M6 complete.)
 
-2026-06-20 continuation: host HIR prep (with direct-lower test), profile/replay CLI+stubs (tested), SIMD metadata, parser depth on decl bodies+test, sanit enforce on costate/names, harness full env_clear+PATH match cli, no clones/redundants; PLAN/docs exact match code state.
+2026-06-20 continuation: ... ; PLAN/docs exact match (this task: plan updated vs book/app C/EBNF + actual Vec impl + wontfix for full traverse/profile in narrow).
 
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 

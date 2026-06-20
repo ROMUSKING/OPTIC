@@ -511,6 +511,7 @@ fn flatten_product_children(g: &CgirGraph, id: NodeId) -> Result<Vec<NodeId>, St
         Some(CgirNode::Tap { .. }) | Some(CgirNode::Record { .. }) => Err(format!(
             "flatten_product_children: node {id} is Tap/Record (observability orphan; not a product leaf)"
         )),
+        // catch-all for future CGIR variants (prevents "fusion not updated" regressions; exhaust over known leaves + products)
         Some(_) => Err(format!(
             "flatten_product_children: node {id} is not Product/ProductFlat/OpticLeaf/PrismLeaf/TraversalLeaf"
         )),

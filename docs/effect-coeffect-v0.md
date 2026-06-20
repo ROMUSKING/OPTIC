@@ -15,13 +15,13 @@ Cross-reference: [v0 executable spec](v0-executable-spec.md), book ch12–14 (gr
 
 These are enforced through `optic-typeck` and verified on CGIR compose/product wiring.
 
-## M7 prism + traversal (done)
+## M7 prism + traversal (scaffolding for narrow v0)
 
-- **GradedPrism** surface, HIR summaries (preview/review regions), and `PrismLeaf` CGIR lowering (`m7_reserved=false`)
+- **GradedPrism** surface (via preview/review), HIR summaries, and `PrismLeaf` CGIR lowering (`m7_reserved=false`) — scaffolding for narrow v0 examples; full per book ch13
 - Rust codegen: preview as `Option<focus>`, review as conditional store in map queries
 - Acceptance: `examples/alive_filter.opt` (full golden + execution parity)
 
-- **GradedTraversal** surface (v0 get/put clauses), HIR summaries, and `TraversalLeaf` CGIR lowering (`m7_reserved=false`)
+- **GradedTraversal** surface (v0 get/put clauses only), HIR summaries, and `TraversalLeaf` CGIR lowering (`m7_reserved=false`) — no traverse/update syntax in narrow (app D EBNF)
 - Rust codegen: entity-loop get/put/map with `// optic(traversal):` + optional `// simd-eligible` metadata (no intrinsics in v0)
 - Acceptance: `examples/all_healths.opt` (full golden + execution parity)
 
@@ -32,11 +32,11 @@ These are enforced through `optic-typeck` and verified on CGIR compose/product w
 - traverse/update surface syntax (book ch13; v0 uses get/put for `GradedTraversal`)
 - Full AVX intrinsics / LLVM SIMD bridge (beyond v0 metadata comment only)
 
-CGIR rejects stub `TraversalLeaf` (`m7_reserved=true`) and stub `Tap`/`Record` (`m7_reserved=true`) via **CGI-006**. Lowered observability nodes (`m7_reserved=false`) pass verify.
+CGIR rejects stub `TraversalLeaf` (`m7_reserved=true`) and stub `Tap`/`Record` (`m7_reserved=true`) via **CGI-006**. Lowered observability nodes (`m7_reserved=false`) pass verify. (2026 continuation notes centralized in PLAN §2026; see cross-refs.)
 
-## M8 observability (scaffolding done)
+## M8 observability (scaffolding; full deferred)
 
-`.tap`/`.record` query methods → `Tap`/`Record` CGIR + comment hooks. Profile/replay → **OBS-701**; trailing hooks → **OBS-702**. Witnesses: `tap_record_chain.opt`, `compose_tap.opt`, `unsupported_replay.opt`, `trailing_tap.opt`, `trailing_record.opt`. See [observability-v0.md](observability-v0.md).
+`.tap`/`.record` query methods → `Tap`/`Record` CGIR + comment hooks (narrow scaffolding). Profile/replay → **OBS-701** (stubs; full M8 deferred); trailing hooks → **OBS-702**. Witnesses as listed. See [observability-v0.md](observability-v0.md).
 
 ## Diagnostic pointers
 

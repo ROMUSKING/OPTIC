@@ -1,8 +1,8 @@
 # Optic Narrow v0 Compiler — Complete Implementation Plan
 
-**Source of truth:** The Optic Language Implementation Book (v34 split sources in `book-sources/`, assembled in root and `book-sources/assembled.md`).
+**Source of truth:** The Optic Language Implementation Book (split sources in `book-sources/`, assembled in `book-sources/assembled.md`; appendices C/D/E normative for milestones/EBNF/grades).
 
-**Goal:** Deliver a *fully working*, executable narrow-v0 compiler (and supporting runtime) that meets the book's M0–M6 milestone gates for the prelude. The output must include:
+**Goal:** Deliver a *fully working*, executable narrow-v0 compiler (and supporting runtime) that meets the book's M0–M6 milestone gates for the prelude (app C). M7+ (prisms/traversals full syntax, observability profile/replay real) deferred per book. Output includes:
 - A usable `opticc` CLI (and library API).
 - End-to-end: `.opt` source → parse → HIR + summaries → type/grade/alias check (with good diagnostics) → CGIR (with provenance) → the three fusion rewrites → readable, correct Rust emission.
 - Tiny `optic-runtime` (Cursor + SoA support).
@@ -10,7 +10,7 @@
 - Golden fixtures, diagnostics, and benchmark baselines (per appendix B).
 - All per the normative EBNF (appendix D), grade rules (ch. 6/9 + appendix E), OpticSummary / Cursor / CGIR shapes (ch. 8/10), codegen shape (ch. 11), and milestone ladder (appendix C).
 
-**Scope for "complete" (this task):** Narrow v0 only (lens-like optics, in-memory SoA, CacheGrade + OwnershipGrade v0 carrier, the three fusions). Later features (prisms, LLVM, full 8D grades, multicore, coinduction, self-hosting) are explicitly out of scope for the first delivery but the architecture must not paint them into a corner (reserve nodes, keep summaries rich, etc.).
+**Scope for "complete" (this task):** Narrow v0 only per book ch7/app D (GradedOptic + get/put, lens-like, in-memory SoA, CacheGrade + OwnershipGrade v0, three fusions). Select M7/M8 scaffolding for prism/traversal/tap/record examples present (preview/review or get/put lowering, m7_reserved=false, comment hooks); full traverse/update syntax, profile/replay real, richer grades out of scope. Architecture reserves nodes for later.
 
 **Non-goals for first delivery:** Full project graph / `optic init`, LSP, multicore, native LLVM (ch16), staging (ch14), rich experimental lanes. We implement the *semantic microscope* (Rust backend) described in ch11.
 
@@ -21,8 +21,8 @@
 - `ConcreteGrade { cache: u8 (255=∞), ownership: OwnershipDim { share: Rational, read_only: bool, must_use: bool } }`.
 - Surface aliases: `LinearGrade`, `AffineGrade`, `SharedGrade`, `CacheGrade<N>`, `OwnershipGrade<r>`, `_` (infer).
 - `Cursor<'a, S> { arena: &'a mut S, id: usize }` — the operational heart (ch5/8/11).
-- **CGIR** (ch10): `CgirGraph { nodes: IndexVec<NodeId, CgirNode>, roots, provenance_index }`.
-  Nodes (core v0): `OpticLeaf {get_fn, put_fn, summary, ...}`, `Compose`, `Product`, `QueryGet/Set/Map`, `FusedLoop { original_ids, ... }`.
+- **CGIR** (ch10): `CgirGraph { nodes: Vec<CgirNode>, roots, provenance_index, resolved_optics, region_map }` (hand-rolled u32 NodeId indexing for determinism; no external IndexVec crate).
+  Nodes (core v0 + select M7/M8 scaffolding): `OpticLeaf`, `Compose`, `Product`/`ProductFlat`, `Query*`, `FusedLoop`, `PrismLeaf`/`TraversalLeaf` (m7_reserved=false for supported), `Tap`/`Record` (m7_reserved=false for tap/record).
 - **Three fusions** (fixed-point driver, provenance-preserving):
   1. Map fusion (chained pure `.map` collapse).
   2. Compose fusion (intermediate focus does not escape → single loop body + temps).
@@ -74,7 +74,7 @@
 - **Host language:** Rust (1.95+ present in env). Natural for systems work, excellent for the "Rust transpiler as semantic microscope".
 - **Project structure:** Cargo workspace exactly as appendix B recommends (`crates/optic-*` split). Thin crates early; merge only if it hurts velocity. Top-level `Cargo.toml` workspace + `opticc` bin in `crates/optic-cli`.
 - **Parser:** 100% hand-written per ch7 (lexer with longest-match scan for >>>/***, depth-counted nested block comments; recursive descent + binding-power for optic_expr). No generated parser (pest etc. avoided for fidelity to "deterministic recovery" story). Spans: byte offsets + source map or (line, col, len).
-- **IR containers:** Custom `IndexVec<Id, T>` (newtype u32 id + Vec) for deterministic ids, easy snapshots, no external graph crate initially (petgraph optional later). Keeps provenance trivial.
+- **IR containers:** hand-rolled `Vec<CgirNode>` + u32 `NodeId` (manual indexing in CgirGraph { nodes: Vec<...>, resolved_optics, region_map }) for deterministic ids, easy snapshots. No external IndexVec or graph crate. Keeps provenance trivial. (See updated CGIR desc + actual optic-cgir.)
 - **Grades / Rational:** Pure-Rust first (`struct Rational { num: i64, den: u64 }` + gcd reduce + ops). `ConcreteGrade` with sat_add / max. Z3 (`z3` crate) feature-gated for future symbolic / harder inference (libs already installed in env; we can `cargo add z3` later if pure Rust inference proves insufficient for the acceptance suite). Book emphasizes Z3 experience from Granule; we keep the door open.
 - **Diagnostics:** Structured `Diagnostic { code: "GRA-104", phase, primary_span, rule, evidence: serde_json::Value, minimal_fix_options, next_commands }`. Human pretty-print + `--json`. Use simple emitter (or ariadne-like if dep added; start with hand-rolled for zero surprise).
 - **CLI:** `clap`. Subcommands: `check`, `transpile`, `dump-ast/hir/cgir`, `run` (transpile + compile + execute harness for verification). Also support the explain / doctor style from app B.
@@ -90,7 +90,7 @@
   - No hidden semantics.
 - **Codegen:** String building or `quote`/`proc-macro2` (prefer minimal; start with `write!` + a small pretty emitter for deterministic names + comments). Emit complete `fn main` test harnesses for examples or pure mutation fns + driver.
 - **Deps (minimal, justified):**
-  - Core: `thiserror`, `index_vec` or hand-rolled IndexVec (to avoid extra), `serde` + `serde_json` for dumps/diagnostics/fixtures.
+  - Core: `thiserror`, `serde` + `serde_json` for dumps/diagnostics/fixtures. (No index_vec; hand-rolled Vec<u32 ids> used in CGIR.)
   - CLI: `clap`, `anyhow`.
   - Optional: `z3` (feature `solver`), `num-rational` (or hand-rolled), `insta` or file-compare for golden.
   - Build: keep dev-deps light.
@@ -265,27 +265,10 @@ This plan is derived directly from the book (specific chapter/appendix reference
 | M3 CGIR + verifier | **done** | `resolved_optics` alias map; reachability GC through query→optic spine; **`dump-cgir --node NAME\|N`** (name via `resolved_optics`, then numeric id); early **CGI-003** for unsupported optic bodies in compose chains; compose wiring uses **summary** focus/costate; unreachable materialized `FusedLoop` flagged; `dump-cgir --check`; CGIR goldens incl. `health_get`/`health_set` pre+post |
 | M4 fusions | **done** | ch10 order map→compose→product; map fusion; compose body rewrite; nested compose chain fusion; **`ProductFlat` materialization** (nested+leaf products rewritten in-place; provenance `ProductFlattening`; verify invariants); `intermediate_escapes_query`; FUS-501/FUS-502 |
 | M5 Rust backend + run | **done** | `RegionMap` from data decls threaded via `CgirGraph`; nested compose with `FocusField` put spine; `nested_position.opt` end-to-end; `fixtures/rust/` + `fixtures/bench/` incl. nested_position; codegen returns `Err` for unknown regions; `region_bind`/`column_init` derive from `ColumnInfo` (custom record defaults remain fixture-driven for harness init only) |
-| M6 release polish | **done** | ... ; 2026-06-20: added debug_assert/guards + sync (see § robustness pass); no behavior change on valid paths |
+| M6 release polish | **done** | ... ; 2026-06-20: added debug_assert/guards + sync (see § robustness pass); no behavior change on valid paths. M0-M6 core complete per app C. |
 
-**Diagnostic catalog (aligned to book):**
-- GRA-110: optic-decl CacheGrade tighter than inferred (ch9.9.3)
-- GRA-104: sequential `>>>` composition exceeds bound (ch9.9.4)
-- ALI-201: alias conflict with `conflicting_regions` evidence
-- TYP-001: unknown costate/focus type (ch9 type universe)
-- TYP-002: optic body type mismatch vs declared focus
-- TYP-003: invalid grade annotation syntax (OwnershipGrade rational, unknown dim)
-- TYP-004: cannot infer optic body type (v0)
-- TYP-010: `unsafe optic` / `extern` host boundary syntax rejected in narrow v0 (prism + traversal supported M7)
-- EXP-001: unknown `--node` (explain-grade/focus, dump-summary, dump-cgir name misses)
-- PAR-001: parse error (incl. `MAX_PARSE_DEPTH = 512` stack-overflow guard in `optic-syntax`)
-- PAR-010+: reserved for future parse error subcodes (v0 uses PAR-001 for syntax + depth limit)
-- FUS-501: compose fusion blocked — intermediate escapes (non-fatal note in `check`)
-- FUS-502: compose fusion blocked — legality precondition (focus/costate, impurity, non-leaf)
-- CGI-003: unsupported optic body / compose+prism (`prism_in_compose`) / compose+traversal (`traversal_in_compose`)
-- CGI-006: M7/M8 reserved CGIR node materialized in narrow v0 graph (structured diag via `cgir_m7_reserved_diag` / `verify_to_diagnostic`)
-- OBS-701: unsupported observability query method (`.profile`/`.replay` deferred; `unsupported_profile.opt`, `unsupported_replay.opt`)
-- OBS-702: observability hook must precede query methods (trailing `.tap`/`.record` rejected; `trailing_tap.opt`, `trailing_record.opt`)
-- RES-001 / other CGI-*: resolve and CGIR build/verify errors
+**Diagnostic catalog (v0 implements book subset; full catalog in app A):**
+- GRA-110, GRA-104, ALI-201, TYP-001/002/003/004/010, EXP-001, PAR-001 (PAR-010+ reserved), FUS-501/502, CGI-003/006, OBS-701/702, RES-001 etc. (see v0-executable-spec.md + code for exact; book has additional PAR-*/OPT-*/etc reserved for M7+)
 
 **Positive examples** use `CacheGrade<2>` for single-field get+put lenses (inferred cache = sat_add(1,1) = 2).
 
@@ -294,67 +277,68 @@ This plan is derived directly from the book (specific chapter/appendix reference
 2. **PathLift + nested field paths** (SUG-004): `PathLift.prefix` + `is_subregion` dotted lattice; seq/par summary lift; `HirExpr::FocusField`; `nested_position.opt` + full golden parity (tokens/ast/hir/cgir/rust/bench)
 3. **Region→field mapping** (SUG-003): `RegionMap` from `data` decls on `CgirGraph`; codegen uses structured `lookup_region_*` returning `Err`; record types emitted for nested structs
 
-**Completed M6 (2026-06-19):**
+**Completed M6 (2026-06-19; narrow v0):**
 1. `opticc explain-grade file.opt --node NAME [--json]` — declared vs inferred cache/ownership + regions
 2. `docs/v0-executable-spec.md` — executable spec cross-referencing M0–M6, CLI, diagnostics, fixture workflow
 3. `crates/optic` facade — `parse`, `lower`, `check`, `build_cgir`, `optimize`, `emit_rust`, `compile_*`, `Diagnostic`
 4. TYP-001/002/003 catalog + `examples/typ*.opt` + `fixtures/diagnostics/typ*.json`
 5. Property/smoke tests: parse→lower idempotence + summary regions ⊆ declared columns (`crates/optic`)
 
-### Prelude-complete summary (2026-06-19)
+### Prelude-complete summary (M0-M6 narrow v0; 2026-06-20)
 
-Appendix B: **`alive_filter.opt`** (positive M7 prism e2e), **`all_healths.opt`** (positive M7 traversal e2e), **`tap_health.opt`** / **`record_health.opt`** / **`tap_record_chain.opt`** / **`compose_tap.opt`** (positive M8 observability e2e), **`unsupported_prism.opt`** / **`unsupported_traversal.opt`** (GRA-110 parse fixtures), **`unsupported_profile.opt`** / **`unsupported_replay.opt`** (OBS-701), **`trailing_tap.opt`** / **`trailing_record.opt`** (OBS-702), **`compose_traversal.opt`** (CGI-003 `traversal_in_compose`), and **`host_boundary.opt`** (TYP-010 `foreign_decl` + `unsafe_optic`) with `fixtures/diagnostics/*.json` witnesses and `optic-cli` integration tests.
+Appendix B (extended examples for scaffolding): **`alive_filter.opt`** (M7 prism e2e via preview), **`all_healths.opt`** (M7 traversal e2e via get/put), **`tap_health.opt`** etc. (M8 obs hooks); negatives for OBS/TYP/ GRA. (Note: narrow v0 EBNF per app D is GradedOptic get/put only; prism/traversal surface is extension scaffolding.)
 
-New CLI / facade commands:
+New CLI / facade commands (M6 + scaffolding):
 - `opticc explain-focus file.opt --node NAME [--json]` — PathLift prefix, root-path, focus_fields
 - `opticc dump-summary file.opt --node NAME|N` — optic/let **name** lookup (name before numeric id)
 - `opticc dump-cgir file.opt --node NAME|N` — optic/let **name** lookup via `resolved_optics` (name before numeric id)
 - `opticc doctor [file.opt]` — toolchain check; optional per-file `check`
-- `opticc bench [file.opt] [--update]` — all examples or single-file harness
+- `opticc bench [file.opt] [--update]` — all (core) examples or single-file harness
+- `opticc profile` / `replay` — OBS-701 surface stubs (narrow)
 
-### M7 prism lowering (status: **done**)
+### M7 prism lowering (status: scaffolding; narrow-v0 core complete)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| CGIR M7/M8 reserved variants | **done** | `PrismLeaf`, `TraversalLeaf` (M7); `Tap`, `Record` (M8 lowered when `m7_reserved=false`); **CGI-006** for stubs; **OBS-701** for profile/replay |
+| CGIR M7/M8 reserved variants | scaffolding | `PrismLeaf`, `TraversalLeaf` (M7, m7_reserved=false for e2e like alive/all); `Tap`/`Record` (M8, m7_reserved=false for tap/record); **CGI-006** for true stubs; **OBS-701** for profile/replay. Full M7 per book (incl. traverse/update syntax) deferred beyond narrow. |
 | `dump-cgir --node NAME\|N` | **done** | `resolve_cgir_node`; name-before-numeric; unknown name → EXP-001; unknown id → `node id N not found` |
-| Appendix B doc stubs | **done** | `docs/observability-v0.md`, `docs/effect-coeffect-v0.md` |
+| Appendix B doc stubs | scaffolding | `docs/observability-v0.md`, `docs/effect-coeffect-v0.md` (M7/M8) |
 | `opticc explain TYP-010` / `CGI-006` | **done** | Enriched catalogs; prism no longer TYP-010 |
-| Structured CGI-006 wiring | **done** | `verify_to_diagnostic` on optimize + verify + `dump-cgir --check`; stub `PrismLeaf` still CGI-006 |
-| GradedPrism HIR → CGIR → codegen | **done** | `alive_filter.opt` e2e; `PrismLeaf` with `m7_reserved=false` passes verify |
-| GradedTraversal lowering | **done** | `all_healths.opt` e2e; v0 surface uses get/put (book traverse/update deferred); `TraversalLeaf` with `m7_reserved=false` passes verify; `// simd-eligible` metadata bridge |
-| `compose_field_access.opt` | **wontfix** | whole-column `s.healths` get body rejected at typeck (**TYP-004**); CGI-003 preserved for CGIR compose-chain bodies |
+| Structured CGI-006 wiring | scaffolding (narrow) | `verify_to_diagnostic` on optimize + verify + `dump-cgir --check`; stub `PrismLeaf` still CGI-006 |
+| GradedPrism HIR → CGIR → codegen | scaffolding (narrow) | `alive_filter.opt` e2e via preview; `PrismLeaf` with `m7_reserved=false` passes verify (full M7 syntax deferred per book) |
+| GradedTraversal lowering | scaffolding (narrow) | `all_healths.opt` e2e; v0 surface uses get/put (book traverse/update deferred per app D); `TraversalLeaf` with `m7_reserved=false` passes verify; `// simd-eligible` metadata bridge |
+| `compose_field_access.opt` | **wontfix** | whole-column `s.healths` get body rejected at typeck (**TYP-004**); CGI-003 preserved for CGIR compose-chain bodies (per book narrow EBNF + ch7) |
 
-**Next iteration priorities:**
-1. traverse/update surface syntax + full AVX intrinsics bridge (beyond v0 metadata comment)
-2. profile/replay observability CLI + grade-controlled erasure passes
+**Next iteration priorities (narrow v0 scope only):**
+1. traverse/update surface syntax + full AVX intrinsics bridge — **wontfix for narrow v0** (book ch13, app D EBNF: narrow uses get/put for GradedTraversal; full syntax deferred to M7+)
+2. profile/replay observability CLI + grade-controlled erasure passes — stubs present (OBS-701 gate, no-op fns, CLI delegates to check); full per book M8, outside narrow v0 scope (wontfix here; see docs/observability-v0.md)
 
-### M8 observability scaffolding (status: **done**)
+### M8 observability scaffolding (status: stubs + surface gate for narrow v0; full M8 deferred)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| `.tap("label")` / `.record("event")` surface | **done** | Query-chain methods; parser + AST `QueryMethod` variants |
-| HIR → CGIR lowering | **done** | `ObsHook` on `HirQuery` → `Tap`/`Record` with `m7_reserved=false` |
-| `verify` / `is_allowed_m7_node` | **done** | Lowered Tap/Record pass verify; stubs still **CGI-006** |
-| Codegen comment hooks | **done** | `// optic(tap):` / `// optic(record):`; inner optic still runs |
-| **OBS-701** diagnostics | **done** | `.profile`/`.replay` rejected; `unsupported_profile.opt` / `unsupported_replay.opt` + JSON witnesses |
-| **OBS-702** diagnostics | **done** | Trailing `.tap`/`.record` rejected; `trailing_tap.opt` / `trailing_record.opt` + JSON witnesses |
-| Hook-string policy | **done** | Single-line ASCII labels; parse-time validation — see `docs/observability-v0.md` §Hook string policy |
-| Structural limitations | **done** | Prefix-only hooks, orphan CGIR nodes, FusedLoop skip — see `docs/observability-v0.md` §v0 structural limitations |
-| Examples + goldens | **done** | Per-example inventory: `tap_health.opt` + `record_health.opt` (tokens/ast/hir/cgir/rust/bench); `tap_record_chain.opt` (tokens/ast/hir/cgir/rust, no bench); `compose_tap.opt` (cgir/rust only) |
+| `.tap("label")` / `.record("event")` surface | scaffolding (narrow) | Query-chain methods; parser + AST `QueryMethod` variants; lowered to comment hooks only (full runtime M8) |
+| HIR → CGIR lowering | scaffolding (narrow) | `ObsHook` on `HirQuery` → `Tap`/`Record` with `m7_reserved=false` |
+| `verify` / `is_allowed_m7_node` | scaffolding (narrow) | Lowered Tap/Record pass verify; stubs still **CGI-006** |
+| Codegen comment hooks | scaffolding (narrow) | `// optic(tap):` / `// optic(record):`; inner optic still runs |
+| **OBS-701** diagnostics | scaffolding (narrow) | `.profile`/`.replay` rejected; `unsupported_profile.opt` / `unsupported_replay.opt` + JSON witnesses |
+| **OBS-702** diagnostics | scaffolding (narrow) | Trailing `.tap`/`.record` rejected; `trailing_tap.opt` / `trailing_record.opt` + JSON witnesses |
+| Hook-string policy | scaffolding | Single-line ASCII labels; parse-time validation — see `docs/observability-v0.md` §Hook string policy |
+| Structural limitations | scaffolding | Prefix-only hooks, orphan CGIR nodes, FusedLoop skip — see `docs/observability-v0.md` §v0 structural limitations |
+| Examples + goldens | partial (per design) | Per-example inventory: `tap_health.opt` + `record_health.opt` (full tokens/ast/hir/cgir/rust/bench); `tap_record_chain.opt` (tokens/ast/hir/cgir/rust, no bench); `compose_tap.opt` (cgir/rust only) — intentional per fixtures/README (narrow scope) |
 
 **Done (prior rounds + gates):** compose body rewrite + equivalence; nested compose chain fusion/codegen; FUS-501/FUS-502; whole-column reject preserved (TYP-004 at typeck for `compose_field_access.opt`, CGI-003 at CGIR for compose-chain bodies); `original_ids` superset documented in `fixtures/README.md`
 
 ## 9. Post-M7 roadmap
 
-- ~~Lower `GradedPrism` from typed HIR into `PrismLeaf` + Rust codegen~~ (**done** — `alive_filter.opt`)
-- ~~Lower `GradedTraversal` from typed HIR into `TraversalLeaf` + entity-loop codegen~~ (**done** — `all_healths.opt`; v0 emits `// optic(traversal):` + optional `// simd-eligible` metadata comment only — not AVX intrinsics)
+- ~~Lower `GradedPrism` from typed HIR into `PrismLeaf` + Rust codegen~~ (scaffolding — `alive_filter.opt`; full syntax M7+)
+- ~~Lower `GradedTraversal` from typed HIR into `TraversalLeaf` + entity-loop codegen~~ (scaffolding — `all_healths.opt`; v0 get/put only per app D — not traverse/update)
 - Host/foreign boundary lowering for `unsafe optic` / `extern` (HIR prep done 2026-06-20; gate+diags+sanit kept; no golden)
-- traverse/update surface syntax + full SIMD intrinsics bridge (beyond v0 comment metadata) (SIMD metadata+debug hardened 2026-06-20; syntax deferred)
-- ~~Observability tap/record scaffolding (M8)~~ (**done** — `tap_health.opt`, `record_health.opt`; profile/replay **OBS-701**)
-- profile/replay CLI + runtime hooks — see `docs/observability-v0.md` (stubs+CLI added 2026-06-20)
+- traverse/update surface syntax + full SIMD intrinsics bridge (beyond v0 comment metadata) (SIMD metadata+debug hardened; syntax **wontfix narrow** per book ch13/app-D — narrow uses get/put clauses for traversals)
+- ~~Observability tap/record scaffolding (M8)~~ (tap/record comment hooks in narrow; profile/replay **OBS-701** stubs per M8 deferral)
+- profile/replay CLI + runtime hooks — see `docs/observability-v0.md` (stubs+CLI; full M8 outside narrow v0)
 
-### M7 codegen touch list (`optic-codegen-rust`) — **done**
+### M7 codegen touch list (`optic-codegen-rust`) — scaffolding for extension examples (narrow core M5 complete)
 
 - `collect_regions_from_node` — `PrismLeaf` / `TraversalLeaf` summaries
 - `detect_query_mode` — query-wrapped M7 leaves (map/get/set)
@@ -387,10 +371,10 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - Used #[allow] for clippy instead of new fns like is_empty; only debug_assert! (not assert) + guards.
 - Incidental clippy fixes (derives/allows/collapses) documented as required for -D clean verification.
 - All new asserts have msgs; some coverage direct calls added. Clones in dedup restructured (no dup clones).
-- All per "smallest targeted", exact patterns (IndexVec usage, Result<String,String> in emit kept, Arc, dedup order), no new features/M7+.
+- All per "smallest targeted", exact patterns (Vec+u32 ids, Result<String,String> in emit kept, Arc, dedup order), no new features/M7+.
 - Verified: fmt+clippy clean; cargo test relevant (golden, execution, parse_recovery, diagnostics, security); full pipeline on examples; no heuristic fallbacks added.
 
-### 2026-06-20 continuation (narrow v0 + robustness)
+### 2026-06-20 continuation (narrow v0 + robustness + plan sync)
 - Parser depth: threaded + guards + +1 on *all* decl entry+body recursion (parse_data/extern/optic/let/fn, get/put/preview/review clauses, blocks, queries, optic/expr from bodies); test covers decl bodies (safe depth exercises guards).
 - Emit hardening: eliminated last bare .unwrap() in prod emit (MapDecay) using structured Result + removed redundant post-check debug_assert.
 - Added debug_assert/guards: CGIR build for unsafe_boundary (lowering prep), is_simd_eligible_region, boundary lowering invariants in hir; no new variants.
@@ -400,9 +384,10 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - profile/replay: added runtime no-op hooks (profile/replay); added CLI Profile/Replay subcommands (surface OBS-701 via compile gate + note).
 - traverse/update + SIMD: no surface syntax change (per narrow v0 get/put for traversal); enhanced SIMD bridge with debug_assert + name sanitization on // optic(traversal) / // simd-eligible emission; metadata only.
 - No new CGIR variants (avoid fusion/verify update debt); all per exact patterns; new asserts have direct unit/boundary coverage.
-- Sync: updated PLAN, docs/*.md (executable-spec, observability, effect-coeffect), README-IMPLEMENTATION, fixtures/README with continuation notes, status, no drift.
+- Sync: updated PLAN, docs/*.md (executable-spec, observability, effect-coeffect), README-IMPLEMENTATION, fixtures/README with continuation notes, status, no drift. (This task: further PLAN sync to book/appC/EBNF + actual code state + wontfix notes.) See also cross-refs in README-IMPLEMENTATION.md and effect-coeffect-v0.md for 2026 notes.
 - Verified: cargo fmt, clippy -D, tests (incl new depth/sanit), CLI on examples, full pipeline, no unintended golden changes.
 - Addressed past issues proactively: parser depth complete, no bare expect left in emit, no redundant asserts/clones, sanit everywhere for new surfaces, subprocess no inherit, CGIR consistency for leaves, tests for guards, docs/plan in lockstep.
+- 2026-06-20 plan update (this task): synced PLAN to book app C (M0-6 narrow vs M7+ begin), app D EBNF (no traverse syntax in narrow), actual code (Vec+id not IndexVec; partial M7/M8 scaffolding; profile/replay OBS stubs), marked traverse/profile full as wontfix for narrow; added next priorities within scope only.
 
 ### 2026-06-20 impl pass (full match to docs + avoid past issues)
 - Threaded parser depth + guards + +1 into data_decl, extern types/params, let/fn header types + value/body exprs (completes all decl entry+body recursion paths per continuation notes).
@@ -410,10 +395,10 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - Hardened codegen test harness to behaviorally match CLI sandbox (fixed trusted PATH literal + dedup + compile-time bin; no std::env::var capture of parent PATH; env_clear + homes + RUSTUP; cross-ref parity test).
 - Added debug_assert (with msgs) for sanitized hook/traversal names before source embed + CGIR hook id ordering invariants.
 - Verified no bare unwraps in prod paths, no heuristic fallbacks, no unnecessary clones, sanit/validation at boundaries; costate validated at emit (per prior), extended guards.
-- No new features, no golden changes, followed IndexVec/Arc/Result/verify_to_diagnostic patterns exactly.
+- No new features, no golden changes, followed Vec/u32-ids/Arc/Result/verify_to_diagnostic patterns exactly (no index_vec dep).
 - Ran cargo fmt, clippy -D warnings, full tests (golden+exec+depth), CLI on examples + negatives (TYP-010/OBS-*), full pipelines; PLAN/docs/code comments in sync.
-- This delivers fully working narrow-v0 per book+PLAN+v0-spec (M0-M6 + M7/M8 stubs as documented; host/prep/profile/simd metadata only).
+- This delivers fully working narrow-v0 per book+PLAN+v0-spec (M0-M6 core + M7/M8 scaffolding as documented; host/prep/profile/simd metadata only; no narrow surface for traverse/update).
 
 ---
 
-*This PLAN.md lives at the root. Update it as implementation reveals book ambiguities or better conservative choices. Reassemble book sources only if we edit the manuscript itself (per AGENTS.md).*
+*This PLAN.md lives at the root. Update it (smallest precise edits) as implementation reveals book ambiguities or better conservative choices. Reassemble book sources only if we edit the manuscript itself (per AGENTS.md). Keep narrow v0 vs M7+ distinctions per app C.*

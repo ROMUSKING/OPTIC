@@ -104,7 +104,7 @@ cargo run -p optic-cli -- bench --update
 
 Review diffs before commit. See `fixtures/README.md`.
 
-## M7 prism + traversal (done)
+## M7 prism + traversal (scaffolding for narrow v0; book M7 begins full)
 
 - `GradedPrism` preview/review: HIR summaries → `PrismLeaf` (`m7_reserved=false`) → Rust codegen
 - `GradedTraversal` get/put (v0 surface; book traverse/update deferred): HIR summaries → `TraversalLeaf` (`m7_reserved=false`) → entity loop codegen + `// optic(traversal):` + optional `// simd-eligible` for homogeneous `SoA<f32>`
@@ -114,10 +114,10 @@ Review diffs before commit. See `fixtures/README.md`.
 
 ## M7+ deferred
 
-- traverse/update surface syntax (v0 uses get/put clauses for `GradedTraversal`)
-- Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only; 2026-06-20 metadata bridge hardened)
-- `unsafe optic` / `extern` host boundaries (**TYP-010**; HIR lowering prep 2026-06-20)
-- profile/replay observability CLI — see `docs/observability-v0.md` (tap/record scaffolding done; stubs+CLI 2026-06-20)
+- traverse/update surface syntax (v0 uses get/put clauses for `GradedTraversal`; full deferred per book)
+- Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only; hardened)
+- `unsafe optic` / `extern` host boundaries (**TYP-010**; HIR lowering prep)
+- profile/replay observability CLI — see `docs/observability-v0.md` (stubs; full M8)
 
 ## Verification
 

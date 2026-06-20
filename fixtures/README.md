@@ -112,7 +112,7 @@ debug_assert guards + error hardening added (see PLAN); fixtures unchanged (pari
 ## 2026-06-20 continuation
 - Parser depth on decls (fn/let/optic/get/put...) + body test.
 - Host HIR prep + explicit bypass coverage test (gates unchanged).
-- profile/replay CLI arms coverage + runtime stubs.
+- profile/replay CLI arms coverage + runtime stubs (full M8 deferred).
 - Sanit enforced on costate + boundary names.
 - Harness = cli (env_clear+PATH).
 - No clones, redundant asserts cleaned; PLAN/docs match code; goldens untouched.

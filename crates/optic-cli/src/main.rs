@@ -330,11 +330,18 @@ fn trusted_tool_path() -> String {
 }
 
 /// Isolated subprocess env: HOME/CARGO_HOME/RUSTUP_HOME in work_home; toolchain via symlinked toolchains.
+///
+/// # Error contract
+/// Panics (via expect) on directory creation failure. This is intentional fail-fast behavior
+/// for the trusted local harness/sandbox model (used by run/bench/doctor/snapshot). Callers
+/// (which are test/CLI paths) expect a clean writable env or early abort. Changing to Result
+/// would require updating multiple call sites and is out of scope for smallest targeted fix.
+/// Documented to address prior review feedback on error model.
 fn sandbox_command(program: &str, work_home: &Path) -> Command {
     let cargo_home = work_home.join("cargo-home");
     let rustup_home = work_home.join("rustup-home");
-    let _ = fs::create_dir_all(&cargo_home);
-    let _ = fs::create_dir_all(&rustup_home);
+    fs::create_dir_all(&cargo_home).expect("create sandbox cargo-home");
+    fs::create_dir_all(&rustup_home).expect("create sandbox rustup-home");
     let mut cmd = Command::new(resolve_tool_bin(program));
     cmd.env_clear()
         .env("PATH", trusted_tool_path())
@@ -753,28 +760,12 @@ fn hir_binding_candidates(hir: &optic_hir::HirProgram) -> Vec<String> {
 }
 
 fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
-    // dedicated per-invocation temp homes + propagate creates (matches harness/sandbox full pattern) (Issue 1)
+    // Use sandbox_command (env_clear + PATH + homes created inside) for exact parity with run/bench harness (dedup logic)
     let work = tempfile::tempdir().context("doctor temp dir")?;
-    let cargo_home = work.path().join("cargo-home");
-    let rustup_home = work.path().join("rustup-home");
-    std::fs::create_dir_all(&cargo_home).context("doctor cargo-home")?;
-    std::fs::create_dir_all(&rustup_home).context("doctor rustup-home")?;
-    let rustc = Command::new(resolve_tool_bin("rustc"))
-        .env_clear()
-        .env("PATH", trusted_tool_path())
-        .env("HOME", work.path())
-        .env("CARGO_HOME", &cargo_home)
-        .env("RUSTUP_HOME", &rustup_home)
-        .env("RUSTUP_TOOLCHAIN", "stable")
+    let rustc = sandbox_command("rustc", work.path())
         .arg("--version")
         .output();
-    let cargo = Command::new(resolve_tool_bin("cargo"))
-        .env_clear()
-        .env("PATH", trusted_tool_path())
-        .env("HOME", work.path())
-        .env("CARGO_HOME", &cargo_home)
-        .env("RUSTUP_HOME", &rustup_home)
-        .env("RUSTUP_TOOLCHAIN", "stable")
+    let cargo = sandbox_command("cargo", work.path())
         .arg("--version")
         .output();
     match (&rustc, &cargo) {
