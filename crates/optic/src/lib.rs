@@ -329,7 +329,7 @@ mod tests {
 
     // Selection for explicit `match` (vs .expect) on positive Results: targeted only to before_fusion early-return,
     // compile_emit Ok, and inner build_cgir decisions using real TypedHir from record/nested (per cgir scale test
-    // + harness patterns + prior facade continuation). Other .expect kept for smallest delta / existing style.
+    // + harness patterns + prior facade continuation + additional cgir scale guard decision coverage). Other .expect kept for smallest delta / existing style.
     // Some Err paths use explicit match for decision coverage (e.g. TYP-010 in host_boundary); most negative tests
     // use .unwrap_err() for conciseness.
 

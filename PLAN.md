@@ -446,6 +446,16 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - Code comment in compile_cgir_with_limit tightened for the new exercised before/emit decisions.
 - No scope creep: narrow v0 only; strengthened coverage for listed remaining paths without adding features/tests for unasked.
 
+### 2026-06-21 continuation (additional cgir scale guard decision coverage + .expect conversions; this run)
+- Shared verification/avoidance approach as in preceding 2026-06-21 subsections (see PLAN history for past-issues list); avoids duplication + drift.
+- Next smallest targeted continuation: converted 2 additional .expect("build") in cgir tests (test_build_chained_seq_compose_tree using compose_triple.opt, test_verify_accepts_let_alias_decay using health_decay.opt) that exercise build for non-exceed guard paths (real TypedHir) to explicit match using "build must Ok for ..."; updated comments to "explicit match for scale guard decision per continuation"; tiniest additive phrase only to selection comment in optic lib.rs ("+ additional cgir scale guard decision coverage").
+- Followed exact patterns (Vec/Arc/Result/match, .expect only setup, smallest).
+- Golden parity (38 zero drift).
+- Same-pass sync (appended this to PLAN + 3 docs).
+- Addressed common patterns proactively (addressed "Remaining .expect in scale test" + inconsistent match vs expect + missing edge/guard coverage for scale).
+- Full verification at end (fmt, clippy, golden_cgir 38, integration, etc., CLI on positives).
+- No scope creep.
+
 ---
 
 *This PLAN.md lives at the root. Update it (smallest precise edits) as implementation reveals book ambiguities or better conservative choices. Reassemble book sources only if we edit the manuscript itself (per AGENTS.md). Keep narrow v0 vs M7+ distinctions per app C.*

@@ -2314,7 +2314,10 @@ mod tests {
         let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let typed = optic_typeck::check(hirp).expect("check");
-        let g = build(&typed).expect("build");
+        let g = match build(&typed) {
+            Ok(g) => g,
+            Err(e) => panic!("build must Ok for chained seq compose: {e:?}"),
+        }; // explicit match for scale guard decision per continuation
         let compose_count = g
             .nodes
             .iter()
@@ -2402,7 +2405,10 @@ mod tests {
         let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let typed = optic_typeck::check(hirp).expect("check");
-        let g = build(&typed).expect("build");
+        let g = match build(&typed) {
+            Ok(g) => g,
+            Err(e) => panic!("build must Ok for let alias decay: {e:?}"),
+        }; // explicit match for scale guard decision per continuation
         assert!(g.resolved_optics.contains_key("decay"));
         verify(&g).expect("decay alias should verify");
     }
