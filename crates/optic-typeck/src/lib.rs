@@ -1532,13 +1532,15 @@ fn main() { entities.query(HealthView).get(); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let err = check(hirp).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::GRADE_DECL_TIGHT));
         let d = err
             .iter()
             .find(|d| d.code == diag::GRADE_DECL_TIGHT)
-            .unwrap();
-        assert_eq!(d.evidence["inferred"], 2);
-        assert_eq!(d.evidence["annotated"], 1);
+            .expect("GRADE_DECL_TIGHT");
+        assert_eq!(d.evidence.get("inferred").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(
+            d.evidence.get("annotated").and_then(|v| v.as_u64()),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1547,7 +1549,11 @@ fn main() { entities.query(HealthView).get(); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let err = check(hirp).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::GRADE_DECL_TIGHT));
+        // explicit find for real-fixture witness presence (no value asserts added per smallest); matches primary GRA test style post-consolidation
+        let _ = err
+            .iter()
+            .find(|d| d.code == diag::GRADE_DECL_TIGHT)
+            .expect("GRADE_DECL_TIGHT");
     }
 
     #[test]
@@ -1708,9 +1714,13 @@ fn main() { entities.query(X).get(); }
         let src = include_str!("../../../examples/invalid_grade.opt");
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
-        let (typed, diags) = typeck_pass(hirp);
-        assert!(diags.iter().any(|d| d.code == diag::GRADE_DECL_TIGHT));
-        let report = explain_grade_with_diags(&typed, "BadCache", &diags)
+        // explicit find for real-fixture witness presence (no value asserts added per smallest); matches primary GRA test style post-consolidation
+        let (typed, err) = typeck_pass(hirp);
+        let _ = err
+            .iter()
+            .find(|d| d.code == diag::GRADE_DECL_TIGHT)
+            .expect("GRADE_DECL_TIGHT");
+        let report = explain_grade_with_diags(&typed, "BadCache", &err)
             .expect("explain despite other errors");
         assert_eq!(report.inferred.cache, 3);
     }

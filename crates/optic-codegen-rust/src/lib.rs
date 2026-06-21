@@ -1650,7 +1650,17 @@ mod tests {
         let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
         let hir = optic_hir::lower(prog).expect("lower");
         let typed = optic_typeck::check(hir).expect("typeck");
-        let cg = optic_cgir::build(&typed).expect("cgir");
+        let cg = match optic_cgir::build(&typed) {
+            Ok(c) => c,
+            Err(e) => panic!("build must Ok for {example} (real TypedHir non-exceed guard): {e:?}"),
+        };
+        // explicit match for scale guard decision per continuation (exercises early+final non-exceed build guards inside CGIR-build on real golden fixtures for rust goldens).
+        // parse/lower/typeck/optimize/emit remain setup .expect boilerplate per PLAN notes.
+        // Remaining .expect("cgir") in other codegen shape tests left per smallest-targeted rule (helper covers all golden_rust real paths; non-golden tests focus on emit/fusion shapes not scale; covered by cgir direct tests + prior facade work).
+        assert!(
+            cg.nodes.len() < optic_cgir::MAX_CGIR_NODES_V0,
+            "post-build non-exceed guard (real golden via helper)"
+        );
         let graph = optic_opt::optimize(cg).expect("optimize").graph;
         let emitted = emit(&graph, "optic_runtime").expect("emit");
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

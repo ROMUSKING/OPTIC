@@ -494,7 +494,7 @@ pub fn scale_limit_err_string(n: usize) -> String {
 ///
 /// Authoritative source for scale guard strategy:
 /// - Production shape tested directly via this helper in test_max_cgir_nodes_v0_const_and_guard.
-/// - Runtime guard placement/flow (pre-item + end checks) inside build() exercised by build() calls on small (incl. 1-item in dedicated test_max) + real TypedHir (non-exceed paths); the exceed *return* (Vec<Diag>) shape exercised by direct helper calls (the fn build delegates to) + verify(large) in tests (avoids bloat vs PLAN modest N). See test for details.
+/// - Runtime guard placement/flow (pre-item + end checks) inside build() exercised by build() calls on small (incl. 1-item in dedicated test_max) + real TypedHir (non-exceed paths; post token/AST/HIR vs CGIR-build decision layer; exercised by test_query_get_set_pipeline + test_build_tap_record_chain_node_order); the exceed *return* (Vec<Diag>) shape exercised by direct helper calls (the fn build delegates to) + verify(large) in tests (avoids bloat vs PLAN modest N). See test for details.
 /// - Used to limit during-growth allocs; allows at most ~1 item's overage on error path.
 fn scale_limit_exceeded(nodes_len: usize) -> Option<Vec<optic_diagnostics::Diagnostic>> {
     if nodes_len >= MAX_CGIR_NODES_V0 {
@@ -744,7 +744,7 @@ pub fn build(
     };
 
     for item in &typed.items {
-        // Early scale guard (before each item's processing/pushes). See scale_limit_exceeded docs for strategy, test for coverage.
+        // Early scale guard (before each item's processing/pushes; CGIR-build layer after token/AST/HIR). See scale_limit_exceeded docs for strategy, test for coverage.
         // Uses shared helper. Pre-item check means crossing item (adds 1+ nodes, e.g. Query* or roots) may allocate before Err. Allows ~1 item overage on exactly-at-limit hostile input; documented contract (no stricter per-push for v0 smallest).
         if let Some(e) = scale_limit_exceeded(nodes.len()) {
             return Err(e);
@@ -1108,7 +1108,7 @@ pub fn build(
         ))]);
     }
 
-    // Final scale guard (belt+suspenders). See scale_limit_exceeded docs for full strategy/coverage notes.
+    // Final scale guard (belt+suspenders; CGIR-build layer). See scale_limit_exceeded docs for full strategy/coverage notes.
     if let Some(e) = scale_limit_exceeded(nodes.len()) {
         return Err(e);
     }
@@ -2162,7 +2162,7 @@ mod tests {
             items,
             summaries: std::collections::HashMap::new(),
         };
-        let g = build(&typed).expect("build");
+        let g = build(&typed).expect("build"); // .expect OK: synthetic setup TypedHir, not real fixture non-exceed guard path (see PLAN defenses)
         let leaf_sum_ref = g
             .nodes
             .iter()
@@ -2206,7 +2206,16 @@ mod tests {
             .get("H0")
             .map(std::sync::Arc::strong_count)
             .unwrap_or(0);
-        let g = build(&typed).expect("build for integration");
+        let g = match build(&typed) {
+            Ok(g) => g,
+            Err(e) => {
+                panic!("build must Ok for synthetic large-N integration (real capacity path, non-exceed guard): {e:?}")
+            }
+        }; // explicit match for scale guard decision (follows cgir/facade harness style); parse/lower/check .expect kept as setup boilerplate; synthetic needed for N=8 (real fixtures cover other paths)
+        assert!(
+            g.nodes.len() < MAX_CGIR_NODES_V0,
+            "post-build non-exceed guard for integ large-N path"
+        );
         // verify Arc summaries flowed to leaves (sharing), dedup (unique r's), pipeline produced graph with optics
         let mut leaf_count = 0;
         let mut unique_r = std::collections::HashSet::new();
@@ -2451,7 +2460,12 @@ mod tests {
             let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
             let hirp = optic_hir::lower(prog).expect("lower");
             let typed = optic_typeck::check(hirp).expect("check");
-            let g = build(&typed).expect("build");
+            let g = match build(&typed) {
+                Ok(g) => g,
+                Err(e) => {
+                    panic!("build must Ok for {file} (real TypedHir non-exceed guard): {e:?}")
+                }
+            }; // explicit match for scale guard decision per continuation (exercises early per-item + final on health_* fixtures; post token/AST/HIR layer -> CGIR-build)
             assert!(g.nodes.iter().any(|n| {
                 match n {
                     CgirNode::QueryGet { optic_name, .. } if kind == "QueryGet" => {
@@ -2727,11 +2741,21 @@ mod tests {
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hir = optic_hir::lower(prog).expect("lower");
         let typed = optic_typeck::check(hir).expect("typeck");
-        let g = build(&typed).expect("build");
+        let g = match build(&typed) {
+            Ok(g) => g,
+            Err(e) => panic!(
+                "build must Ok for tap_record_chain.opt (real TypedHir non-exceed guard): {e:?}"
+            ),
+        }; // explicit match for scale guard decision per continuation (exercises build guards on record; CGIR-build)
         let out = dump_pretty(&g);
-        let tap_idx = out.find("Tap(HealthView,probe_a").expect("tap node");
-        let rec_idx = out.find("Record(HealthView,probe_b").expect("record node");
-        let map_idx = out.find("QueryMap(HealthView)").expect("map node");
+        assert!(out.contains("Tap(HealthView,probe_a"), "tap node");
+        assert!(out.contains("Record(HealthView,probe_b"), "record node");
+        assert!(out.contains("QueryMap(HealthView)"), "map node");
+        let tap_idx = out.find("Tap(HealthView,probe_a").expect("tap node pos");
+        let rec_idx = out
+            .find("Record(HealthView,probe_b")
+            .expect("record node pos");
+        let map_idx = out.find("QueryMap(HealthView)").expect("map node pos");
         assert!(tap_idx < rec_idx, "tap before record in CGIR dump");
         assert!(rec_idx < map_idx, "record before map in CGIR dump");
     }

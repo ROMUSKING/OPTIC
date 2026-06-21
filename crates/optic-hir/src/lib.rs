@@ -110,7 +110,7 @@ fn lift_region(lift: &PathLift, parent_column: Option<&str>, region: &str) -> Re
         parts.push(region.to_string());
     }
     if parts.len() == 1 {
-        parts.into_iter().next().unwrap()
+        parts[0].clone()
     } else {
         parts.join(".")
     }
@@ -1168,6 +1168,22 @@ fn main() { entities.query(c).map(|(h1,h2)| h1 + h2); }
         let hir = lower(prog).expect("l");
         assert!(hir.items.len() >= 11); // 10 Optic + 1 Let; Arc/dedup paths exercised (many r%5)
     }
+
+    #[test]
+    fn test_pathlift_lift_regions_len1_boundaries() {
+        let id = PathLift::identity();
+        assert_eq!(
+            PathLift::lift_regions(&id, None, &["healths".to_string()]),
+            vec!["healths".to_string()]
+        );
+        let p = PathLift {
+            prefix: vec!["pos".to_string()],
+        };
+        assert_eq!(
+            PathLift::lift_regions(&p, None, &["pos".to_string()]),
+            vec!["pos".to_string()]
+        );
+    }
 }
 
 fn type_expr_name(te: &syn::TypeExpr) -> String {
@@ -1465,10 +1481,14 @@ fn compute_summary_for_optic(
     env: &HashMap<String, Arc<OpticSummary>>,
 ) -> Result<OpticSummary, String> {
     match optic {
-        HirOptic::Named { name, .. } => Ok(env
-            .get(name)
-            .map(|a| (**a).clone())
-            .unwrap_or_else(|| default_summary(name))),
+        HirOptic::Named { name, .. } => {
+            // explicit no-fallback (unified RES-001); see PLAN 2026-06-21
+            if let Some(a) = env.get(name) {
+                Ok((**a).clone())
+            } else {
+                Err(format!("unknown optic `{}`", name))
+            }
+        }
         HirOptic::Seq { lhs, rhs, .. } => {
             let mut s = compute_summary_for_optic(lhs, env)?;
             let r = compute_summary_for_optic(rhs, env)?;
@@ -1506,38 +1526,6 @@ fn compute_summary_for_optic(
                 provenance: l.provenance,
             })
         }
-    }
-}
-
-fn default_summary(name: &str) -> OpticSummary {
-    OpticSummary {
-        name: Some(name.into()),
-        costate: "Entities".into(),
-        focus: "f32".into(),
-        lift: PathLift::default(),
-        get_reads: vec![],
-        put_reads: vec![],
-        put_writes: vec![],
-        get_grade: ConcreteGrade {
-            cache: 1,
-            ownership: OwnershipDim {
-                share: Rational::one(),
-                read_only: false,
-                must_use: false,
-            },
-        },
-        put_grade: ConcreteGrade {
-            cache: 1,
-            ownership: OwnershipDim {
-                share: Rational::one(),
-                read_only: false,
-                must_use: false,
-            },
-        },
-        get_determinism: Determinism::Pure,
-        put_determinism: Determinism::Pure,
-        serializable: true,
-        provenance: Span::dummy(),
     }
 }
 

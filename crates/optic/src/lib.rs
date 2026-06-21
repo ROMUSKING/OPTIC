@@ -247,7 +247,7 @@ pub fn compile_cgir_with_limit(
     let typed = compile_through_check(src, max_bytes, SourceId(1))?;
     let cg = build_cgir(&typed)?;
     if before_fusion {
-        // Note: build() now enforces MAX_CGIR_NODES_V0 (protects pre-fusion dump paths too).
+        // Note: build() now enforces MAX_CGIR_NODES_V0 (protects pre-fusion dump paths too; early return exercised in facade test).
         return Ok(CgirOutcome {
             graph: cg,
             fusion_notes: vec![],
@@ -328,12 +328,16 @@ mod tests {
     use std::collections::HashSet;
 
     // Selection for explicit `match` (vs .expect) on positive Results: targeted only to before_fusion early-return,
-    // compile_emit Ok, and inner build_cgir decisions using real TypedHir from record/nested (per cgir scale test
+    // compile_emit Ok, and inner build_cgir decisions using real TypedHir from record/health + this-run health_get/set/alive/all_healths/tap (per cgir scale test
     // + harness patterns + prior facade continuation + additional cgir scale guard decision coverage). Other .expect kept for smallest delta / existing style.
     // Some Err paths use explicit match for decision coverage (e.g. TYP-010 in host_boundary); most negative tests
     // use .unwrap_err() for conciseness.
+    // 2026-06-21: additional compile/build paths (from_path health_get, alive/all_healths prism/trav, query health_get/set, tap_record) converted to match exercising guards.
+    // Err arms for new matches: covered by existing dedicated reject tests (facade_rejects_*, cgir build_err cases, unwrap_err tests); no bloat added.
+    // 2026-06-21 continuation (this run): codegen helper assert_rust_golden + cgir integration large-N converted build to explicit match (real golden fixtures coverage via helper + synthetic capacity path); follows prior match harness/doctor style. (Note: facade compile_* outer matches transitively exercise inner build guards per compile_through_check path.)
 
     // Note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match).
+    // parse/lower/check .expect in cgir query/tap tests are setup-only (boilerplate common to all real-TypedHir tests; build decision is the exercised guard path per PLAN).
     fn example_src(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
@@ -495,27 +499,37 @@ mod tests {
     fn facade_compile_check_positive() {
         // use record example to exercise real TypedHir (data Entities + Record hook + region_map) through build guards (match binds + asserts non-empty)
         let src = example_src("record_health.opt");
-        let o = compile_check(&src).expect("success");
+        // explicit match (not .expect) for full compile_check Ok decision on primary records/region_map fixture (exercises complete path + internal build guards/early+final scale); record_health is the canonical for Entities/Record
+        let o = match compile_check(&src) {
+            Ok(o) => o,
+            Err(e) => panic!("compile_check must Ok for record_health.opt (real TypedHir non-exceed guard): {e:?}"),
+        };
         debug_assert!(
             !o.typed_hir.items.is_empty(),
             "post-success CGIR/facade assert"
         );
-        // explicit match (not .expect) for build(&TypedHir) Ok decision + non-exceed guard arm on real records data (follows cgir test pattern + harness match style; exercises early+final scale ifs + region build inside; see module selection criteria).
+        // inner build_cgir match for explicit decision coverage on TypedHir (post compile_check); follows harness style (now both outer compile + inner explicit)
         let g = match build_cgir(&o.typed_hir) {
             Ok(g) => g,
-            Err(e) => panic!("build(&TypedHir) decision must Ok for record_health: {e:?}"),
+            Err(e) => {
+                panic!(
+                    "build must Ok for record_health.opt (real TypedHir non-exceed guard): {e:?}"
+                )
+            }
         };
         assert!(!g.nodes.is_empty());
     }
 
     #[test]
     fn facade_compile_emit_positive() {
-        // explicit match (not .expect) for compile_emit Ok decision + post-assert; use nested to exercise real nested/Transform data path through emit (via compile_cgir(false))
+        // explicit match (not .expect) for compile_emit Ok decision + post-assert; use nested to exercise real nested/Transform data path through emit (via compile_cgir(false); CGIR-build layer)
         // health_decay covered via golden_rust + execution + smoke lists (385/443).
         let src = example_src("nested_position.opt");
         let out = match compile_emit(&src) {
             Ok(o) => o,
-            Err(e) => panic!("compile_emit must Ok for nested_position: {e:?}"),
+            Err(e) => {
+                panic!("compile_emit must Ok for nested_position.opt (real non-exceed): {e:?}")
+            }
         };
         assert!(out.contains("run_example"));
     }
@@ -523,11 +537,11 @@ mod tests {
     #[test]
     fn facade_compile_cgir_before_fusion_positive() {
         // use record example to exercise before_fusion early return (build + direct return, no optimize) decision match on real TypedHir (data Entities + Record hook + region_map)
-        // explicit match (not .expect) follows exact match-not-expect + post-asserts (pre-existing nodes; new fusion_notes contract for early return) from cgir scale tests + module selection criteria
+        // explicit match (not .expect) follows exact match-not-expect + post-asserts (pre-existing nodes; new fusion_notes contract for early return) from cgir scale tests + module selection criteria (token/AST/HIR -> CGIR-build)
         let src = example_src("record_health.opt");
         let outcome = match compile_cgir(&src, true) {
             Ok(o) => o,
-            Err(e) => panic!("compile_cgir before_fusion must Ok for record_health: {e:?}"),
+            Err(e) => panic!("compile_cgir before_fusion must Ok for record_health.opt (real TypedHir non-exceed guard): {e:?}"),
         };
         assert!(!outcome.graph.nodes.is_empty());
         assert!(outcome.fusion_notes.is_empty()); // before_fusion early-return contract: fusion_notes must be empty
@@ -570,7 +584,13 @@ mod tests {
     fn facade_compile_check_from_path_positive() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/health_get.opt");
-        let outcome = compile_check_from_path(&path).expect("compile from path");
+        // explicit match (not .expect) for compile path decision on real fixture (exercises full compile through build guards; post token/AST/HIR -> CGIR-build)
+        let outcome = match compile_check_from_path(&path) {
+            Ok(o) => o,
+            Err(e) => panic!(
+                "compile_check_from_path must Ok for health_get.opt (real non-exceed): {e:?}"
+            ),
+        };
         assert!(!outcome.typed_hir.items.is_empty());
     }
 
@@ -712,7 +732,11 @@ mod tests {
     #[test]
     fn facade_compile_check_alive_filter_prism() {
         let src = example_src("alive_filter.opt");
-        let outcome = compile_check(&src).expect("alive_filter must compile");
+        // explicit match for compile path (prism scaffolding real data; exercises build guards/Ok decision in CGIR-build layer)
+        let outcome = match compile_check(&src) {
+            Ok(o) => o,
+            Err(e) => panic!("compile_check must Ok for alive_filter.opt (real non-exceed): {e:?}"),
+        };
         assert!(
             outcome
                 .typed_hir
@@ -726,7 +750,10 @@ mod tests {
     #[test]
     fn facade_compile_check_all_healths_traversal() {
         let src = example_src("all_healths.opt");
-        let outcome = compile_check(&src).expect("all_healths must compile");
+        let outcome = match compile_check(&src) {
+            Ok(o) => o,
+            Err(e) => panic!("compile_check must Ok for all_healths.opt (real non-exceed): {e:?}"),
+        }; // explicit match (compile path exercising build guards)
         assert!(
             outcome
                 .typed_hir
@@ -735,7 +762,10 @@ mod tests {
                 .any(|i| matches!(i, optic_hir::HirItem::Optic { decl, .. } if decl.name.node == "AllHealths" && decl.is_traversal())),
             "AllHealths traversal must be in typed HIR"
         );
-        let emitted = compile_emit(&src).expect("emit traversal example");
+        let emitted = match compile_emit(&src) {
+            Ok(e) => e,
+            Err(e) => panic!("compile_emit must Ok for all_healths.opt (real non-exceed): {e:?}"),
+        };
         assert!(emitted.contains("// optic(traversal): AllHealths"));
         assert!(emitted.contains("// simd-eligible"));
     }
@@ -996,7 +1026,10 @@ mod tests {
     #[test]
     fn facade_compile_emit_alive_filter() {
         let src = example_src("alive_filter.opt");
-        let rust = compile_emit(&src).expect("alive_filter must compile_emit");
+        let rust = match compile_emit(&src) {
+            Ok(r) => r,
+            Err(e) => panic!("compile_emit must Ok for alive_filter.opt (real non-exceed): {e:?}"),
+        }; // explicit match for compile_emit decision (real prism path)
         assert!(rust.contains("run_example"));
         assert!(!rust.contains("if let Some"));
     }
@@ -1007,5 +1040,33 @@ mod tests {
         let report = explain_focus_from_src(&src, "AliveFilter").expect("prism focus report");
         assert_eq!(report.node, "AliveFilter");
         assert_eq!(report.root_path, "entities.healths[id]");
+    }
+
+    #[test]
+    fn lower_let_unknown_named_res001() {
+        // smallest inline coverage for new explicit Err arm in compute_summary_for_optic (Named unknown during let optic-expr lower); exercises lower→lower_to_diags→RES-001. Uses unified message.
+        let src = r#"
+data E { h: SoA<f32> }
+optic A: GradedOptic<E, f32, _> { get s => s.h[s.id] put (s, v) => { s.h[s.id] = v } }
+let bad = A >>> Missing;
+fn main() { entities.query(bad).get(); }
+"#;
+        let errs = lower_src(src).expect_err("lower must fail for unknown Named in let optic-expr");
+        assert!(
+            errs.iter()
+                .any(|d| d.code == "RES-001" && d.rule.contains("unknown optic `Missing`")),
+            "must be RES-001 with unified message from hir compute path"
+        );
+        // 1-line extension for annotated-let parity (make_summary_from_ann path to compute Err)
+        let src_ann = r#"
+data E { h: SoA<f32> }
+optic A: GradedOptic<E, f32, _> { get s => s.h[s.id] put (s, v) => { s.h[s.id] = v } }
+let bad: GradedOptic<E, f32, _> = A >>> MissingAnn;
+fn main() { entities.query(bad).get(); }
+"#;
+        let e2 = lower_src(src_ann).expect_err("ann let");
+        assert!(e2
+            .iter()
+            .any(|d| d.code == "RES-001" && d.rule.contains("unknown optic `MissingAnn`")));
     }
 }
