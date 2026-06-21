@@ -47,6 +47,8 @@ M7 scaffolding: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M
 2026-06-21: hard guards + shared helpers + boundary carry prep + test coverage (build guard via small+helper, TYP-010, harness match) + precise sync; see PLAN.
 2026-06-21 further: match (not expect) on compile_emit (surface gate) + build(&TypedHir) (guard checks) for decision paths; continued doc/plan sync.
 2026-06-21 continuation: explicit build match decision on real TypedHir from nested/records example; plan/docs synced same pass.
+2026-06-21 continuation (facade): added explicit build_cgir match decision coverage in automated facade check_positive test (earlier facade build match work) using real TypedHir from record_health.opt (Entities data decl + Record hook + region_map paths exercised for guard Ok/non-exceed); goldens parity zero-change; same-pass sync to all docs.
+2026-06-21 continuation (before_fusion + emit): explicit `match` on compile_cgir before_fusion early-return (record_health: Entities+Record+region_map) + compile_emit Ok (nested_position: Transform/Entities/region); real data; goldens zero-drift; same-pass sync. (See PLAN for full exercised details.)
 
 
 

@@ -427,6 +427,25 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - Kept golden parity, no scope creep, no new surface/examples, no clones, followed Vec<u32/Arc/Result/if-let/match harness patterns exactly; delta = comment sites (basic/scale/nested) + appends (fidelity to actual touched lines).
 - Avoided past issues (proactive): real nested for records/region_map coverage; goldens/prior matches untouched; same-pass updates with accurate desc ("records/region_map primary"); defended pre-existing .expect (setup) + clone (API); no new prod .expect/bloat.
 
+### 2026-06-21 continuation (facade real TypedHir build coverage; this run)
+- Smallest targeted continuation: strengthened explicit unit test coverage for build guard decision paths using real path -- facade_compile_check_positive now loads record_health.opt (real TypedHir via full front-end incl data decls + Record) and does explicit `match build_cgir(&o.typed_hir) { Ok => , Err=>panic }` to cover Ok decision arm + internal guard non-exceed (early per-item + final); follows exact match pattern from cgir nested test and harness/doctor; also covers record_health in this facade positive path.
+- Golden parity: ran golden_cgir, codegen golden_rust (incl record_health, nested), integration, cli checks on record/nested; all pass, no drift, zero golden updates (preferred).
+- Same-pass doc/plan sync: appended this precise note (exercised: build decision on real records data from record_health.opt + Entities/region/Record paths; harness/CLI coverage) to PLAN + README-IMPLEMENTATION.md + docs/v0-executable-spec.md + fixtures/README.md ; prior 2026 bullets untouched this pass (new subsection only); no contradictory claims; counts per actual diff.
+- Code comment updated at touch site in optic lib test for fidelity to exercised path.
+- Avoided past issues: real (not stub/whitebox/synthetic only) coverage for decision/guard; parity full for new-touched record; docs synced same pass w/ precise exercised desc; no .expect in prod, no clones added, no magic, used existing build_cgir reexport + match harness style, .expect only in test setup/panic paths consistent with prior; no new diags/surface.
+- Full end-to-end verification performed after (see summary); fmt/clippy/test/CLI clean. (Repeated facade + execution + CLI runs evidence non-exceed guards hit on real records graph; no new tooling per smallest.)
+- No scope: narrow v0 only; smallest delta (one src string + match block + 1 assert + appends to 4 docs).
+
+### 2026-06-21 continuation (before_fusion + compile_emit decision coverage; this run)
+- Shared verification/avoidance approach documented in the preceding '2026-06-21 continuation (facade real TypedHir build coverage; this run)' subsection
+  (see original PLAN history for full past-issues list); avoids boilerplate duplication + drift risk.
+- Next smallest targeted continuation: added explicit automated coverage for remaining decision/edge paths using real data -- facade_compile_cgir_before_fusion_positive now does explicit `match compile_cgir(&src, true) { Ok => , Err=>panic }` + post-assert on real record_health.opt TypedHir (covers before_fusion early-return branch + shared build guards/region_map/Record on Entities data decl); facade_compile_emit_positive uses explicit match (not .expect) + post-assert on nested_position.opt (covers compile_emit decision Ok arm + full post path on nested Transform/Entities/region data).
+- Followed exact patterns: match harness style from cgir decision tests + prior facade check_positive; no new fns, no bloat, .expect only in panic/setup; used existing compile_* ; smallest delta (src+fn name tweak + match blocks + asserts + comment tweak in lib.rs).
+- Golden parity: touched record_health + nested_position; ran full golden_cgir (pre/post for both), golden_rust, integration/execution (records/nested/host); zero drift, zero golden updates preferred.
+- Same-pass doc/plan sync: appended this precise exercised-path note (before_fusion early return on records, compile_emit on nested; guard coverage) to PLAN + README-IMPLEMENTATION + v0-executable-spec + fixtures/README (consistent 2026-06-21 continuation style, no lagging phrasing vs actual code paths).
+- Code comment in compile_cgir_with_limit tightened for the new exercised before/emit decisions.
+- No scope creep: narrow v0 only; strengthened coverage for listed remaining paths without adding features/tests for unasked.
+
 ---
 
 *This PLAN.md lives at the root. Update it (smallest precise edits) as implementation reveals book ambiguities or better conservative choices. Reassemble book sources only if we edit the manuscript itself (per AGENTS.md). Keep narrow v0 vs M7+ distinctions per app C.*

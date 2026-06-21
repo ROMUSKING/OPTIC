@@ -327,6 +327,13 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    // Selection for explicit `match` (vs .expect) on positive Results: targeted only to before_fusion early-return,
+    // compile_emit Ok, and inner build_cgir decisions using real TypedHir from record/nested (per cgir scale test
+    // + harness patterns + prior facade continuation). Other .expect kept for smallest delta / existing style.
+    // Some Err paths use explicit match for decision coverage (e.g. TYP-010 in host_boundary); most negative tests
+    // use .unwrap_err() for conciseness.
+
+    // Note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match).
     fn example_src(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
@@ -486,26 +493,44 @@ mod tests {
 
     #[test]
     fn facade_compile_check_positive() {
-        let src = example_src("health_get.opt");
+        // use record example to exercise real TypedHir (data Entities + Record hook + region_map) through build guards (match binds + asserts non-empty)
+        let src = example_src("record_health.opt");
         let o = compile_check(&src).expect("success");
         debug_assert!(
             !o.typed_hir.items.is_empty(),
             "post-success CGIR/facade assert"
         );
+        // explicit match (not .expect) for build(&TypedHir) Ok decision + non-exceed guard arm on real records data (follows cgir test pattern + harness match style; exercises early+final scale ifs + region build inside; see module selection criteria).
+        let g = match build_cgir(&o.typed_hir) {
+            Ok(g) => g,
+            Err(e) => panic!("build(&TypedHir) decision must Ok for record_health: {e:?}"),
+        };
+        assert!(!g.nodes.is_empty());
     }
 
     #[test]
     fn facade_compile_emit_positive() {
-        let src = example_src("health_decay.opt");
-        let out = compile_emit(&src).expect("emit");
+        // explicit match (not .expect) for compile_emit Ok decision + post-assert; use nested to exercise real nested/Transform data path through emit (via compile_cgir(false))
+        // health_decay covered via golden_rust + execution + smoke lists (385/443).
+        let src = example_src("nested_position.opt");
+        let out = match compile_emit(&src) {
+            Ok(o) => o,
+            Err(e) => panic!("compile_emit must Ok for nested_position: {e:?}"),
+        };
         assert!(out.contains("run_example"));
     }
 
     #[test]
-    fn facade_compile_cgir_post_fusion_positive() {
-        let src = example_src("health_get.opt");
-        let outcome = compile_cgir(&src, false).expect("cgir");
+    fn facade_compile_cgir_before_fusion_positive() {
+        // use record example to exercise before_fusion early return (build + direct return, no optimize) decision match on real TypedHir (data Entities + Record hook + region_map)
+        // explicit match (not .expect) follows exact match-not-expect + post-asserts (pre-existing nodes; new fusion_notes contract for early return) from cgir scale tests + module selection criteria
+        let src = example_src("record_health.opt");
+        let outcome = match compile_cgir(&src, true) {
+            Ok(o) => o,
+            Err(e) => panic!("compile_cgir before_fusion must Ok for record_health: {e:?}"),
+        };
         assert!(!outcome.graph.nodes.is_empty());
+        assert!(outcome.fusion_notes.is_empty()); // before_fusion early-return contract: fusion_notes must be empty
     }
 
     #[test]
@@ -647,7 +672,6 @@ mod tests {
     fn hir_direct_lower_unsafe_optic_prep_path() {
         // exercises HIR lowering prep for unsafe (post-skip removal); gates still reject in facade/compile paths
         // (documents direct API delta vs prior silent drop; no golden impact)
-        // note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match)
         let src = example_src("host_boundary.opt");
         let prog = match parse(&src, SourceId(1)) {
             Ok(p) => p,
