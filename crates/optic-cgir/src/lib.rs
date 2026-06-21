@@ -1948,7 +1948,10 @@ mod tests {
     #[test]
     fn test_build_basic() {
         let t = mk_typed_with_optic("H", 0);
-        let g = build(&t).expect("build"); // pre-existing .expect left in setup path per smallest scope; explicit matches added only for targeted decision coverage (scale guard + real records/region_map)
+        let g = match build(&t) {
+            Ok(g) => g,
+            Err(e) => panic!("build must Ok for basic scale guard case: {e:?}"),
+        }; // now explicit match for scale guard basic case per continuation
         assert!(g.nodes.is_empty());
     }
 
