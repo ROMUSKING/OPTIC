@@ -1,5 +1,7 @@
 //! Security regression tests (path limits, size caps, diagnostic hygiene).
 
+#![allow(clippy::assertions_on_constants)]
+
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
 use std::io::{Seek, SeekFrom, Write};
@@ -100,7 +102,7 @@ fn rejects_oversized_source_file() {
         .expect("create huge.opt");
     const LIMIT: u64 = 4 * 1024 * 1024;
     f.seek(SeekFrom::Start(LIMIT + 1)).expect("seek");
-    f.write_all(&[b' ']).expect("write byte");
+    f.write_all(b" ").expect("write byte");
     f.flush().expect("flush");
     opticc()
         .args(["check", &path.to_string_lossy()])

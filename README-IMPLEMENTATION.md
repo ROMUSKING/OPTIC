@@ -44,6 +44,7 @@ Embedding helpers: `compile_check`, `compile_check_from_path`, `compile_emit`, `
 M7 scaffolding: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M8 scaffolding: `.tap`/`.record` → `Tap`/`Record` (`m7_reserved=false`) + hooks; profile/replay → **OBS-701** (stubs). See docs. (Narrow v0 core M0-M6 complete.)
 
 2026-06-20 continuation: ... ; PLAN/docs exact match (this task: plan updated vs book/app C/EBNF + actual Vec impl + wontfix for full traverse/profile in narrow).
+2026-06-21: hard guards + shared helpers + boundary carry prep + test coverage (build guard via small+helper, TYP-010, harness match) + precise sync; see PLAN.
 
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 

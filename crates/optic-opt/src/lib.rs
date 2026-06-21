@@ -713,6 +713,7 @@ mod tests {
             put_value_body: None,
             summary: sum,
             provenance: Span::dummy(),
+            unsafe_boundary: false,
         }
     }
 
@@ -2075,7 +2076,8 @@ mod tests {
         };
         let children = flatten_product_children(&g, 2).expect("prism in product");
         assert_eq!(children, vec![0, 1]);
-        debug_assert!(true, "M7 prism leaf positive construction explicit here + ProductFlat support in verify (R5)");
+        let _ = "M7 prism leaf positive construction explicit here + ProductFlat support in verify (R5)";
+        // doc only, clippy-cleaned from debug_assert(true)
     }
 
     #[test]

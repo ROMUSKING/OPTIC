@@ -771,8 +771,9 @@ fn doctor_check(file: Option<&Path>) -> anyhow::Result<()> {
         .arg("--version")
         .output()
         .context("cargo --version")?;
-    if !(rustc.status.success() && cargo.status.success()) {
-        anyhow::bail!("rustc/cargo not available");
+    match (rustc.status.success(), cargo.status.success()) {
+        (true, true) => {}
+        _ => anyhow::bail!("rustc/cargo not available"),
     }
     println!("rustc: {}", String::from_utf8_lossy(&rustc.stdout).trim());
     println!("cargo: {}", String::from_utf8_lossy(&cargo.stdout).trim());

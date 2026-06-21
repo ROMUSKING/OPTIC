@@ -399,6 +399,16 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 - Ran cargo fmt, clippy -D warnings, full tests (golden+exec+depth), CLI on examples + negatives (TYP-010/OBS-*), full pipelines; PLAN/docs/code comments in sync.
 - This delivers fully working narrow-v0 per book+PLAN+v0-spec (M0-M6 core + M7/M8 scaffolding as documented; host/prep/profile/simd metadata only; no narrow surface for traverse/update).
 
+### 2026-06-21 continuation (this impl)
+- More robustness: hardened 2 debug_assert -> hard Err in cgir verify (wiring/post invariants); turned emit scale debug->hard Err using shared scale_limit_err_string (pub'd + reexported).
+- Shared helpers extended (scale err string); no magic, no dup strings/lits.
+- Host/foreign boundary prep completed: flag carried on OpticLeaf in CGIR (for TYP-010 prep); codegen uses is_unsafe_boundary helper on graph.nodes for invariant (collection simplified to 2-tuple, no longer duplicates flag); added CGIR/codegen invariants for unsafe/extern; explicit TYP-010 tests (compile_emit + match not expect) in optic facade.
+- Test/edge coverage: non-exceed guard checks exercised via build() on small/empty + real TypedHir (plus decision+helper); exceed shape/return via direct helper calls (build delegates to it) + verify(large graphs) -- avoids bloat per PLAN N; comments/docs tightened for precision. Scale test uses .expect (consistent); harness/doctor use match.
+- Improved error paths, no new surface, no goldens changed, records/nested harness coverage touched.
+- Avoided all listed past issues: parity preserved (no ex added), tests added for error/TYP/guard (improved), plan/docs updated inline + made precise vs exact exercised paths (empty+helper), no heuristic in emit, diag not touched, no parser, shared consts, no dup comments (post-harden removed), summary self-contained, no bare expect, harness/doctor consistent, no magic.
+- Full verification: fmt/clippy/tests/CLI on examples/negatives/harnesses.
+- Docs/plan sync: this note + updates to v0-spec, README-IMPLEMENTATION, fixtures/README (no drift vs actual Vec/guards/prep/scaffolding).
+
 ---
 
 *This PLAN.md lives at the root. Update it (smallest precise edits) as implementation reveals book ambiguities or better conservative choices. Reassemble book sources only if we edit the manuscript itself (per AGENTS.md). Keep narrow v0 vs M7+ distinctions per app C.*

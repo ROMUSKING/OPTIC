@@ -1698,7 +1698,7 @@ mod tests {
         for _ in 0..SAFE_DEEP {
             deep2.push('(');
         }
-        deep2.push_str("v");
+        deep2.push('v');
         for _ in 0..SAFE_DEEP {
             deep2.push(')');
         }

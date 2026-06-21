@@ -458,6 +458,7 @@ pub fn cgir_verify_failed_diag(rule: &str) -> Diagnostic {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod cgir_verify_tests {
     use super::*;
 

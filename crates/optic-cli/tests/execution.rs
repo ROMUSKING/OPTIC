@@ -16,11 +16,20 @@ fn parse_entities_line(out: &str, label: &str) -> Vec<f32> {
         .lines()
         .find(|l| l.starts_with(label))
         .unwrap_or_else(|| panic!("missing {label} line in output"));
-    let start = line.find('[').expect("healths array");
-    let end = line.find(']').expect("healths array end");
+    let start = match line.find('[') {
+        Some(s) => s,
+        None => panic!("healths array"),
+    };
+    let end = match line.find(']') {
+        Some(e) => e,
+        None => panic!("healths array end"),
+    };
     line[start + 1..end]
         .split(',')
-        .map(|s| s.trim().parse().expect("f32"))
+        .map(|s| match s.trim().parse() {
+            Ok(v) => v,
+            Err(_) => panic!("f32"),
+        })
         .collect()
 }
 
@@ -33,10 +42,19 @@ fn parse_positions_line(out: &str, label: &str) -> Vec<(f32, f32)> {
     for chunk in line.split('(').skip(1) {
         if let Some(end) = chunk.find(')') {
             let inner = &chunk[..end];
-            let mut nums = inner
-                .split(',')
-                .map(|s| s.trim().parse::<f32>().expect("f32"));
-            pairs.push((nums.next().expect("x"), nums.next().expect("y")));
+            let mut nums = inner.split(',').map(|s| match s.trim().parse::<f32>() {
+                Ok(v) => v,
+                Err(_) => panic!("f32"),
+            });
+            let x = match nums.next() {
+                Some(v) => v,
+                None => panic!("x"),
+            };
+            let y = match nums.next() {
+                Some(v) => v,
+                None => panic!("y"),
+            };
+            pairs.push((x, y));
         }
     }
     pairs
@@ -306,10 +324,19 @@ fn parse_transform_positions_line(out: &str, label: &str) -> Vec<(f32, f32)> {
     for chunk in line.split('(').skip(1) {
         if let Some(end) = chunk.find(')') {
             let inner = &chunk[..end];
-            let mut nums = inner
-                .split(',')
-                .map(|s| s.trim().parse::<f32>().expect("f32"));
-            pairs.push((nums.next().expect("x"), nums.next().expect("y")));
+            let mut nums = inner.split(',').map(|s| match s.trim().parse::<f32>() {
+                Ok(v) => v,
+                Err(_) => panic!("f32"),
+            });
+            let x = match nums.next() {
+                Some(v) => v,
+                None => panic!("x"),
+            };
+            let y = match nums.next() {
+                Some(v) => v,
+                None => panic!("y"),
+            };
+            pairs.push((x, y));
         }
     }
     pairs

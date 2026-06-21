@@ -135,3 +135,4 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - No golden change; coverage added for CLI profile arms, prep paths, hardened errs, body depth.
 - Docs match code: depth on fn/let/optic/getput bodies, harness full clear, prep delta noted, "metadata/stubs/prep only".
 - 2026 impl pass: parser depth + fusion Tap/Record + harness sync + more asserts; fully matches docs.
+- 2026-06-21: more hard guards (verify/emit using shared scale helper), boundary flag carried+invariants in codegen, build guard exercised (small+helper/decision; notes precise vs empty case), match-not-expect + TYP-010 emit path explicit test, harness/doctor match; full verification; plan/docs synced; goldens untouched.

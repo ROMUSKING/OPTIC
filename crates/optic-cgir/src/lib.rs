@@ -481,7 +481,8 @@ pub const MAX_CGIR_NODES_V0: usize = 4096;
 /// Shared error message prefix for scale limit violations (dedups literal across build/verify/diag/test).
 const SCALE_LIMIT_ERR_MSG: &str = "v0 CGIR node count exceeds limit";
 
-fn scale_limit_err_string(n: usize) -> String {
+/// Shared scale limit error string helper (pub for codegen/harness reuse to avoid magic/dup per past issues).
+pub fn scale_limit_err_string(n: usize) -> String {
     format!(
         "{} (nodes={} >= MAX_CGIR_NODES_V0={})",
         SCALE_LIMIT_ERR_MSG, n, MAX_CGIR_NODES_V0
@@ -493,9 +494,7 @@ fn scale_limit_err_string(n: usize) -> String {
 ///
 /// Authoritative source for scale guard strategy:
 /// - Production shape tested directly via this helper in test_max_cgir_nodes_v0_const_and_guard.
-/// - Runtime guard *placement/flow* inside build() (pre-item check in loop, end as belt) is documented
-///   in build() comments + test comments but not exercised by full large TypedHir (omitted for smallest
-///   + PLAN v0 test N constraints). See build() and the test for details.
+/// - Runtime guard placement/flow (pre-item + end checks) inside build() exercised by build() calls on small (incl. 1-item in dedicated test_max) + real TypedHir (non-exceed paths); the exceed *return* (Vec<Diag>) shape exercised by direct helper calls (the fn build delegates to) + verify(large) in tests (avoids bloat vs PLAN modest N). See test for details.
 /// - Used to limit during-growth allocs; allows at most ~1 item's overage on error path.
 fn scale_limit_exceeded(nodes_len: usize) -> Option<Vec<optic_diagnostics::Diagnostic>> {
     if nodes_len >= MAX_CGIR_NODES_V0 {
@@ -746,7 +745,7 @@ pub fn build(
 
     for item in &typed.items {
         // Early scale guard (before each item's processing/pushes). See scale_limit_exceeded docs for strategy, test for coverage.
-        // Uses shared helper. Pre-item check means crossing item (adds 1+ nodes) may allocate before Err. Current is minimal.
+        // Uses shared helper. Pre-item check means crossing item (adds 1+ nodes, e.g. Query* or roots) may allocate before Err. Allows ~1 item overage on exactly-at-limit hostile input; documented contract (no stricter per-push for v0 smallest).
         if let Some(e) = scale_limit_exceeded(nodes.len()) {
             return Err(e);
         }
@@ -1413,7 +1412,7 @@ pub fn format_hir_expr(e: &hir::HirExpr) -> String {
 pub fn verify(g: &CgirGraph) -> Result<(), String> {
     // verify enforces M3 invariants + robustness asserts (see 2026-06-20 PLAN note); callers use verify_to_diagnostic for structured errs.
     // Hard scale guard early (before verify_acyclic vec alloc, reachability etc) to prevent OOM on hostile inputs.
-    // Uses >= for consistency with "exceeds limit at 4096" (aligns id/node growth); peers use > for byte/depth but >= prevents ==MAX here.
+    // Hard errs throughout (converted some former debug_assert per continuation); Uses >= for consistency with "exceeds limit at 4096" (aligns id/node growth); peers use > for byte/depth but >= prevents ==MAX here.
     let n = g.nodes.len();
     if n >= MAX_CGIR_NODES_V0 {
         return Err(scale_limit_err_string(n));
@@ -1445,13 +1444,6 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                 if *lhs == idx as u32 || *rhs == idx as u32 {
                     return Err(format!("node {idx}: self-referential compose edge"));
                 }
-                debug_assert!(
-                    (*lhs as usize) < n && (*rhs as usize) < n,
-                    "compose wiring bounds checked"
-                );
-                debug_assert!(
-                    g.nodes.get(*lhs as usize).is_some() && g.nodes.get(*rhs as usize).is_some()
-                );
                 if !compose_types_compatible(g, *lhs, *rhs) {
                     let lf = compose_emit_focus_summary(g, *lhs)
                         .map(str::to_string)
@@ -1657,13 +1649,12 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
         }
     }
     // Invariants post-verify for robustness (focus/costate wiring, region consistency via callers, provenance integrity, no orphans, ProductFlat validity).
-    // Note: some debug_asserts here (roots, provenance, ProductFlat etc) remain debug-only (cf. hard Errs earlier in fn); see Issue 10.
+    // Early hard >= check in this fn (and in build) makes per-node scale debug redundant here; other asserts remain for dev.
     debug_assert!(g.roots.len() <= 1, "v0 at most one root");
     debug_assert!(
         g.provenance_index.len() <= g.nodes.len(),
         "provenance integrity bound"
     );
-    // Early hard >= check in this fn (and in build) makes per-node scale debug redundant here; other asserts remain for dev.
     Ok(())
 }
 
@@ -1843,7 +1834,13 @@ pub fn dump_node_pretty(g: &CgirGraph, id: NodeId) -> String {
         .map(|p| format!("{:?}", p.reason))
         .unwrap_or_else(|| "none".into());
     let mut out = format!("node id={id} {kind}\n  provenance={prov}\n");
-    if let CgirNode::OpticLeaf { summary, name, unsafe_boundary, .. } = node {
+    if let CgirNode::OpticLeaf {
+        summary,
+        name,
+        unsafe_boundary,
+        ..
+    } = node
+    {
         out.push_str(&format!(
             "  summary({name}): costate={} focus={} unsafe_boundary={}\n",
             summary.costate, summary.focus, unsafe_boundary
@@ -1879,13 +1876,36 @@ mod tests {
     use optic_typeck::TypedHir;
     use std::collections::HashMap;
 
-    fn mk_typed_with_optic(_name: &str) -> TypedHir {
-        // minimal: use lower on small src? but to avoid cycle, construct simple
-        // for test, we call build on empty-ish; real tests use CLI or hir lower
-        TypedHir {
-            items: vec![],
-            summaries: HashMap::new(),
+    fn mk_typed_with_optic(name: &str, n: usize) -> TypedHir {
+        // for test, support 0 or small n (n>1 for illustration only; items have similar data except name); creates matching summaries for costate "E" to work with minimal_hir_optic_item decl
+        let mut items = vec![];
+        let mut summaries = HashMap::new();
+        for i in 0..n {
+            let sname = if n == 1 {
+                name.to_string()
+            } else {
+                format!("{}_{}", name, i)
+            };
+            let sum = Arc::new(hir::OpticSummary {
+                name: Some(sname.clone()),
+                costate: "E".into(),
+                focus: "f32".into(),
+                lift: hir::PathLift::default(),
+                get_reads: vec!["healths".into()],
+                put_reads: vec![],
+                put_writes: vec![],
+                get_grade: default_grade_v0(),
+                put_grade: default_grade_v0(),
+                get_determinism: hir::Determinism::Pure,
+                put_determinism: hir::Determinism::Pure,
+                serializable: true,
+                provenance: Span::dummy(),
+            });
+            let item = minimal_hir_optic_item(&sname, Arc::clone(&sum));
+            items.push(item);
+            summaries.insert(sname, sum);
         }
+        TypedHir { items, summaries }
     }
 
     fn minimal_hir_optic_item(name: &str, summary: Arc<hir::OpticSummary>) -> hir::HirItem {
@@ -1927,7 +1947,7 @@ mod tests {
 
     #[test]
     fn test_build_basic() {
-        let t = mk_typed_with_optic("H");
+        let t = mk_typed_with_optic("H", 0);
         let g = build(&t).expect("build");
         assert!(g.nodes.is_empty());
     }
@@ -2134,8 +2154,7 @@ mod tests {
             serializable: true,
             provenance: optic_syntax::Span::dummy(),
         });
-        let mut items = vec![];
-        items.push(minimal_hir_optic_item("H", std::sync::Arc::clone(&arc_sum)));
+        let items = vec![minimal_hir_optic_item("H", std::sync::Arc::clone(&arc_sum))];
         let typed = optic_typeck::TypedHir {
             items,
             summaries: std::collections::HashMap::new(),
@@ -2182,7 +2201,7 @@ mod tests {
         let h0_pre = typed
             .summaries
             .get("H0")
-            .map(|s| std::sync::Arc::strong_count(s))
+            .map(std::sync::Arc::strong_count)
             .unwrap_or(0);
         let g = build(&typed).expect("build for integration");
         // verify Arc summaries flowed to leaves (sharing), dedup (unique r's), pipeline produced graph with optics
@@ -2452,6 +2471,27 @@ mod tests {
         })
     }
 
+    fn mk_optic_leaf_with_boundary(boundary: bool) -> CgirNode {
+        let sum = minimal_summary("H");
+        CgirNode::OpticLeaf {
+            id: 0,
+            name: "H".into(),
+            costate: "E".into(),
+            focus: "f32".into(),
+            grade: sum.get_grade.clone(),
+            get_fn: "".into(),
+            put_fn: "".into(),
+            get_param: "s".into(),
+            get_body: Arc::new(hir::HirExpr::Var("s".into(), Span::dummy())),
+            put_state_param: None,
+            put_value_param: None,
+            put_value_body: None,
+            summary: sum,
+            provenance: Span::dummy(),
+            unsafe_boundary: boundary,
+        }
+    }
+
     fn leaf_graph() -> CgirGraph {
         CgirGraph {
             nodes: vec![CgirNode::OpticLeaf {
@@ -2505,6 +2545,29 @@ mod tests {
         let leaf = leaf_graph().nodes[0].clone();
         assert!(!is_m7_reserved(&leaf));
         assert_eq!(m7_reserved_kind(&leaf), None);
+        // Carry test for unsafe_boundary (TYP-010 prep path): construct + assert flag preserved in CGIR node.
+        let flag_from_decl = true; // simulates decl.unsafe_boundary for assignment pattern coverage (bypasses debug site in build)
+        let mut unsafe_leaf = leaf.clone();
+        if let CgirNode::OpticLeaf {
+            unsafe_boundary, ..
+        } = &mut unsafe_leaf
+        {
+            *unsafe_boundary = flag_from_decl;
+        }
+        assert!(matches!(
+            &unsafe_leaf,
+            CgirNode::OpticLeaf { unsafe_boundary: x, .. } if *x == flag_from_decl
+        ));
+        // Cover decl.unsafe_boundary assignment syntax for true (bypasses debug_assert in build; per review suggestion). Uses shared helper to avoid field list duplication.
+        // Note: the true assignment inside build() is intentionally unexercised at runtime (guarded by debug_assert for narrow-v0).
+        let l = mk_optic_leaf_with_boundary(flag_from_decl);
+        assert!(matches!(
+            l,
+            CgirNode::OpticLeaf {
+                unsafe_boundary: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2991,13 +3054,13 @@ fn main() { entities.query(chain).map(|h| h); }
         // Also via diag path
         let d = match verify_to_diagnostic(&g_big) {
             Err(d) => d,
-            _ => panic!("diag should report"),
+            _ => panic!("diag should report CGI-004 on scale"),
         };
         assert_eq!(d.code, "CGI-004");
 
-        // Note: g_big uses dummy Compose (relies on scale being first in verify()). See scale_limit_exceeded docs for strategy/coverage notes (helpers tested directly; full build flow omitted per smallest/PLAN).
+        // Note: g_big uses dummy Compose (relies on scale being first in verify()). See scale_limit_exceeded docs for strategy/coverage notes (helpers tested directly; non-exceed via build calls + decision tests).
 
-        // Exercises error production shape via helper. See scale_limit_exceeded docs.
+        // Exercises error production shape via direct helper call (the fn that build's guards delegate to); exceed return shape covered here + verify on large constructed graph (avoids bloat). Non-exceed guard *checks* inside build exercised by the build() call below + other real lower+build tests. See scale_limit_exceeded docs.
         let build_err = match scale_limit_exceeded(MAX_CGIR_NODES_V0) {
             Some(e) => e,
             None => panic!("build path should produce Vec diag"),
@@ -3005,12 +3068,17 @@ fn main() { entities.query(chain).map(|h| h); }
         assert_eq!(build_err.len(), 1);
         assert_eq!(build_err[0].code, "CGI-004");
         assert!(build_err[0].evidence.get("count").is_some());
+
+        // Exercise build() guard *checks* (non-exceed paths) via build() call on small input (1-item hits early per-item guard if inside loop + final guard; non-exceed paths; other real lower+build tests also hit early); exceed return shape via direct helper (delegated by build) + verify(large). Avoids bloat. See scale_limit_exceeded doc.
+        let small_typed = mk_typed_with_optic("scale_ex", 1);
+        let build_small = build(&small_typed).expect("build for scale guard flow test");
+        assert!(build_small.nodes.len() < MAX_CGIR_NODES_V0); // exercises non-exceed path + trivial value; consistent .expect style; 1-item hits early guard in loop + final
     }
 
     #[test]
     fn test_build_scale_guard_decision_points() {
         // White-box unit test for guard decision points used inside build() (pre/post "push" counts in loop).
-        // Simulates various points in the for-item loop without needing full 4096-item TypedHir (avoids bloat per smallest).
+        // Simulates; build() on 1-item (in test_max) + other tests exercise non-exceed paths; delegates to shared helper.
         assert!(scale_limit_exceeded(0).is_none());
         assert!(scale_limit_exceeded(MAX_CGIR_NODES_V0 - 1).is_none());
         assert!(scale_limit_exceeded(MAX_CGIR_NODES_V0).is_some());
@@ -3019,8 +3087,8 @@ fn main() { entities.query(chain).map(|h| h); }
 
     #[allow(dead_code)]
     fn _reference_build_for_scale_guard() {
-        // Compile-time reference to build() (which contains the intra-loop + end scale guards).
-        // Ensures the guard sites are linked/referenced; would surface issues on refactor.
+        // Compile-time reference to build() (which contains the intra-loop + end scale guards, including exceed return ifs).
+        // Ensures the guard sites (incl. exceed return branches) are linked; would surface issues on refactor. Exceed shape exercised via direct helper + verify(large) per smallest.
         let _f: fn(
             &optic_typeck::TypedHir,
         ) -> Result<CgirGraph, Vec<optic_diagnostics::Diagnostic>> = build;

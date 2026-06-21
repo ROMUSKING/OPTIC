@@ -10,8 +10,8 @@
 
 pub use optic_cgir::{
     build as build_cgir, dump_node_pretty, find_node_by_id, is_m7_reserved, leaf_summary_by_id,
-    m7_reserved_kind, node_span, node_summary, resolve_cgir_node, verify_to_diagnostic, CgirGraph,
-    ResolveCgirNodeError, MAX_CGIR_NODES_V0, MAX_NODE_NAME_BYTES,
+    m7_reserved_kind, node_span, node_summary, resolve_cgir_node, scale_limit_err_string,
+    verify_to_diagnostic, CgirGraph, ResolveCgirNodeError, MAX_CGIR_NODES_V0, MAX_NODE_NAME_BYTES,
 };
 pub use optic_codegen_rust::emit as emit_rust;
 pub use optic_diagnostics::Diagnostic;
@@ -322,6 +322,7 @@ pub fn explain_focus_from_src_with_limit(
 }
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants, clippy::single_element_loop)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -491,7 +492,6 @@ mod tests {
             !o.typed_hir.items.is_empty(),
             "post-success CGIR/facade assert"
         );
-        assert!(true);
     }
 
     #[test]
@@ -629,19 +629,18 @@ mod tests {
 
     #[test]
     fn facade_rejects_typ010_on_dump_hir_and_ast() {
-        for name in ["host_boundary.opt"] {
-            let src = example_src(name);
-            let hir_err = dump_hir_src(&src).unwrap_err();
-            assert!(
-                hir_err.iter().any(|d| d.code == "TYP-010"),
-                "{name}: dump_hir must reject TYP-010"
-            );
-            let ast_err = dump_ast_src(&src).unwrap_err();
-            assert!(
-                ast_err.iter().any(|d| d.code == "TYP-010"),
-                "{name}: dump_ast must reject TYP-010"
-            );
-        }
+        let name = "host_boundary.opt";
+        let src = example_src(name);
+        let hir_err = dump_hir_src(&src).unwrap_err();
+        assert!(
+            hir_err.iter().any(|d| d.code == "TYP-010"),
+            "{name}: dump_hir must reject TYP-010"
+        );
+        let ast_err = dump_ast_src(&src).unwrap_err();
+        assert!(
+            ast_err.iter().any(|d| d.code == "TYP-010"),
+            "{name}: dump_ast must reject TYP-010"
+        );
     }
 
     #[test]
@@ -649,8 +648,14 @@ mod tests {
         // exercises HIR lowering prep for unsafe (post-skip removal); gates still reject in facade/compile paths
         // (documents direct API delta vs prior silent drop; no golden impact)
         let src = example_src("host_boundary.opt");
-        let prog = parse(&src, SourceId(1)).expect("parse host_boundary directly");
-        let hir = lower(prog).expect("lower unsafe optic for prep path coverage");
+        let prog = match parse(&src, SourceId(1)) {
+            Ok(p) => p,
+            Err(_) => panic!("parse host_boundary directly"),
+        };
+        let hir = match lower(prog) {
+            Ok(h) => h,
+            Err(_) => panic!("lower unsafe optic for prep path coverage"),
+        };
         let has_unsafe = hir.items.iter().any(|item| {
             if let optic_hir::HirItem::Optic { decl, .. } = item {
                 decl.unsafe_boundary
@@ -662,9 +667,14 @@ mod tests {
             has_unsafe,
             "unsafe optic must now lower to HirItem::Optic (boundary lowering prep)"
         );
-        // gate still works
+        // gate still works for compile + emit (explicit TYP-010 path test)
         let err = compile_check(&src).unwrap_err();
         assert!(err.iter().any(|d| d.code == "TYP-010"));
+        let emit_err = compile_emit(&src).unwrap_err();
+        assert!(
+            emit_err.iter().any(|d| d.code == "TYP-010"),
+            "TYP-010 on emit path for boundary"
+        );
     }
 
     #[test]

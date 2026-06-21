@@ -88,7 +88,7 @@ fn assert_json_notes_golden(example_file: &str, json_name: &str, code: &str) {
 }
 
 fn assert_json_diag_matches_fixture(diag: &optic_diagnostics::Diagnostic, json_name: &str) {
-    let out = optic_diagnostics::diagnostics_to_json(&[diag.clone()]);
+    let out = optic_diagnostics::diagnostics_to_json(std::slice::from_ref(diag));
     let path = fixture(json_name);
     let normalized = normalize_json_floats(out.trim());
     if std::env::var("OPTIC_UPDATE_GOLDEN").is_ok() {

@@ -647,6 +647,7 @@ pub fn dump_hir(p: &HirProgram) -> String {
     out
 }
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use optic_syntax::{parse, SourceId};
@@ -1025,7 +1026,7 @@ fn main() { entities.query(bad).map(|(a,b)| a+b); }
         // find let summary has put_reads (from rhs reads in put)
         let has_let_with_put_reads = hirp.items.iter().any(|it| {
             if let HirItem::Let { summary, .. } = it {
-                summary.put_reads.iter().any(|r| r == "healths") && summary.put_writes.len() >= 1
+                summary.put_reads.iter().any(|r| r == "healths") && !summary.put_writes.is_empty()
             } else {
                 false
             }
@@ -1071,7 +1072,7 @@ fn main() { entities.query(c).map(|(h1,h2)| h1 + h2); }
             }
             if let HirItem::Let { summary, .. } = it {
                 // the composed has its data (possibly deduped regions if dups in union)
-                if summary.put_writes.len() > 0 {
+                if !summary.put_writes.is_empty() {
                     dedup_tested = true;
                 }
             }

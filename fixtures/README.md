@@ -117,3 +117,6 @@ debug_assert guards + error hardening added (see PLAN); fixtures unchanged (pari
 - Harness = cli (env_clear+PATH).
 - No clones, redundant asserts cleaned; PLAN/docs match code; goldens untouched.
 - This pass: depth threading complete across decls, fusion explicit for obs nodes, harness PATH no-capture match, added sanit asserts; goldens/ behavior preserved.
+
+## 2026-06-21
+- Continued: hard guards/scale shared, boundary prep carry+invariants+tests, guard flow exercised (small/empty+helper/decision -- precise in notes), harness match updates, TYP-010 paths explicit; goldens preserved; full verification done. See PLAN.
