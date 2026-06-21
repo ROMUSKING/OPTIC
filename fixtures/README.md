@@ -120,3 +120,6 @@ debug_assert guards + error hardening added (see PLAN); fixtures unchanged (pari
 
 ## 2026-06-21
 - Continued: hard guards/scale shared, boundary prep carry+invariants+tests, guard flow exercised (small/empty+helper/decision -- precise in notes), harness match updates, TYP-010 paths explicit; goldens preserved; full verification done. See PLAN.
+- Further: explicit match on compile_emit TYP-010 (error path/surface) and build scale guard flow (TypedHir non-exceed checks, automated); docs/PLAN updated; no behavior/golden change.
+- 2026-06-21 continuation: build() match decision explicit for real TypedHir (nested_position/records region paths); full sync/verify, goldens untouched.
+

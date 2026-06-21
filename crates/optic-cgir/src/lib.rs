@@ -1948,7 +1948,7 @@ mod tests {
     #[test]
     fn test_build_basic() {
         let t = mk_typed_with_optic("H", 0);
-        let g = build(&t).expect("build");
+        let g = build(&t).expect("build"); // pre-existing .expect left in setup path per smallest scope; explicit matches added only for targeted decision coverage (scale guard + real records/region_map)
         assert!(g.nodes.is_empty());
     }
 
@@ -2414,7 +2414,11 @@ mod tests {
         let prog = optic_syntax::parse(&src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let typed = optic_typeck::check(hirp).expect("check");
-        let g = build(&typed).expect("build");
+        // match (not .expect) to explicitly cover build() Result decision path on real TypedHir (records/region_map primary: data decl + Transform record_fields/columns from nested_position.opt; nested field exprs upstream in lower/typeck)
+        let g = match build(&typed) {
+            Ok(g) => g,
+            Err(e) => panic!("build for nested/records region test should succeed: {e:?}"),
+        };
         assert_eq!(g.region_map.costate_name, "Entities");
         assert!(g.region_map.columns.contains_key("transforms"));
         assert!(g.region_map.record_fields.contains_key("Transform"));
@@ -3069,10 +3073,14 @@ fn main() { entities.query(chain).map(|h| h); }
         assert_eq!(build_err[0].code, "CGI-004");
         assert!(build_err[0].evidence.get("count").is_some());
 
-        // Exercise build() guard *checks* (non-exceed paths) via build() call on small input (1-item hits early per-item guard if inside loop + final guard; non-exceed paths; other real lower+build tests also hit early); exceed return shape via direct helper (delegated by build) + verify(large). Avoids bloat. See scale_limit_exceeded doc.
+        // Exercise build() guard *checks* (non-exceed paths) via build() call on small input (1-item hits early per-item guard if inside loop + final guard; non-exceed paths; other real lower+build tests also hit early); exceed return shape via direct helper (delegated by build) + verify(large). Avoids bloat. See scale_limit_exceeded doc. (direct helper+verify cover Err shape; this match makes Ok decision explicit for non-exceed checks inside build)
         let small_typed = mk_typed_with_optic("scale_ex", 1);
-        let build_small = build(&small_typed).expect("build for scale guard flow test");
-        assert!(build_small.nodes.len() < MAX_CGIR_NODES_V0); // exercises non-exceed path + trivial value; consistent .expect style; 1-item hits early guard in loop + final
+        // match (not .expect) to explicitly cover build() Result decision path for guard flow (automated TypedHir call)
+        let build_small = match build(&small_typed) {
+            Ok(g) => g,
+            Err(e) => panic!("build non-exceed for scale guard flow should succeed: {e:?}"),
+        };
+        assert!(build_small.nodes.len() < MAX_CGIR_NODES_V0); // exercises non-exceed path + trivial value; 1-item hits early guard in loop + final
     }
 
     #[test]

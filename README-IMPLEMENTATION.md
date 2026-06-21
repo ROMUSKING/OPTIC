@@ -45,6 +45,10 @@ M7 scaffolding: `PrismLeaf` and `TraversalLeaf` lowered (`m7_reserved=false`). M
 
 2026-06-20 continuation: ... ; PLAN/docs exact match (this task: plan updated vs book/app C/EBNF + actual Vec impl + wontfix for full traverse/profile in narrow).
 2026-06-21: hard guards + shared helpers + boundary carry prep + test coverage (build guard via small+helper, TYP-010, harness match) + precise sync; see PLAN.
+2026-06-21 further: match (not expect) on compile_emit (surface gate) + build(&TypedHir) (guard checks) for decision paths; continued doc/plan sync.
+2026-06-21 continuation: explicit build match decision on real TypedHir from nested/records example; plan/docs synced same pass.
+
+
 
 `CheckOutcome` includes `typed_hir` for downstream tooling.
 

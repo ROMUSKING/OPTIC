@@ -647,6 +647,7 @@ mod tests {
     fn hir_direct_lower_unsafe_optic_prep_path() {
         // exercises HIR lowering prep for unsafe (post-skip removal); gates still reject in facade/compile paths
         // (documents direct API delta vs prior silent drop; no golden impact)
+        // note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match)
         let src = example_src("host_boundary.opt");
         let prog = match parse(&src, SourceId(1)) {
             Ok(p) => p,
@@ -667,10 +668,17 @@ mod tests {
             has_unsafe,
             "unsafe optic must now lower to HirItem::Optic (boundary lowering prep)"
         );
-        // gate still works for compile + emit (explicit TYP-010 path test)
-        let err = compile_check(&src).unwrap_err();
+        // gate still works for compile + emit (explicit TYP-010 path test; both use match for error-expecting facade calls per harness/doctor pattern; early surface gate in compile_through_check)
+        let err = match compile_check(&src) {
+            Err(e) => e,
+            Ok(_) => panic!("TYP-010 expected on compile_check for host_boundary"),
+        };
         assert!(err.iter().any(|d| d.code == "TYP-010"));
-        let emit_err = compile_emit(&src).unwrap_err();
+        // exercises compile_emit error return (early TYP-010 surface gate before build_cgir/scale guards) + matches harness style
+        let emit_err = match compile_emit(&src) {
+            Err(e) => e,
+            Ok(_) => panic!("TYP-010 expected on compile_emit for host_boundary"),
+        };
         assert!(
             emit_err.iter().any(|d| d.code == "TYP-010"),
             "TYP-010 on emit path for boundary"

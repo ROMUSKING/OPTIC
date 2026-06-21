@@ -402,12 +402,30 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
 ### 2026-06-21 continuation (this impl)
 - More robustness: hardened 2 debug_assert -> hard Err in cgir verify (wiring/post invariants); turned emit scale debug->hard Err using shared scale_limit_err_string (pub'd + reexported).
 - Shared helpers extended (scale err string); no magic, no dup strings/lits.
-- Host/foreign boundary prep completed: flag carried on OpticLeaf in CGIR (for TYP-010 prep); codegen uses is_unsafe_boundary helper on graph.nodes for invariant (collection simplified to 2-tuple, no longer duplicates flag); added CGIR/codegen invariants for unsafe/extern; explicit TYP-010 tests (compile_emit + match not expect) in optic facade.
+- Host/foreign boundary prep completed: flag carried on OpticLeaf in CGIR (for TYP-010 prep); codegen uses is_unsafe_boundary helper on graph.nodes for invariant (collection simplified to 2-tuple, no longer duplicates flag); added CGIR/codegen invariants for unsafe/extern; explicit TYP-010 compile_emit test (match conversion followed in subsequent further pass) in optic facade.
 - Test/edge coverage: non-exceed guard checks exercised via build() on small/empty + real TypedHir (plus decision+helper); exceed shape/return via direct helper calls (build delegates to it) + verify(large graphs) -- avoids bloat per PLAN N; comments/docs tightened for precision. Scale test uses .expect (consistent); harness/doctor use match.
 - Improved error paths, no new surface, no goldens changed, records/nested harness coverage touched.
 - Avoided all listed past issues: parity preserved (no ex added), tests added for error/TYP/guard (improved), plan/docs updated inline + made precise vs exact exercised paths (empty+helper), no heuristic in emit, diag not touched, no parser, shared consts, no dup comments (post-harden removed), summary self-contained, no bare expect, harness/doctor consistent, no magic.
 - Full verification: fmt/clippy/tests/CLI on examples/negatives/harnesses.
 - Docs/plan sync: this note + updates to v0-spec, README-IMPLEMENTATION, fixtures/README (no drift vs actual Vec/guards/prep/scaffolding).
+
+### 2026-06-21 further continuation (this run)
+- Further iteration (smallest targeted): switched compile_emit TYP-010 (error return path, early surface gate) + build(&TypedHir) scale non-exceed guards (success decision for non-exceed checks) to explicit `match` (not unwrap/err/expect) for decision path coverage in automated calls; follows exact match style from harness/doctor/main.
+- More test/edge: build guard flow now explicitly matched in scale test on 1-item mk_typed TypedHir (early+final guards exercised via Ok arm); compile_emit explicit on boundary (surface gate before CGIR build).
+- Boundary prep: no new carry (already complete); additional match exercises TYP-010 compile_emit path.
+- Doc/plan sync same pass (appended here + v0-spec + README-IMPLEMENTATION + fixtures/README); comments updated for exercised match paths + layer precision (token/AST/HIR vs CGIR-build); no drift.
+- Avoided all past issues: no new goldens/ex, no bloat (tiny match arms), parity, no redundant asserts/clones, no .expect added in prod/lib, tests cover the change, full fmt/clippy/test/CLI verification, smallest edits only (Vec/Arc/Result/ if-let guard patterns unchanged).
+- Full verification: fmt --check, clippy -D, cargo test, optic CLI on all + negatives + harnesses/records/nested.
+- No scope creep: narrow-v0 only; no new surface/guards beyond targeted match coverage for prior focus.
+
+### 2026-06-21 continuation (records/nested + build decision; this run)
+- More robustness/guard/decision coverage (smallest): explicit `match` (not .expect) for build(&TypedHir) Ok decision on real TypedHir from nested_position.opt (records/region_map primary: data decls + Transform record_fields/columns + build internals; follows exact scale-test match/Ok arm; direct helper for exceed per notes). Plus minimal comment tightenings at other build sites (basic, scale artifact clean).
+- Test/edge/harness coverage: records/nested now have explicit build decision exercised (in addition to prior goldens/execution harnesses for record_health/nested_position); error paths/verify decisions via existing + helper patterns kept.
+- Host/foreign boundary prep: no new (TYP-010 gate + lower match + carry debug + codegen invariant + explicit compile_* matches already cover; surface gate before build remains).
+- Doc/plan/code sync same-pass: subsection appended + doc one-liners + comment edits (for fidelity); exercised path desc tightened to "records/region_map primary"; defends pre-existing .expect (setup paths only) + clone (pre-existing, API-forced in build_region_map) + smallest scope (1 decision match site + cleanups, no other .expect converted).
+- Full verification (every run): cargo fmt -- --check, cargo clippy --workspace --all-targets -D warnings, cargo test (incl execution for records/nested/host), optic CLI on positives/negatives/examples/harnesses (incl record_health, nested_position, host_boundary).
+- Kept golden parity, no scope creep, no new surface/examples, no clones, followed Vec<u32/Arc/Result/if-let/match harness patterns exactly; delta = comment sites (basic/scale/nested) + appends (fidelity to actual touched lines).
+- Avoided past issues (proactive): real nested for records/region_map coverage; goldens/prior matches untouched; same-pass updates with accurate desc ("records/region_map primary"); defended pre-existing .expect (setup) + clone (API); no new prod .expect/bloat.
 
 ---
 

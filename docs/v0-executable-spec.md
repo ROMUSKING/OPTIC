@@ -136,3 +136,6 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - Docs match code: depth on fn/let/optic/getput bodies, harness full clear, prep delta noted, "metadata/stubs/prep only".
 - 2026 impl pass: parser depth + fusion Tap/Record + harness sync + more asserts; fully matches docs.
 - 2026-06-21: more hard guards (verify/emit using shared scale helper), boundary flag carried+invariants in codegen, build guard exercised (small+helper/decision; notes precise vs empty case), match-not-expect + TYP-010 emit path explicit test, harness/doctor match; full verification; plan/docs synced; goldens untouched.
+- 2026-06-21 further: explicit `match` (compile_emit error return/surface gate + build(&TypedHir) non-exceed guard checks) for decision explicitness; PLAN+docs appended same-pass; smallest; full verification pass.
+- 2026-06-21 continuation: explicit match on build(&real TypedHir) for decision (nested_position/records exercised in cgir build path); doc/plan sync; no goldens/behavior change; full fmt/clippy/test/CLI (incl records/nested/host_boundary).
+
