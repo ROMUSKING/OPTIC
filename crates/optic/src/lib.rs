@@ -338,6 +338,8 @@ mod tests {
 
     // Note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match).
     // parse/lower/check .expect in cgir query/tap tests are setup-only (boilerplate common to all real-TypedHir tests; build decision is the exercised guard path per PLAN).
+    // other bare evidence[] / .any() (e.g. OBS-70x/PAR-001 + remaining TYP-001) left per smallest (TYP-001 facade hardened; see 2026 sub + PLAN).
+    // Mixed styles + cross-refs (unknown-costate here; focus via CLI/json; typeck .any left): see facade_explain_grade_fails_typ001_on_target.
     fn example_src(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
@@ -567,7 +569,8 @@ mod tests {
     fn facade_explain_grade_fails_typ001_on_target() {
         let src = example_src("typ001_unknown_type.opt");
         let err = explain_grade_from_src(&src, "GhostView").unwrap_err();
-        assert!(err.iter().any(|d| d.code == "TYP-001"));
+        // explicit find.expect("TYP-001") on real typ001_unknown_type.opt fixture (terse harness style; explain-grade error path per self-host prep)
+        err.iter().find(|d| d.code == "TYP-001").expect("TYP-001");
     }
 
     #[test]
@@ -666,26 +669,23 @@ mod tests {
     fn facade_rejects_typ010_on_compile_check() {
         let src = example_src("host_boundary.opt");
         let err = compile_check(&src).unwrap_err();
-        assert!(
-            err.iter().any(|d| d.code == "TYP-010"),
-            "host_boundary: compile_check must reject TYP-010"
-        );
+        // explicit find.expect("TYP-010") on real host_boundary fixture (terse harness style; direct boundary coverage per self-host prep)
+        err.iter().find(|d| d.code == "TYP-010").expect("TYP-010");
     }
 
     #[test]
     fn facade_rejects_typ010_on_dump_hir_and_ast() {
-        let name = "host_boundary.opt";
-        let src = example_src(name);
+        let src = example_src("host_boundary.opt");
         let hir_err = dump_hir_src(&src).unwrap_err();
-        assert!(
-            hir_err.iter().any(|d| d.code == "TYP-010"),
-            "{name}: dump_hir must reject TYP-010"
-        );
+        hir_err
+            .iter()
+            .find(|d| d.code == "TYP-010")
+            .expect("TYP-010");
         let ast_err = dump_ast_src(&src).unwrap_err();
-        assert!(
-            ast_err.iter().any(|d| d.code == "TYP-010"),
-            "{name}: dump_ast must reject TYP-010"
-        );
+        ast_err
+            .iter()
+            .find(|d| d.code == "TYP-010")
+            .expect("TYP-010");
     }
 
     #[test]
@@ -717,16 +717,17 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("TYP-010 expected on compile_check for host_boundary"),
         };
-        assert!(err.iter().any(|d| d.code == "TYP-010"));
+        // explicit find.expect("TYP-010") on real host_boundary fixture (terse harness style; direct boundary coverage per self-host prep)
+        err.iter().find(|d| d.code == "TYP-010").expect("TYP-010");
         // exercises compile_emit error return (early TYP-010 surface gate before build_cgir/scale guards) + matches harness style
         let emit_err = match compile_emit(&src) {
             Err(e) => e,
             Ok(_) => panic!("TYP-010 expected on compile_emit for host_boundary"),
         };
-        assert!(
-            emit_err.iter().any(|d| d.code == "TYP-010"),
-            "TYP-010 on emit path for boundary"
-        );
+        emit_err
+            .iter()
+            .find(|d| d.code == "TYP-010")
+            .expect("TYP-010");
     }
 
     #[test]

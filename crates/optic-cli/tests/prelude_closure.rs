@@ -83,7 +83,11 @@ fn check_host_boundary_typ010() {
     assert_eq!(typ010.len(), 2);
     let features: std::collections::HashSet<_> = typ010
         .iter()
-        .filter_map(|d| d["evidence"]["feature"].as_str())
+        .filter_map(|d| {
+            d.get("evidence")
+                .and_then(|e| e.get("feature"))
+                .and_then(|v| v.as_str())
+        }) // explicit get+and_then for evidence (no value asserts added per smallest); mirrors host-boundary TYP-010 in typeck; cli harness for TYP-010 gate (self-host prep)
         .collect();
     assert!(features.contains("foreign_decl"));
     assert!(features.contains("unsafe_optic"));
@@ -214,7 +218,12 @@ fn explain_focus_typ002_blocks_on_target() {
     let v: serde_json::Value = serde_json::from_str(stderr.trim()).expect("parse json");
     assert_eq!(v["ok"], false);
     let diags = v["diagnostics"].as_array().expect("diagnostics");
-    assert!(diags.iter().any(|d| d["code"].as_str() == Some("TYP-002")));
+    // explicit find.expect("TYP-002") on real typ002_body_mismatch.opt fixture (terse harness style; explain-focus error path per self-host prep)
+    let d = diags
+        .iter()
+        .find(|d| d["code"].as_str() == Some("TYP-002"))
+        .expect("TYP-002");
+    let _ = d; // deliberate unused (cli harness bare presence; let d= prefix matches GRA-110 exactly; GRA consumes d for evidence assert)
 }
 
 #[test]

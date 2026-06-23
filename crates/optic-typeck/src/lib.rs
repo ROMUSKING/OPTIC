@@ -1674,8 +1674,15 @@ fn main() { entities.query(Bad).get(); }
             .iter()
             .find(|d| d.code == diag::TYPE_BODY_MISMATCH)
             .expect("TYP-002");
-        assert_eq!(d.evidence["expected_type"], "f32");
-        assert_eq!(d.evidence["actual_type"], "(f32, f32)");
+        // explicit get+and_then for evidence (no value asserts added per smallest); mirrors GRA-110 hardened style
+        assert_eq!(
+            d.evidence.get("expected_type").and_then(|v| v.as_str()),
+            Some("f32")
+        );
+        assert_eq!(
+            d.evidence.get("actual_type").and_then(|v| v.as_str()),
+            Some("(f32, f32)")
+        );
     }
 
     #[test]
@@ -1732,7 +1739,11 @@ fn main() { entities.query(X).get(); }
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, diags) = typeck_pass(hirp);
         let err = explain_grade_with_diags(&typed, "GhostView", &diags).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::TYPE_UNKNOWN));
+        // explicit find.expect("TYP-001") on real typ001_unknown_type.opt fixture (terse harness style; explain-grade error path per self-host prep)
+        err.iter()
+            .find(|d| d.code == diag::TYPE_UNKNOWN)
+            .expect("TYP-001");
+        // (diag const per typeck precedent vs facade str; fmt multi-line)
     }
 
     #[test]
@@ -1765,7 +1776,7 @@ fn main() { entities.query(X).get(); }
         assert_eq!(diags.len(), 2);
         let features: std::collections::HashSet<_> = diags
             .iter()
-            .filter_map(|d| d.evidence["feature"].as_str())
+            .filter_map(|d| d.evidence.get("feature").and_then(|v| v.as_str())) // explicit get+and_then for evidence (no value asserts added per smallest); mirrors GRA-110/TYP-002/003; host-boundary TYP-010 self-host prep
             .collect();
         assert!(features.contains("foreign_decl"));
         assert!(features.contains("unsafe_optic"));
@@ -2052,7 +2063,8 @@ optic BadLens: GradedOptic<Entities, f32, _> {
         assert!(
             diags.iter().any(|d| {
                 d.code == diag::TYPE_GRADE_SYNTAX
-                    && d.evidence["fragment"].as_str() == Some("preview")
+                    // explicit get+and_then for evidence (no value asserts added per smallest); mirrors GRA-110/TYP-002 hardened style
+                    && d.evidence.get("fragment").and_then(|v| v.as_str()) == Some("preview")
             }),
             "GradedOptic + preview must emit TYP-003: {diags:?}"
         );
@@ -2145,7 +2157,11 @@ optic BadPrism: GradedPrism<Entities, f32, _> {
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, diags) = typeck_pass(hirp);
         let err = explain_focus_with_diags(&typed, "BadFocus", &diags).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::TYPE_BODY_MISMATCH));
+        // explicit find.expect("TYP-002") on real typ002_body_mismatch.opt fixture (terse harness style; explain-focus error path per self-host prep)
+        err.iter()
+            .find(|d| d.code == diag::TYPE_BODY_MISMATCH)
+            .expect("TYP-002");
+        // (diag const per typeck precedent vs facade str; fmt multi-line)
     }
 
     #[test]
@@ -2164,7 +2180,12 @@ optic BadPrism: GradedPrism<Entities, f32, _> {
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let err = check(hirp).unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::TYPE_BODY_UNINFERABLE));
+        // explicit find.expect("TYP-004") on real typ004_uninferable_body.opt fixture (terse harness style; direct check error path per self-host prep)
+        err.iter()
+            .find(|d| d.code == diag::TYPE_BODY_UNINFERABLE)
+            .expect("TYP-004");
+        // (diag const per typeck precedent vs facade str; fmt multi-line)
+        // other bare .any (EXPLAIN/typ inline/CGIR) + !any absence left per smallest delta constraint (no new coverage/tests added)
     }
 
     #[test]
