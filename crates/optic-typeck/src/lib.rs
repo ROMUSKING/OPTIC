@@ -2171,7 +2171,12 @@ optic BadPrism: GradedPrism<Entities, f32, _> {
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, _) = typeck_pass(hirp);
         let err = explain_grade(&typed, "NoSuchOptic").unwrap_err();
-        assert!(err.iter().any(|d| d.code == diag::EXPLAIN_UNKNOWN_NODE));
+        // explicit find.expect("EXPLAIN_UNKNOWN_NODE") on real health_get.opt fixture (terse harness style; explain-grade error path per self-host prep)
+        err.iter()
+            .find(|d| d.code == diag::EXPLAIN_UNKNOWN_NODE)
+            .expect("EXPLAIN_UNKNOWN_NODE");
+        // (diag const per typeck precedent vs facade str; fmt multi-line)
+        // (peer TYP-00x use short code value; this delta uses documented exact canonical + const in predicate per series spec)
     }
 
     #[test]
@@ -2185,7 +2190,7 @@ optic BadPrism: GradedPrism<Entities, f32, _> {
             .find(|d| d.code == diag::TYPE_BODY_UNINFERABLE)
             .expect("TYP-004");
         // (diag const per typeck precedent vs facade str; fmt multi-line)
-        // other bare .any (EXPLAIN/typ inline/CGIR) + !any absence left per smallest delta constraint (no new coverage/tests added)
+        // other bare .any (EXPLAIN/typ inline/CGIR) + !any absence left per smallest delta constraint (no new coverage/tests added) (historical snapshot pre-EXPLAIN/EXP-001 + pre-OBS-70x facade; OBS hardened in optic facade per 2026-06-23 sub)
     }
 
     #[test]

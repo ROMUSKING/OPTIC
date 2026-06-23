@@ -338,7 +338,7 @@ mod tests {
 
     // Note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match).
     // parse/lower/check .expect in cgir query/tap tests are setup-only (boilerplate common to all real-TypedHir tests; build decision is the exercised guard path per PLAN).
-    // other bare evidence[] / .any() (e.g. OBS-70x/PAR-001 + remaining TYP-001) left per smallest (TYP-001 facade hardened; see 2026 sub + PLAN).
+    // other bare evidence[] / .any() (e.g. PAR-001 + TYPE_UNKNOWN inline + CGIR_UNSUPPORTED_EXPR/GRADE_COMPOSE_OVER + !any absences) left per smallest (OBS-70x hardened this pass; see 2026 sub + PLAN).
     // Mixed styles + cross-refs (unknown-costate here; focus via CLI/json; typeck .any left): see facade_explain_grade_fails_typ001_on_target.
     fn example_src(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -605,16 +605,16 @@ mod tests {
         ] {
             let src = example_src(name);
             let err = compile_check(&src).unwrap_err();
-            assert!(
-                err.iter().any(|d| d.code == "OBS-701"),
-                "{name}: compile_check must reject OBS-701"
+            // explicit find.expect("OBS-701") on real unsupported_*.opt fixture (terse harness style; compile_check error path per self-host prep)
+            // compact single-line let-d retained (established short facade precedent matching TYP-010 compile/OBS-702; typeck splits on diag::; post-fmt clean; no bloat)
+            let d = err.iter().find(|d| d.code == "OBS-701").expect("OBS-701");
+            // explicit get+and_then for evidence (no value asserts added per smallest); mirrors GRA-110/TYP-002 hardened style (host-boundary TYP-010 precedent in typeck/cli)
+            // (absent-key / non-str boundary for hardened assert left per smallest; main fixtures always provide key)
+            assert_eq!(
+                d.evidence.get("method").and_then(|v| v.as_str()),
+                Some(method)
             );
-            assert!(
-                err.iter()
-                    .any(|d| d.evidence["method"].as_str() == Some(method)),
-                "{name}: evidence.method must be {method}"
-            );
-            assert!(has_unsupported_observability(&err));
+            assert!(has_unsupported_observability(&err)); // pre-existing helper (family presence); find already asserts specific code per smallest
         }
     }
 
@@ -623,11 +623,9 @@ mod tests {
         for name in ["trailing_tap.opt", "trailing_record.opt"] {
             let src = example_src(name);
             let err = compile_check(&src).unwrap_err();
-            assert!(
-                err.iter().any(|d| d.code == "OBS-702"),
-                "{name}: compile_check must reject OBS-702"
-            );
-            assert!(has_unsupported_observability(&err));
+            // explicit find.expect("OBS-702") on real trailing_*.opt fixture (terse harness style; compile_check error path per self-host prep)
+            err.iter().find(|d| d.code == "OBS-702").expect("OBS-702");
+            assert!(has_unsupported_observability(&err)); // pre-existing helper (family presence); find already asserts specific code per smallest
         }
     }
 
@@ -636,15 +634,17 @@ mod tests {
         for name in ["unsupported_profile.opt", "unsupported_replay.opt"] {
             let src = example_src(name);
             let hir_err = dump_hir_src(&src).unwrap_err();
-            assert!(
-                hir_err.iter().any(|d| d.code == "OBS-701"),
-                "{name}: dump_hir must reject OBS-701"
-            );
+            // explicit find.expect("OBS-701") on real unsupported_*.opt fixture (terse harness style; dump_hir error path per self-host prep)
+            hir_err
+                .iter()
+                .find(|d| d.code == "OBS-701")
+                .expect("OBS-701");
             let ast_err = dump_ast_src(&src).unwrap_err();
-            assert!(
-                ast_err.iter().any(|d| d.code == "OBS-701"),
-                "{name}: dump_ast must reject OBS-701"
-            );
+            // explicit find.expect("OBS-701") on real unsupported_*.opt fixture (terse harness style; dump_ast error path per self-host prep)
+            ast_err
+                .iter()
+                .find(|d| d.code == "OBS-701")
+                .expect("OBS-701");
         }
     }
 
@@ -653,15 +653,17 @@ mod tests {
         for name in ["trailing_tap.opt", "trailing_record.opt"] {
             let src = example_src(name);
             let hir_err = dump_hir_src(&src).unwrap_err();
-            assert!(
-                hir_err.iter().any(|d| d.code == "OBS-702"),
-                "{name}: dump_hir must reject OBS-702"
-            );
+            // explicit find.expect("OBS-702") on real trailing_*.opt fixture (terse harness style; dump_hir error path per self-host prep)
+            hir_err
+                .iter()
+                .find(|d| d.code == "OBS-702")
+                .expect("OBS-702");
             let ast_err = dump_ast_src(&src).unwrap_err();
-            assert!(
-                ast_err.iter().any(|d| d.code == "OBS-702"),
-                "{name}: dump_ast must reject OBS-702"
-            );
+            // explicit find.expect("OBS-702") on real trailing_*.opt fixture (terse harness style; dump_ast error path per self-host prep)
+            ast_err
+                .iter()
+                .find(|d| d.code == "OBS-702")
+                .expect("OBS-702");
         }
     }
 
@@ -677,11 +679,13 @@ mod tests {
     fn facade_rejects_typ010_on_dump_hir_and_ast() {
         let src = example_src("host_boundary.opt");
         let hir_err = dump_hir_src(&src).unwrap_err();
+        // explicit find.expect("TYP-010") on real host_boundary.opt fixture (terse harness style; dump_hir error path per self-host prep)
         hir_err
             .iter()
             .find(|d| d.code == "TYP-010")
             .expect("TYP-010");
         let ast_err = dump_ast_src(&src).unwrap_err();
+        // explicit find.expect("TYP-010") on real host_boundary.opt fixture (terse harness style; dump_ast error path per self-host prep)
         ast_err
             .iter()
             .find(|d| d.code == "TYP-010")
