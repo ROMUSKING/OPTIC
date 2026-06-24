@@ -338,7 +338,7 @@ mod tests {
 
     // Note: other facade tests use .expect/.unwrap_err for setup (pre-existing, test-only; prod paths use Result+match).
     // parse/lower/check .expect in cgir query/tap tests are setup-only (boilerplate common to all real-TypedHir tests; build decision is the exercised guard path per PLAN).
-    // other bare evidence[] / .any() (e.g. PAR-001 + TYPE_UNKNOWN inline + CGIR_UNSUPPORTED_EXPR/GRADE_COMPOSE_OVER + !any absences) left per smallest (OBS-70x hardened this pass; see 2026 sub + PLAN).
+    // other bare evidence[] / .any() (e.g. TYPE_UNKNOWN inline + CGIR_UNSUPPORTED_EXPR/GRADE_COMPOSE_OVER + !any absences) left per smallest (PAR-001 hardened this pass; remaining left; no new coverage/tests added per smallest; see 2026 sub + PLAN).
     // Mixed styles + cross-refs (unknown-costate here; focus via CLI/json; typeck .any left): see facade_explain_grade_fails_typ001_on_target.
     fn example_src(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -779,7 +779,8 @@ mod tests {
     fn facade_rejects_oversized_source() {
         let huge = "x".repeat((DEFAULT_MAX_SOURCE_BYTES + 1) as usize);
         let err = compile_check(&huge).unwrap_err();
-        assert!(err.iter().any(|d| d.code == "PAR-001"));
+        // explicit find.expect("PAR-001") on oversized synthetic (terse harness style; compile_check error path per self-host prep)
+        err.iter().find(|d| d.code == "PAR-001").expect("PAR-001");
     }
 
     #[test]
@@ -789,7 +790,8 @@ mod tests {
         std::fs::write(&path, &huge).expect("write huge.opt");
         let err = compile_check_from_path(&path).unwrap_err();
         let _ = std::fs::remove_file(&path);
-        assert!(err.iter().any(|d| d.code == "PAR-001"));
+        // explicit find.expect("PAR-001") on oversized synthetic via from_path (terse harness style; compile_check_from_path error path per self-host prep)
+        err.iter().find(|d| d.code == "PAR-001").expect("PAR-001");
     }
 
     #[test]
