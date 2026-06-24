@@ -730,7 +730,7 @@ pub fn build(
         std::collections::HashMap::new();
     let mut query_count = 0usize;
     let region_map = match hir::build_region_map(&hir::HirProgram {
-        items: typed.items.clone(),
+        items: typed.items.clone(), // safe with Extern (build_region_map inspects only Data; boundary carry for S1 per ch22/appI)
     }) {
         Ok(m) => m,
         Err(rule) => {
@@ -746,6 +746,7 @@ pub fn build(
     for item in &typed.items {
         // Early scale guard (before each item's processing/pushes; CGIR-build layer after token/AST/HIR). See scale_limit_exceeded docs for strategy, test for coverage.
         // Uses shared helper. Pre-item check means crossing item (adds 1+ nodes, e.g. Query* or roots) may allocate before Err. Allows ~1 item overage on exactly-at-limit hostile input; documented contract (no stricter per-push for v0 smallest).
+        // runs for carried boundary items (harmless, no nodes)
         if let Some(e) = scale_limit_exceeded(nodes.len()) {
             return Err(e);
         }
@@ -1098,7 +1099,8 @@ pub fn build(
                     },
                 );
             }
-            _ => {}
+            hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
+            _ => {} // Data/Fn (and future) carried in TypedHir for S1 bootstrap/region_map; no Cgir nodes (explicit Extern arm completes boundary)
         }
     }
 
@@ -1952,6 +1954,27 @@ mod tests {
             Ok(g) => g,
             Err(e) => panic!("build must Ok for basic scale guard case: {e:?}"),
         }; // now explicit match for scale guard basic case per continuation
+        assert!(g.nodes.is_empty());
+    }
+
+    #[test]
+    fn test_build_tolerates_extern_boundary() {
+        // smallest direct unit for explicit Extern arm (S1 carry; match harness per test_build_basic + prior; exercises explicit Extern arm as noop in build(); direct for boundary carry per ch22; no new helpers)
+        let ext = optic_syntax::ExternDecl {
+            abi: "C".into(),
+            name: optic_syntax::Spanned::new("h".into(), optic_syntax::Span::dummy()),
+            params: vec![],
+            ret: None,
+            span: optic_syntax::Span::dummy(),
+        };
+        let t = TypedHir {
+            items: vec![hir::HirItem::Extern(ext)],
+            summaries: std::collections::HashMap::new(),
+        };
+        let g = match build(&t) {
+            Ok(g) => g,
+            Err(e) => panic!("build must tolerate carried Extern (S0 for S1): {e:?}"),
+        };
         assert!(g.nodes.is_empty());
     }
 

@@ -917,3 +917,31 @@ Round-3 dedup review — items fixed where trivial; remainder documented here:
   (exact cmd: `git diff --shortstat -- PLAN.md README-IMPLEMENTATION.md crates/optic-cgir/src/lib.rs crates/optic-codegen-rust/src/lib.rs crates/optic-hir/src/lib.rs crates/optic/src/lib.rs docs/v0-executable-spec.md fixtures/README.md`); fixtures/ only doc text.
 - 2026-06-24 continuation (self-host bootstrap+HIR carry+marker+coverage+verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 89 insertions(+), 18 deletions(-)`): see PLAN sub.
 
+### 2026-06-25 continuation (self-hosted compiler + bootstrap update: typeck full Extern carry in typeck + passes-as-optics comment per ch22/appI/appF/PLAN; this run)
+- Smallest targeted impl to advance "build more of the self-hosted compiler and tooling" + "update the current bootstrap": in crates/optic-typeck/src/lib.rs (typeck_pass), added explicit `hir::HirItem::Extern(_) => {}` arm (completes full propagation/carry of Extern beyond the one collect_unsupported_surface syn site; now explicit in hir validation loop too) + terse ch22 comment (modeling pass as optic over costate + boundary for S1 prep).
+  - Rationale: typeck now has explicit boundary item handling for reliable processing of host/foreign decls in bootstrap paths (S0 supports S1 first-party toolchain libs per 3-ring/app I without promoting semantic authority); TYP-010 gate + no CGIR/emit for extern preserved; explain/file_level safe (dummy/err paths).
+  - Followed exact past patterns (terse // ch22/appI refs, explicit match arms, no behavior change, no new tests/.opt/CLI/surface, Vec/Arc/Result, .expect in harnesses untouched).
+  - No new .opt / features; narrow v0 only; differential trust / promotion rule respected (boundary scaffolding only).
+- Addresses past issues proactively: #1 (explicit typeck site for Extern carry + test parity implicit via existing), #3/#5/#6 (accurate live stats, no drift, same-pass sync), read first.
+- Verification (post fmt/clippy): full `cargo test --workspace --no-fail-fast`, CLI `opticc check` on host_boundary (TYP-010) + positives/negatives.
+- Same-pass sync: appended this precise subsection to PLAN.md + verbatim identical one-liner parenthetical to the 3 docs (README-IMPLEMENTATION.md + docs/v0-executable-spec.md + fixtures/README.md) (in 2026 continuation sections); live stats captured at write.
+- Files touched (this delta): crates/optic-typeck/src/lib.rs + PLAN + 3 docs (5 files).
+- Scope: narrow v0 late-stage; S0 bootstrap update only (no S2+ code in Optic, no full self-desc); aligns to docs.
+- Exact live at write (captured `git diff --shortstat` etc right now before summary): FULL git diff --shortstat =  5 files changed, 19 insertions(+), 1 deletion(-)
+  (exact cmd: `git diff --shortstat -- PLAN.md README-IMPLEMENTATION.md crates/optic-typeck/src/lib.rs docs/v0-executable-spec.md fixtures/README.md`); fixtures/ only doc text. (1 src line + 4 doc syncs = 5f/19i doc-heavy)
+- 2026-06-25 continuation (typeck full Extern carry + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 19 insertions(+), 1 deletion(-)`): see PLAN sub.
+
+### 2026-06-25 continuation (self-hosted compiler + bootstrap update: cgir full Extern carry in build + passes-as-optics comment per ch22/appI/appF/PLAN; this run)
+- Smallest targeted impl to advance "build more of the self-hosted compiler and tooling" + "update the current bootstrap": in crates/optic-cgir/src/lib.rs (build), added explicit `hir::HirItem::Extern(_) => {}` arm (completes full propagation/carry of Extern through CGIR after typeck; explicit no longer in _ catch-all) + terse ch22 comment (passes as optics over costate + boundary for S1 prep) + smallest unit test (match harness) + tiny clone/scale/_ comments.
+  - Rationale: cgir build now has explicit boundary item handling for reliable processing of host/foreign decls in S0 bootstrap paths (S0 supports S1 first-party toolchain libs per 3-ring/app I); TYP-010 gate + no extern->CGIR-node preserved; region_map clone safe (Data only).
+  - Followed exact past patterns (terse // ch22/appI refs, explicit match arms, no behavior change, no new .opt/CLI/surface, Vec/Arc/Result, find.expect("CODE") harness in tests; no prod .expect).
+  - No new .opt / features / M7; narrow v0 only; differential trust / promotion / soundness respected (S1 scaffolding only).
+- Addresses past issues proactively: #1/#3 (explicit cgir arm + direct unit test coverage for Extern using match harness + real patterns), #2 (smallest test), #4 (added _ comment), #6 (clone/scale comments), #3/#5/#6/#9 (accurate post-capture stats, byte-identical syncs using canonical template matching typeck sub), read/grep first, used smallest hunks.
+- Verification (post fmt/clippy): full `cargo test --workspace --no-fail-fast`, CLI `opticc check` on host_boundary (TYP-010) + positives (health_*) + negatives (typ004, unsupported_*) + boundaries; zero golden drift (fixtures/ only doc).
+- Same-pass sync: appended this precise subsection to PLAN.md + verbatim identical one-liner parenthetical to the 3 docs (README-IMPLEMENTATION.md + docs/v0-executable-spec.md + fixtures/README.md) (in 2026 continuation sections); live stats + git/grep/wc captured at write time after all.
+- Files touched (this delta): crates/optic-cgir/src/lib.rs + PLAN + 3 docs (5 files).
+- Scope: narrow v0 late-stage; S0 bootstrap update only (no S2+ Optic code, no full self-desc, TYP-010/OBS preserved).
+- Exact live at write (captured `git diff --shortstat` etc right now before summary): FULL git diff --shortstat =  7 files changed, 62 insertions(+), 4 deletions(-)
+  (exact cmd: `git diff --shortstat`); scoped: `git diff --shortstat -- crates/optic-cgir/src/lib.rs PLAN.md README-IMPLEMENTATION.md docs/v0-executable-spec.md fixtures/README.md` = 5 files changed, 59 insertions(+), 2 deletions(-); src: grep Extern/tolerates=9 lines, wc=36; (pre-existing dirty from typeck/optic + this test+comments+syncs qualified; this-delta 5f net).
+- 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
+

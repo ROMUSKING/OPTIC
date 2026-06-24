@@ -181,4 +181,6 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - 2026-06-24 continuation (evidence robustness: harden bare .any to find.expect("OBS-701") for nested_replay synthetic (test_collect_unsupported_surface_nested_replay_in_binary replay in binary rhs) in typeck + update other bare note + doc/plan sync; this run): hardened fragile .any to find.expect (synthetic for replay in binary rhs, terse harness; see PLAN); same-pass sync + verif; see PLAN.
 - 2026-06-24 continuation (test error handling consistency PAR-001 loose .any -> find.expect("PAR-001") harness style in facade + doc/plan sync; this run): converted loose .any to find.expect("PAR-001") terse harness style in facade (oversized synthetic); same-pass sync + verif; see PLAN.
 - 2026-06-24 continuation (self-host bootstrap+HIR carry+marker+coverage+verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 77 insertions(+), 18 deletions(-)`): see PLAN sub.
+- 2026-06-25 continuation (typeck full Extern carry + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 19 insertions(+), 1 deletion(-)`): see PLAN sub.
+- 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
 

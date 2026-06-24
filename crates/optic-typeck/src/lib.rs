@@ -220,6 +220,7 @@ pub fn typeck_pass(hir: hir::HirProgram) -> (TypedHir, Vec<Diagnostic>) {
                 diags.extend(validate_graded_optic_types(ann, &known_types, name));
                 diags.extend(validate_grade_syntax(&ann.grade, name));
             }
+            hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }
@@ -344,7 +345,7 @@ pub fn typeck_pass(hir: hir::HirProgram) -> (TypedHir, Vec<Diagnostic>) {
                 }
                 typed_items.push(hir::HirItem::Query(q));
             }
-            other => typed_items.push(other),
+            other => typed_items.push(other), // includes Extern (first loop validation arm explicit above; carry complete)
         }
     }
 

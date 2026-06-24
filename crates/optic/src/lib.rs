@@ -725,7 +725,7 @@ mod tests {
             dumped.contains("Extern host_helper"),
             "dump_hir must cover new Extern arm (real fixture prep)"
         );
-        // typeck_pass bypass coverage: Extern reaches TypedHir (falls to other=> push); unsafe optic body checked but gate not re-run here
+        // typeck_pass bypass coverage: Extern reaches TypedHir (first-loop validation arm + other=> push); unsafe optic body checked but gate not re-run here (validation arm hit per typeck change)
         let (typed, _diags) = typeck_pass(hir);
         let has_extern_typed = typed
             .items
