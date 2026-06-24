@@ -483,6 +483,8 @@ pub struct HirProgram {
 #[allow(clippy::large_enum_variant)]
 pub enum HirItem {
     Data(syn::DataDecl),
+    /// Carried for HIR full (extern/unsafe boundary prep); enables bootstrap to see host decls in S1 front-end sources per ch22/app I/PLAN (gates unchanged; no CGIR lowering for extern).
+    Extern(syn::ExternDecl),
     Optic {
         decl: syn::OpticDecl,
         summary: Arc<OpticSummary>,
@@ -530,12 +532,10 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
             }
             syn::Item::Optic(decl) => {
                 let decl = *decl;
-                // Host/foreign boundary lowering prep (unsafe optic): lower to HIR Optic item
-                // so CGIR/code gen path (as OpticLeaf) + summaries (effects/grades) are ready.
-                // Surface gate (TYP-010 in collect_unsupported) still rejects in narrow v0 to
-                // preserve current behavior/goldens. See PLAN §9, docs/effect-coeffect-v0.md.
-                // Extern decls remain dropped (separate lowering deferred).
-                // (debug invariant for boundary now carried through HIR lower path; CGIR gate still active)
+                // Host/foreign boundary lowering prep (unsafe optic + extern now full carry): lower to HIR Optic/Extern item
+                // so future S1 tooling sources + CGIR/codegen path ready. Surface gate (TYP-010) still rejects in narrow v0 to
+                // preserve current behavior/goldens. See ch22/appI/PLAN.
+                // (debug invariant for boundary carried; CGIR gate still active for narrow)
                 let summary = build_summary_from_decl(&decl, &optic_env);
                 let arc = Arc::new(summary);
                 optic_env.insert(decl.name.node.clone(), Arc::clone(&arc));
@@ -584,7 +584,10 @@ pub fn lower(program: syn::Program) -> Result<HirProgram, Vec<syn::ParseError>> 
                     hir_items.push(HirItem::Query(q));
                 }
             }
-            syn::Item::Extern(_) => {}
+            syn::Item::Extern(e) => {
+                // Host/foreign boundary full HIR carry (extern preserved for S0 bootstrap support of S1 compiler/tooling sources per ch22/app I; unsafe optic already via decl; CGIR/codegen still gate before use; extern not turned into CGIR node).
+                hir_items.push(HirItem::Extern(e));
+            }
         }
     }
     Ok(HirProgram { items: hir_items })
@@ -640,6 +643,9 @@ pub fn dump_hir(p: &HirProgram) -> String {
                 }
                 line.push('\n');
                 out.push_str(&line);
+            }
+            HirItem::Extern(e) => {
+                out.push_str(&format!("  Extern {} abi={}\n", e.name.node, e.abi));
             }
             _ => out.push_str("  other\n"),
         }

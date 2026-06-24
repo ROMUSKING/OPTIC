@@ -694,17 +694,11 @@ mod tests {
 
     #[test]
     fn hir_direct_lower_unsafe_optic_prep_path() {
-        // exercises HIR lowering prep for unsafe (post-skip removal); gates still reject in facade/compile paths
+        // exercises HIR lowering prep for unsafe+extern (full carry); gates still reject in facade/compile paths (self-host bootstrap support, ch22/appI)
         // (documents direct API delta vs prior silent drop; no golden impact)
         let src = example_src("host_boundary.opt");
-        let prog = match parse(&src, SourceId(1)) {
-            Ok(p) => p,
-            Err(_) => panic!("parse host_boundary directly"),
-        };
-        let hir = match lower(prog) {
-            Ok(h) => h,
-            Err(_) => panic!("lower unsafe optic for prep path coverage"),
-        };
+        let prog = parse(&src, SourceId(1)).expect("parse host_boundary directly");
+        let hir = lower(prog).expect("lower unsafe optic for prep path coverage");
         let has_unsafe = hir.items.iter().any(|item| {
             if let optic_hir::HirItem::Optic { decl, .. } = item {
                 decl.unsafe_boundary
@@ -715,6 +709,31 @@ mod tests {
         assert!(
             has_unsafe,
             "unsafe optic must now lower to HirItem::Optic (boundary lowering prep)"
+        );
+        // explicit extern carry for HIR full (self-host bootstrap S0->S1 prep per ch22/app I/PLAN; externs now visible to tooling sources; no behavior/golden change)
+        let has_extern = hir
+            .items
+            .iter()
+            .any(|item| matches!(item, optic_hir::HirItem::Extern(_)));
+        assert!(
+            has_extern,
+            "extern must lower to HirItem::Extern for full boundary HIR (host/foreign support)"
+        );
+        // explicit dump_hir coverage for Extern arm on real host_boundary (addresses test gap; dump includes "  Extern host_helper abi=C"; no golden impact)
+        let dumped = optic_hir::dump_hir(&hir);
+        assert!(
+            dumped.contains("Extern host_helper"),
+            "dump_hir must cover new Extern arm (real fixture prep)"
+        );
+        // typeck_pass bypass coverage: Extern reaches TypedHir (falls to other=> push); unsafe optic body checked but gate not re-run here
+        let (typed, _diags) = typeck_pass(hir);
+        let has_extern_typed = typed
+            .items
+            .iter()
+            .any(|item| matches!(item, optic_hir::HirItem::Extern(_)));
+        assert!(
+            has_extern_typed,
+            "extern must reach TypedHir (prep for self-host boundary sources)"
         );
         // gate still works for compile + emit (explicit TYP-010 path test; both use match for error-expecting facade calls per harness/doctor pattern; early surface gate in compile_through_check)
         let err = match compile_check(&src) {

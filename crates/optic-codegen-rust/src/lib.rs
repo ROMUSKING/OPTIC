@@ -57,6 +57,17 @@ fn is_unsafe_boundary(node: &CgirNode) -> bool {
     )
 }
 
+/// Boundary marker for future emission (S0 bootstrap update supporting S1 self-host Optic sources per ch22/appI).
+/// Returns marker string when unsafe_boundary (for host/foreign); not emitted in narrow v0 (TYP-010 gate before emit).
+#[allow(dead_code)]
+fn boundary_marker_for(node: &CgirNode) -> Option<&'static str> {
+    if is_unsafe_boundary(node) {
+        Some("// optic(unsafe-boundary)")
+    } else {
+        None
+    }
+}
+
 pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
     // emit uses validate + Result<String,String> per existing pattern; debug_asserts added for post-validate column/ident (2026-06-20 robustness).
     // Hard scale guard using shared helper (avoids dup/magic, follows exact pattern); verify is primary but belt here for direct emit callers.
@@ -111,6 +122,8 @@ pub fn emit(graph: &CgirGraph, _runtime: &str) -> Result<String, String> {
         graph.nodes.iter().all(|n| !is_unsafe_boundary(n)), // in reachable emit, no boundary leaves (prep only)
         "unsafe boundary leaves do not reach narrow codegen emit"
     );
+    // exercise boundary marker emission prep (for self-host S1...); harmless (always 0 by assert/gate); full Some/None coverage in boundary_marker_for_unsafe_some_and_none unit test below
+    let _ = graph.nodes.iter().filter_map(boundary_marker_for).count();
 
     let est = 1024 + leaf_names.len() * 128 + all_regions.len() * 64;
     // internal string capacity (alloc detail, not the CGIR node scale limit)
@@ -3207,5 +3220,20 @@ mod tests {
         let err = emit_compose_chain_loop(&mut out, &g, 2, &body, "h", None, "Entities")
             .expect_err("compose+prism must fail codegen");
         assert!(err.contains("PrismLeaf"));
+    }
+
+    #[test]
+    fn boundary_marker_for_unsafe_some_and_none() {
+        // exercises Some branch for boundary marker (prep for S1 emission markers per ch22); None for normal
+        let (mut l, _) = mk_leaf("B", vec![]);
+        if let CgirNode::OpticLeaf {
+            unsafe_boundary, ..
+        } = &mut l
+        {
+            *unsafe_boundary = true;
+        }
+        assert_eq!(boundary_marker_for(&l), Some("// optic(unsafe-boundary)"));
+        let (s, _) = mk_leaf("S", vec![]);
+        assert_eq!(boundary_marker_for(&s), None);
     }
 }

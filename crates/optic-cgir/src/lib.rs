@@ -759,7 +759,7 @@ pub fn build(
                 debug_assert_eq!(summary.focus, focus);
                 debug_assert!(
                     !decl.unsafe_boundary,
-                    "unsafe optic / host boundary reaches CGIR build only in M7+; v0 gate rejects (TYP-010) before; lowering prep uses OpticLeaf path"
+                    "unsafe optic / host boundary reaches CGIR build only in M7+; v0 gate rejects (TYP-010) before; lowering prep uses OpticLeaf path (HIR extern/unsafe carry updated for bootstrap)"
                 );
 
                 if decl.is_prism() {
