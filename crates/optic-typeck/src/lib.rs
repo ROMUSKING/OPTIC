@@ -1788,9 +1788,16 @@ fn main() { entities.query(X).get(); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, diag::OBS_UNSUPPORTED_METHOD);
-        assert_eq!(diags[0].evidence["method"], "profile");
-        assert_eq!(diags[0].evidence["mode"], "run");
+        // explicit find.expect("OBS-701") on real unsupported_profile.opt fixture (terse harness style; collect_unsupported_surface OBS error path per self-host prep)
+        let d = diags
+            .iter()
+            .find(|d| d.code == diag::OBS_UNSUPPORTED_METHOD)
+            .expect("OBS-701");
+        assert_eq!(
+            d.evidence.get("method").and_then(|v| v.as_str()),
+            Some("profile")
+        );
+        assert_eq!(d.evidence.get("mode").and_then(|v| v.as_str()), Some("run"));
     }
 
     #[test]
@@ -1799,9 +1806,19 @@ fn main() { entities.query(X).get(); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, diag::OBS_UNSUPPORTED_METHOD);
-        assert_eq!(diags[0].evidence["method"], "replay");
-        assert_eq!(diags[0].evidence["checkpoint"], "checkpoint");
+        // explicit find.expect("OBS-701") on real unsupported_replay.opt fixture (terse harness style; collect_unsupported_surface OBS error path per self-host prep)
+        let d = diags
+            .iter()
+            .find(|d| d.code == diag::OBS_UNSUPPORTED_METHOD)
+            .expect("OBS-701");
+        assert_eq!(
+            d.evidence.get("method").and_then(|v| v.as_str()),
+            Some("replay")
+        );
+        assert_eq!(
+            d.evidence.get("checkpoint").and_then(|v| v.as_str()),
+            Some("checkpoint")
+        );
     }
 
     #[test]
@@ -1825,12 +1842,19 @@ fn main() { entities.query(X).get(); }
         };
         let diags = collect_unsupported_surface(&prog);
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, diag::OBS_INVALID_HOOK_LABEL);
-        assert_eq!(diags[0].phase, diag::Phase::Type);
-        assert_eq!(diags[0].evidence["method"], "tap");
+        // explicit find.expect("OBS-703") on synthetic for invalid hook label (terse harness style; collect_unsupported_surface + collect_observability OBS error path per self-host prep)
+        let d = diags
+            .iter()
+            .find(|d| d.code == diag::OBS_INVALID_HOOK_LABEL)
+            .expect("OBS-703");
+        assert_eq!(d.phase, diag::Phase::Type);
         assert_eq!(
-            diags[0].evidence["rule"],
-            "observability hook label must not contain control characters"
+            d.evidence.get("method").and_then(|v| v.as_str()),
+            Some("tap")
+        );
+        assert_eq!(
+            d.evidence.get("rule").and_then(|v| v.as_str()),
+            Some("observability hook label must not contain control characters")
         );
     }
 
@@ -1839,10 +1863,12 @@ fn main() { entities.query(X).get(); }
         let src = include_str!("../../../examples/trailing_tap.opt");
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert!(
-            diags.iter().any(|d| d.code == diag::OBS_TRAILING_HOOK),
-            "trailing tap must emit OBS-702: {diags:?}"
-        );
+        // explicit find.expect("OBS-702") on real trailing_tap.opt fixture (terse harness style; collect_unsupported_surface OBS error path per self-host prep)
+        diags
+            .iter()
+            .find(|d| d.code == diag::OBS_TRAILING_HOOK)
+            .expect("OBS-702");
+        // presence-only per smallest + no value asserts (sibling trailing_record covers evidence["method"] via captured diag; fixture contract ensures 1; len not asserted per smallest)
     }
 
     #[test]
@@ -1865,11 +1891,15 @@ fn main() { entities.query(X).get(); }
         let src = include_str!("../../../examples/trailing_record.opt");
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert!(
-            diags.iter().any(|d| d.code == diag::OBS_TRAILING_HOOK),
-            "trailing record must emit OBS-702: {diags:?}"
+        // explicit find.expect("OBS-702") on real trailing_record.opt fixture (terse harness style; collect_unsupported_surface OBS error path per self-host prep)
+        let d = diags
+            .iter()
+            .find(|d| d.code == diag::OBS_TRAILING_HOOK)
+            .expect("OBS-702");
+        assert_eq!(
+            d.evidence.get("method").and_then(|v| v.as_str()),
+            Some("record")
         );
-        assert_eq!(diags[0].evidence["method"], "record");
     }
 
     #[test]
@@ -1886,10 +1916,11 @@ fn main() {
 "#;
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let diags = collect_unsupported_surface(&prog);
-        assert!(
-            diags.iter().any(|d| d.code == diag::OBS_UNSUPPORTED_METHOD),
-            "replay in binary rhs must emit OBS-701: {diags:?}"
-        );
+        // explicit find.expect("OBS-701") on synthetic for replay in binary rhs (terse harness style; collect_unsupported_surface + collect_observability OBS error path per self-host prep)
+        diags
+            .iter()
+            .find(|d| d.code == diag::OBS_UNSUPPORTED_METHOD)
+            .expect("OBS-701");
     }
 
     #[test]
@@ -2190,7 +2221,7 @@ optic BadPrism: GradedPrism<Entities, f32, _> {
             .find(|d| d.code == diag::TYPE_BODY_UNINFERABLE)
             .expect("TYP-004");
         // (diag const per typeck precedent vs facade str; fmt multi-line)
-        // other bare .any (EXPLAIN/typ inline/CGIR) + !any absence left per smallest delta constraint (no new coverage/tests added) (historical snapshot pre-EXPLAIN/EXP-001 + pre-OBS-70x facade; OBS hardened in optic facade per 2026-06-23 sub)
+        // other bare .any (EXPLAIN/typ inline/CGIR/TYPE/GRADE + !any absences + helper any for OBS_UNSUPPORTED/OBS_TRAILING) + diags[0]/direct evidence[] left per smallest delta constraint (no new coverage/tests added) (historical snapshot pre-EXPLAIN/EXP-001 + pre-OBS-70x facade; OBS hardened in optic facade per 2026-06-23 sub; trailing_*_obs702 + unsupported_profile/replay diags[0] + invalid_hook_label_obs703 + nested_replay now hardened in this delta; remaining left)
     }
 
     #[test]
