@@ -1,6 +1,7 @@
--- Multi-system fusion via chained let products (mover = P***V; sim = H *** mover) for 3-arity.
--- Exercises 3-arity ProductFlat, let reuse, arity-3 tuple map, prefix .record hook, untouched cols.
--- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active syntax)
+-- Multi-system fusion via let mover = P***V ; sim = H *** mover (product of product).
+-- Game-loop style; exercises 3-arity ProductFlat flattening (flatten recurses Product), tuple map body arity=3 (3-param closure), let reuse, multi-col.
+-- Vel column present but untouched in this update (richer data exercised).
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
     healths: SoA<f32>,

@@ -1,6 +1,5 @@
--- Game-loop pipeline: fused product via reusable lets (decay *** posv); prefix tap.
--- Exercises let reuse, binary product fusion, tuple map, multi-col data (vel untouched richer).
--- Game sim style dataflow pipeline.
+-- Game-loop style: fused product of HDecay *** PView (vel SoA column for richer multi-col data), tap prefix, reusable lets.
+-- Vel untouched (declared only); exercises product/tuple arith + prefix hook.
 
 data Entities {
     healths: SoA<f32>,
