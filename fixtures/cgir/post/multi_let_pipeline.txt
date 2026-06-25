@@ -1,0 +1,8 @@
+CGIR (6 nodes, roots [5])
+  [0] OpticLeaf(HDecay)  provenance=Build
+  [1] OpticLeaf(PView)  provenance=Build
+  [2] OpticLeaf(VView)  provenance=Build
+  [3] ProductFlat([0, 1],alias_safe=true)  provenance=ProductFlattening
+  [4] Tap(hp,multi_let_tap,m7_reserved=false)  provenance=Build
+  [5] QueryMap(hp)  provenance=Build
+

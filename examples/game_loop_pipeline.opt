@@ -1,5 +1,6 @@
 -- Game-loop style: fused product of HDecay *** PView (vel SoA column for richer multi-col data), tap prefix, reusable lets.
 -- Vel untouched (declared only); exercises product/tuple arith + prefix hook.
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
     healths: SoA<f32>,

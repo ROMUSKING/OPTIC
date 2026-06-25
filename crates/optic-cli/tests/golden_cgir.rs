@@ -238,3 +238,129 @@ fn golden_cgir_pre_compose_tap() {
 fn golden_cgir_post_compose_tap() {
     assert_golden("cgir/post", "compose_tap.opt", false);
 }
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_game_entity_sim() {
+    assert_golden("cgir/pre", "game_entity_sim.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_game_entity_sim() {
+    assert_golden("cgir/post", "game_entity_sim.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_mixed_prism_traversal() {
+    assert_golden("cgir/pre", "mixed_prism_traversal.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_mixed_prism_traversal() {
+    assert_golden("cgir/post", "mixed_prism_traversal.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_reusable_and_taps() {
+    assert_golden("cgir/pre", "reusable_and_taps.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_reusable_and_taps() {
+    assert_golden("cgir/post", "reusable_and_taps.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_rich_entity_update() {
+    assert_golden("cgir/pre", "rich_entity_update.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_rich_entity_update() {
+    assert_golden("cgir/post", "rich_entity_update.opt", false);
+}
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_triple_product_fusion() {
+    assert_golden("cgir/pre", "triple_product_fusion.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_triple_product_fusion() {
+    assert_golden("cgir/post", "triple_product_fusion.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_let_reuse_pipeline() {
+    assert_golden("cgir/pre", "let_reuse_pipeline.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_let_reuse_pipeline() {
+    assert_golden("cgir/post", "let_reuse_pipeline.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_tapped_multi_system() {
+    assert_golden("cgir/pre", "tapped_multi_system.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_tapped_multi_system() {
+    assert_golden("cgir/post", "tapped_multi_system.opt", false);
+}
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_game_loop_pipeline() {
+    assert_golden("cgir/pre", "game_loop_pipeline.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_game_loop_pipeline() {
+    assert_golden("cgir/post", "game_loop_pipeline.opt", false);
+}
+
+#[test]
+fn golden_cgir_pre_multi_system_fusion() {
+    assert_golden("cgir/pre", "multi_system_fusion.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_multi_system_fusion() {
+    assert_golden("cgir/post", "multi_system_fusion.opt", false);
+}
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi/multi_let: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_multi_let_pipeline() {
+    assert_golden("cgir/pre", "multi_let_pipeline.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_multi_let_pipeline() {
+    assert_golden("cgir/post", "multi_let_pipeline.opt", false);
+}
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi/multi_let/arith: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_arith_fusion_pipeline() {
+    assert_golden("cgir/pre", "arith_fusion_pipeline.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_arith_fusion_pipeline() {
+    assert_golden("cgir/post", "arith_fusion_pipeline.opt", false);
+}
+
+// Follows exact pattern of game/mixed/reusable/rich/triple/let/tapped/game_loop/multi/multi_let/arith: CGIR only (per fixtures/README runtime carve-out).
+#[test]
+fn golden_cgir_pre_tuple_fusion_pipeline() {
+    assert_golden("cgir/pre", "tuple_fusion_pipeline.opt", true);
+}
+
+#[test]
+fn golden_cgir_post_tuple_fusion_pipeline() {
+    assert_golden("cgir/post", "tuple_fusion_pipeline.opt", false);
+}

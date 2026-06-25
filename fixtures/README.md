@@ -86,6 +86,16 @@ Hook-string policy and structural limitations: `docs/observability-v0.md`.
 
 `cgi003_traversal_compose.json` — **CGI-003** witness (`traversal_in_compose`) from `compose_traversal.opt`.
 
+### Runtime-focused acceptance examples (post M6 narrow testing additions)
+The complex examples for functional/runtime coverage (game_entity_sim.opt, mixed_prism_traversal.opt, reusable_and_taps.opt, rich_entity_update.opt, triple_product_fusion.opt, let_reuse_pipeline.opt, tapped_multi_system.opt, game_loop_pipeline.opt, multi_system_fusion.opt, multi_let_pipeline.opt, arith_fusion_pipeline.opt, tuple_fusion_pipeline.opt; 12 total; order matches bench_examples) have:
+(Note: .opt sources + CGIR pre/post committed for parity/runnable-clean; full layers omitted per carve-out. Historical 2026 notes below for prior context; current sync/PLAN take precedence.)
+- CGIR pre/post golden parity (via golden_cgir registrations + fixtures) + full end-to-end execution `opticc run` verification (before/after + "RUN VERIFIED" + rich parses for multi-col/tuples).
+- Emitted-shape checks (fused comments) + boundary harness coverage (N=0 empty cols, product arity in parse tests) in execution.rs.
+- No full token/ast/hir/rust/bench layers: this is by design the *minimal sufficient* for a "runtime functional tests + complex example apps" task (see original narrow-v0 scope + "smallest change" rule). CGIR already exercises the key lowering/codegen paths (ProductFlat incl. 3-arity via chained Par, let-bound products, tuple map bodies/stores, hook lowering, region_map from data decls) + runtime harness covers mutations.
+- Acceptance: CGIR + runtime harness + docs notes + emitted asserts in tests is sufficient parity here. Full M0-M5 goldens expansion would be follow-up work outside this delta. (Partial golden + execution is the explicit minimal compromise for runtime-focused additions.)
+
+See crates/optic-cli/tests/execution.rs (parse + run_* + transpile asserts) and main.rs (verify + bench). Bench list updated for them (baselines via future --update; full data omitted per carve-out). Sync maintained on addition.
+
 `cgi003_prism_compose.json` — **CGI-003** witness (`prism_in_compose`) from `compose_prism.opt`.
 
 Prism e2e positives: `prism_get.opt` (get query), `prism_set.opt` (set query), `partial_prism.opt` (`partial preview` → Option codegen path).

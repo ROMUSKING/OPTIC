@@ -1,5 +1,5 @@
--- Richer data (healths+positions+velocities SoA + Vec2) + reusable lets + fused PView***VView product.
--- (No prism/trav in active path; header corrected for accuracy.) Exercises tuple product arith on pos+vel.
+-- Game-loop style: fused product of HDecay *** PView (vel SoA column for richer multi-col data), tap prefix, reusable lets.
+-- Vel untouched (declared only); exercises product/tuple arith + prefix hook.
 -- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
@@ -8,7 +8,7 @@ data Entities {
     velocities: SoA<Vec2>,
 }
 
-optic HView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+optic HDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
     get  s => s.healths[s.id]
     put  (s, v) => { s.healths[s.id] = v }
 }
@@ -23,8 +23,10 @@ optic VView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
     put  (s, v) => { s.velocities[s.id] = v }
 }
 
-let update_pos_vel = PView *** VView;
+let decay = HDecay;
+let posv = PView;
+let hp = decay *** posv;
 
 fn main() {
-    entities.query(update_pos_vel).map(|(p, v)| ((p.0 + v.0, p.1 + v.1), v));
+    entities.query(hp).tap("multi_let_tap").map(|(h, p)| (h - 10.0, (p.0 + 2.0, p.1 + 2.0)));
 }

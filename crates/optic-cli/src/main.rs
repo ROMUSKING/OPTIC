@@ -1127,7 +1127,22 @@ fn bench_examples(update: bool, verbose: bool) -> anyhow::Result<()> {
         "compose_triple.opt",
         "nested_position.opt",
         "nested_field_triple.opt",
+        // runtime-focused examples (game_*, ..., multi_let_*, arith_fusion_*): no full baselines per carve-out (11 total)
+        "game_entity_sim.opt",
+        "mixed_prism_traversal.opt",
+        "reusable_and_taps.opt",
+        "rich_entity_update.opt",
+        "triple_product_fusion.opt",
+        "let_reuse_pipeline.opt",
+        "tapped_multi_system.opt",
+        "game_loop_pipeline.opt",
+        "multi_system_fusion.opt",
+        "multi_let_pipeline.opt",
+        "arith_fusion_pipeline.opt",
+        "tuple_fusion_pipeline.opt",
     ];
+    // manual registration of runtime complex (no auto; appended to bench_examples + verify + golden_cgir + lists; 12 total per sync)
+    // automation hint (per PLAN): keep this list + verify arms + golden_cgir pre/post fns + PLAN/docs/fixtures lists in sync on future adds (bench_examples order = source of truth; bump "N total"; re-run tests/opticc spots + UPDATE goldens for new runtime complex).
     let bench_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bench");
     if update {
         fs::create_dir_all(&bench_dir)?;
@@ -1246,6 +1261,66 @@ fn verify_example_stdout(filename: &str, stdout: &str) -> bool {
         }
         "nested_field_triple.opt" => {
             stdout.contains("tag: 0.1") && stdout.contains("before:") && stdout.contains("after:")
+        }
+        "game_entity_sim.opt" => {
+            stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("45.0")
+        }
+        "mixed_prism_traversal.opt" => stdout.contains("90.0") && stdout.contains("70.0"),
+        "reusable_and_taps.opt" => {
+            stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("(0.1, 0.0)")
+        }
+        "rich_entity_update.opt" => {
+            stdout.contains("(4.0, 4.0)") && stdout.contains("after:") && stdout.contains("100.0")
+        }
+        "triple_product_fusion.opt" => {
+            stdout.contains("95.0")
+                && stdout.contains("75.0")
+                && stdout.contains("(3.0, 3.0)")
+                && stdout.contains("velocities")
+        }
+        "let_reuse_pipeline.opt" => {
+            stdout.contains("90.0")
+                && stdout.contains("70.0")
+                && stdout.contains("(2.5, 2.5)")
+                && stdout.contains("positions")
+        }
+        "tapped_multi_system.opt" => {
+            stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("(1.0, 1.0)")
+        }
+        "game_loop_pipeline.opt" => {
+            stdout.contains("95.0")
+                && stdout.contains("75.0")
+                && stdout.contains("(1.0, 1.0)")
+                && stdout.contains("velocities")
+        }
+        "multi_system_fusion.opt" => {
+            stdout.contains("95.0")
+                && stdout.contains("75.0")
+                && stdout.contains("(3.0, 3.0)")
+                && stdout.contains("velocities")
+        }
+        "multi_let_pipeline.opt" => {
+            stdout.contains("90.0")
+                && stdout.contains("70.0")
+                && stdout.contains("(4.0, 4.0)")
+                && stdout.contains("velocities")
+        }
+        "arith_fusion_pipeline.opt" => {
+            stdout.contains("85.0")
+                && stdout.contains("65.0")
+                && stdout.contains("35.0")
+                && stdout.contains("(3.0, 3.0)")
+                && stdout.contains("(5.0, 5.0)")
+                && stdout.contains("velocities")
+        }
+        "tuple_fusion_pipeline.opt" => {
+            stdout.contains("75.0")
+                && stdout.contains("55.0")
+                && stdout.contains("25.0")
+                && stdout.contains("(4.0, 4.0)")
+                && stdout.contains("(5.0, 5.0)")
+                && stdout.contains("(6.0, 6.0)")
+                && stdout.contains("velocities")
         }
         _ => false,
     }

@@ -1,5 +1,6 @@
 -- Reusable optics via lets; prefix tap/record hooks on single product query with tuple focus.
 -- Demonstrates app-like update + hooks (single query per v0).
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
     healths: SoA<f32>,

@@ -126,7 +126,7 @@ cargo test --workspace --no-fail-fast
 cargo run -p optic-cli -- check examples/*.opt
 ```
 
-Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`.
+Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`. Runtime-focused complex set (12 total in bench_examples order: game_entity_sim.opt, mixed_prism_traversal.opt, reusable_and_taps.opt, rich_entity_update.opt, triple_product_fusion.opt, let_reuse_pipeline.opt, tapped_multi_system.opt, game_loop_pipeline.opt, multi_system_fusion.opt, multi_let_pipeline.opt, arith_fusion_pipeline.opt, tuple_fusion_pipeline.opt) uses CGIR+execution parity (see fixtures/README.md carve-out; no full token/ast/hir/rust/bench).
 
 ## Robustness (2026-06-20 + continuation)
 - debug_assert! + guards for CGIR (incl unsafe boundary), simd, hir prep, parser (depth on decls+ all bodies listed in PLAN), emit.

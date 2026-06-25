@@ -1,5 +1,6 @@
 -- Reusable lets + product fusion for pipeline (decay on health, update on pos).
 -- Multiple lets including product alias; exercises reusable lets + binary product + tuple map.
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
     healths: SoA<f32>,

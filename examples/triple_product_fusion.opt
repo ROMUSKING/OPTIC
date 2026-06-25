@@ -1,6 +1,7 @@
 -- Triple product via let mover = P***V ; sim = H *** mover (product of product).
 -- Game-loop style; exercises 3-arity ProductFlat flattening (flatten recurses Product), tuple map body arity=3 (3-param closure), let reuse, multi-col.
 -- Vel column present but untouched in this update (richer data exercised).
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
 
 data Entities {
     healths: SoA<f32>,
