@@ -30,6 +30,7 @@ cargo run -p optic-cli -- bench --update
 ```
 
 Review diffs before committing.
+# M7 Phase 1 skeleton (this delta): 28 ast goldens (Debug for traverse/update/BranchBias); core 9f +129i; golden_ast same-pass. See PLAN.
 
 ## CLI commands (v0)
 

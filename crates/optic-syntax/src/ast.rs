@@ -84,6 +84,9 @@ pub struct OpticDecl {
     pub put: Option<PutClause>,
     pub preview: Option<GetClause>,
     pub review: Option<PutClause>,
+    /// M7 Phase 1 skeleton fields (reusing GetClause/PutClause per plan). Full enforcement Phase 2.
+    pub traverse: Option<GetClause>,
+    pub update: Option<PutClause>,
     pub span: Span,
 }
 
@@ -124,6 +127,7 @@ pub enum GradeDim {
     Cache { n: Option<u32>, span: Span },        // None = _
     Ownership { r: Option<String>, span: Span }, // rational or _
     Named { name: String, span: Span },          // LinearGrade etc or _
+    BranchBias { bias: String, span: Span },     // Likely | Unlikely | Unknown (M7)
     Infer(Span),
 }
 

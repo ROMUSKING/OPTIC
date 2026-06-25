@@ -138,7 +138,7 @@ Narrow v0 (M0–M6) complete. Realizes book ch.7-11 + M7/M8 scaffolding per app 
 **Diagnostic catalog (v0 implements book subset; full catalog in app A):**
 - GRA-110, GRA-104, ALI-201, TYP-001/002/003/004/010, EXP-001, PAR-001 (PAR-010+ reserved), FUS-501/502, CGI-003/006, OBS-701/702, RES-001 etc. (see v0-executable-spec.md + code for exact; book has additional PAR-*/OPT-*/etc reserved for M7+)
 
-**Positive examples** now include core set + ambitious "complex" runtime demos (bench order): `game_entity_sim.opt`, `mixed_prism_traversal.opt`, `reusable_and_taps.opt`, `rich_entity_update.opt`, `triple_product_fusion.opt` (3-arity ProductFlat), `let_reuse_pipeline.opt`, `tapped_multi_system.opt`, `game_loop_pipeline.opt`, `multi_system_fusion.opt`, `multi_let_pipeline.opt`, `arith_fusion_pipeline.opt`, `tuple_fusion_pipeline.opt` (12 total). Newer have CGIR+execution parity (carve-out); lists kept in sync.
+**Positive examples** now include core set + ambitious "complex" runtime demos (bench order): `game_entity_sim.opt`, `mixed_prism_traversal.opt`, `reusable_and_taps.opt`, `rich_entity_update.opt`, `triple_product_fusion.opt` (3-arity ProductFlat), `let_reuse_pipeline.opt`, `tapped_multi_system.opt`, `game_loop_pipeline.opt`, `multi_system_fusion.opt`, `multi_let_pipeline.opt`, `arith_fusion_pipeline.opt`, `tuple_fusion_pipeline.opt`, `four_col_pipeline.opt` (13 total). Newer have CGIR+execution parity (carve-out); lists kept in sync.
 
 **M7 prism lowering (scaffolding; narrow-v0 core complete):**
 
@@ -146,6 +146,7 @@ Narrow v0 (M0–M6) complete. Realizes book ch.7-11 + M7/M8 scaffolding per app 
 |------|--------|-------|
 | CGIR M7/M8 reserved variants | scaffolding | `PrismLeaf`/`TraversalLeaf` (M7, `m7_reserved=false`); `Tap`/`Record` (M8); **CGI-006** only for true stubs. Full traverse/update syntax deferred. |
 | GradedPrism / GradedTraversal usage | scaffolding (narrow) | Exercised in realistic programs via separate queries/lets (`alive_filter`, `all_healths`, `mixed_prism_traversal`). |
+| Phase 1 syntax skeleton | partial (this delta) | traverse/update + BranchBias parse (extend listed); permissive (enforce Phase2); EBNF/PLAN/DOCS +28 goldens synced. |
 
 **M8 observability scaffolding (stubs + surface gates for narrow; full M8 deferred):**
 
@@ -158,27 +159,25 @@ Narrow v0 (M0–M6) complete. Realizes book ch.7-11 + M7/M8 scaffolding per app 
 
 **New / Next Goals (post 2026-06-25 complex-examples task)**
 - [done this delta: prior] Added 3 new ambitious runtime examples (triple/let_reuse/tapped); CGIR+run+bench+verify+golden+harness+sync.
-- [done this delta] Added multi_let_pipeline.opt (chained let + tap + tuple arith + untouched col + marker); CGIR+run_*+verify+bench+golden+lists synced.
-- [done this delta] Added arith_fusion_pipeline.opt (next game-loop/pipeline style exercising more tuple/arith/3-arity/untouched cols/let/fusion + marker) + run_* (richer asserts + boundary) + self-host markers to 2 more .opt + evidence + verify + golden_cgir + bench/PLAN/docs syncs (11 total; order from bench_examples).
-- [done this delta] Added tuple_fusion_pipeline.opt + run test + CGIR + registrations + lists bump to 12; updated docs/PLAN with automation note for sync.
-- [done this delta] Compacted M5 text (milestone table + section 8 high-level trim); extended parse asserts for arity; synced all lists (fixtures/README "12 total", docs, PLAN).
+- [done this delta: prior] Added multi_let_pipeline.opt (chained let + tap + tuple arith + untouched col + marker); CGIR+run_*+verify+bench+golden+lists synced.
+- [done this delta: prior] Added arith_fusion_pipeline.opt (next game-loop/pipeline style exercising more tuple/arith/3-arity/untouched cols/let/fusion + marker) + run_* (richer asserts + boundary) + self-host markers to 2 more .opt + evidence + verify + golden_cgir + bench/PLAN/docs syncs (11 total; order from bench_examples).
+- [done this delta: prior] Added tuple_fusion_pipeline.opt + run test + CGIR + registrations + lists bump to 12; updated docs/PLAN with automation note for sync.
+- [done this delta: prior] Compacted M5 text (milestone table + section 8 high-level trim); extended parse asserts for arity; synced all lists (fixtures/README "12 total", docs, PLAN).
+- [done this delta] Added four_col_pipeline.opt (chained lets for 4-column product fusion, tap prefix, 4-col data, untouched velocities); CGIR pre/post goldens + run_* test + lists synced (13 total).
+- [done this delta] Expanded self-host prep markers (commented extern) to game_entity_sim.opt and mixed_prism_traversal.opt; added source assertions in execution.rs.
+- [done this delta] Implemented full runtime N=0 entities execution boundary test (`test_n0_empty_boundary_runtime_exec`) transpiling and running with empty vectors.
+- [done this delta] Extended parsing helper and arity boundary tests to support 4-col products/arity edges and empty array cases.
+- [done this delta] Expanded harness with richer boundary asserts (parse helpers on real N=0 runtime exec output) + 4-col arity edge case (parse_entities_line_boundary + n0 test); execution coverage growth.
 - Grow suite further with game-loop/pipeline apps stressing fusion/let/tuple/scaffolding (use only narrow surface).
-- Expand execution coverage + harness (full runtime N=0 entities exec, more arity edges, richer asserts).
+- Expand execution coverage + harness (full runtime N=0 entities exec, more arity edges, richer asserts; N=0 + 4-col partial done prior).
 - Add more self-host prep markers/comments using extern in examples (comment only).
 - Keep PLAN/docs/goldens/code in sync (no drift) for future additions; accurate .opt comments; runtime-focused CGIR+exec policy.
 
 **Immediate next items**
-- Grow suite with yet another complex pipeline/game-loop .opt exercising additional tuple/arith/untouched patterns via narrow surface only (tuple_fusion_pipeline added this delta).
-- Complete explicit runtime arity-mismatch positive + negative test coverage (build on cgi005 + new 3-arity run_* ; add dedicated mismatch harness cases; indirect via 3-arity + cgi005 this delta).
-- Implement full runtime N=0 entities exec (harness update + boundary test; see PLAN immediate next + fixtures/README carve-out (N=0 codegen deferred; synthetic + boundary only; no NOTE yet); full N=0 .opt runtime open).
-- Further expand self-host prep markers (commented extern) to additional .opt + add evidence asserts in run_* (markers on let/rich + new this delta).
-- Extend verify_example_stdout + parse_*_boundary for additional arity edges (e.g. 4-col products; parse extended with 3/4-col note + arith sample this delta).
-- Add note/automation hint for keeping bench_examples / verify / golden_cgir / docs lists in sync on future adds (added in main.rs comment + const-like; see also test list consistency).
 - Re-run full fmt/clippy + execution/golden + opticc spot-checks after all changes (always required; done).
 - Further compact PLAN (high-level only; prune any residual M5/M6 verbose parentheticals in next pass).
-- (list order unification + 12 total sync done this delta + doc syncs; see bench_examples order as source of truth; automation note added).
 
-**See also (kept in sync):** `README-IMPLEMENTATION.md`, `docs/v0-executable-spec.md`, `fixtures/README.md`.
+**See also (kept in sync):** `docs/v0-executable-spec.md`, `fixtures/README.md`. (README-IMPLEMENTATION.md untouched this delta)
 
 ## 9. Post-M7 roadmap
 
@@ -189,13 +188,43 @@ Narrow v0 (M0–M6) complete. Realizes book ch.7-11 + M7/M8 scaffolding per app 
 - M9 self-hosting with translation-validation harness.
 - M10 kernel-class + domain playbooks (Part IV) + full rationale (Part V).
 
-### M7 notes (scaffolding state)
+### Milestone M7 Roadmap: Prisms, Traversals, and the SIMD Bridge (Full Language Begins)
 
-Current scaffolding gives working preview/review + get/put paths for the prelude examples. When doing full M7:
-- Add traverse/update surface + HIR lowering (per book/app D update).
-- Extend codegen for branches + real intrinsics; lift m7_reserved where appropriate.
-- Update verifier/fusions as needed while preserving narrow compatibility.
-- Keep "wontfix for narrow" distinctions explicit.
+As specified in the book (Ch. 13, Appendix C, and Appendix D), full M7 transitions from our current narrow v0 scaffolding to the first full-language capability. The concrete detailed requirements are organized into six tracks:
+
+#### Track 1: Surface Syntax & Parser Extensions
+- [ ] **Clause Syntax for Prisms:** Parser extension to enforce `preview`/`review` clauses in `optic` declaration blocks for `GradedPrism` types, deprecating the narrow-v0 get/put fallback. (Phase 1 skeleton: parse support+fields; full in Phase 2)
+- [ ] **Clause Syntax for Traversals:** Parser extension to enforce `traverse`/`update` clauses in `optic` declarations for `GradedTraversal` types. (Phase 1 skeleton: parse_traverse/update + reuse; full Phase 2)
+- [ ] **Branch Bias Grade Syntax:** Support parsing of explicit branch bias annotations (`Likely` / `Unlikely` / `Unknown`) on prism clauses and grade annotations. (Phase 1 skeleton: parse_grade_dim + BranchBias; full later)
+- [ ] **Extended Ast/Tokens snap-updating:** Add parsing tests for nested Option/coproduct matching syntax and update AST/Token goldens. (Phase 1: goldens for Debug; full new-syntax Phase 2)
+
+#### Track 2: HIR Lowering & Summary Inference
+- [ ] **Coproduct Lowering:** Lower `preview`/`review` to explicit branch representation in HIR, rather than assuming standard getters/setters.
+- [ ] **SIMD-Eligibility Verification Check:** Implement the 5-point static check on `GradedTraversal` summaries:
+  1. No cross-element dependencies (`i` does not read or write `j`).
+  2. Regular stride and layout.
+  3. homogeneous element types with supported lanes (e.g., `f32`, `Vec2`).
+  4. No divergent control-flow/prisms in loop body.
+  5. Alias safety to reorder or coalesce stores.
+- [ ] **Richer Cache & Ownership Grades:** Integration of fractional uniqueness grades (linear, unique, read-only) into summary constraints and region checking.
+
+#### Track 3: CGIR & Invariant Verification
+- [ ] **Prism/Traversal Node Realization:** Lower scaffolding stubs to full `PrismLeaf` and `TraversalLeaf` nodes in the CGIR graph (`m7_reserved=false`).
+- [ ] **Control-flow & Branch-Prediction Graph Construction:** CGIR graph builder represents coproduct eliminations as conditional branch edges, carrying the branch-bias facts (`Likely` / `Unlikely`).
+- [ ] **Alias Safety Verification:** Invariant checker verifies store coalescing legality over `TraversalLeaf` nodes.
+
+#### Track 4: Optimizer & Fusions
+- [ ] **Prism/Traversal Compose Fusion:** Implement compose fusion rules for Prisms and Traversals. Lift the narrow-v0 compile-time errors (CGI-003 `prism_in_compose` / `traversal_in_compose`) under verified legal invariants.
+- [ ] **Branch-Coalescing Rewrites:** CGIR optimization pass simplifies sequential conditional branch structures (nested prisms compose).
+
+#### Track 5: Codegen (Rust SIMD & Branch hints)
+- [ ] **SIMD Loop Emission:** Emit vectorization-friendly loop nests for homogeneous traversals satisfying `SimdEligible` constraints, outputting actual vector arrays or vector-packed code shapes.
+- [ ] **Branch Bias Hint Emission:** Translate `Likely` and `Unlikely` grades to Rust `core::intrinsics::likely` / `unlikely` (or cold/hot branch styling).
+- [ ] **Coproduct codegen:** Clean option unwraps (e.g. `if let Some(...)` or match constructs) generated without double-Option wrapping or redundant helper copies.
+
+#### Track 6: Conformance & Baselines
+- [ ] **M7 Conformance Suite:** Complete positive and negative test cases for branch bias, SIMD eligibility, and compose prism fusion.
+- [ ] **Vector/Branching Performance Baselines:** Commit Criterion benchmarks verifying instruction count reductions from SIMD layouts and branch hints.
 
 **Intentional narrow debt (until M8+):**
 - Triplicate leaf match arms in codegen (**wontfix** until more variants).
@@ -205,5 +234,4 @@ Current scaffolding gives working preview/review + get/put paths for the prelude
 
 ## Live git capture at end of this delta write (for summary + PLAN sync per task)
 # (re-captured final via `git status --porcelain`, `git diff --stat HEAD -- [this-delta files]`, `git ls-files --others` post checkout unrelated)
-# This delta tracked (limited): edits to PLAN.md (compact/sync/[done]), main.rs (bench+verify), execution.rs (run_*+marker asserts+parse extend+notes), golden_cgir.rs (regs+comment), docs/v0-executable-spec.md, fixtures/README.md, examples/let_reuse_pipeline.opt + rich_entity_update.opt (markers). Untracked (per policy): arith_fusion_pipeline.opt + cgir pre/post.
-# Accum/prior: M game_loop+triple (prior markers vs HEAD; this-delta only touched let/rich), untracked multi_let* + its cgir (prior policy), large PLAN stat (base content vs old HEAD). See summary for verbatim captures.
+# M7 Phase 1 skeleton (this delta): KwTraverse/KwUpdate + lexer, GradeDim::BranchBias + parse_grade_dim, OpticDecl + parse_traverse/update (reuse), EBNF/PLAN/docs sync + 28 ast goldens. 37 files changed, 205 insertions(+), 28 deletions(-). Core (syntax+cgir+ebnf+plan+v0-spec+fixtures): 9 files, 129i/28d. Goldens: 28 files +76i (Debug fields). Followed Phase 1 exactly per approved plan (extend listed, smallest, reuse). See review. git diff --shortstat HEAD: 37 files changed, 205 insertions(+), 28 deletions(-). Untracked untouched.

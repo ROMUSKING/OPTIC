@@ -148,6 +148,8 @@ impl<'src> Lexer<'src> {
             "preview" => TokenKind::KwPreview,
             "partial" => TokenKind::KwPartial,
             "review" => TokenKind::KwReview,
+            "traverse" => TokenKind::KwTraverse,
+            "update" => TokenKind::KwUpdate,
             "let" => TokenKind::KwLet,
             "fn" => TokenKind::KwFn,
             "query" => TokenKind::KwQuery,

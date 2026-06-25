@@ -107,14 +107,15 @@ Review diffs before commit. See `fixtures/README.md`.
 ## M7 prism + traversal (scaffolding for narrow v0; book M7 begins full)
 
 - `GradedPrism` preview/review: HIR summaries → `PrismLeaf` (`m7_reserved=false`) → Rust codegen
-- `GradedTraversal` get/put (v0 surface; book traverse/update deferred): HIR summaries → `TraversalLeaf` (`m7_reserved=false`) → entity loop codegen + `// optic(traversal):` + optional `// simd-eligible` for homogeneous `SoA<f32>`
+- `GradedTraversal` get/put (v0 surface; book traverse/update deferred but Phase1 syntax skeleton added): HIR summaries → `TraversalLeaf` (`m7_reserved=false`) → entity loop codegen + `// optic(traversal):` + optional `// simd-eligible` for homogeneous `SoA<f32>`
 - `verify` allows properly lowered `PrismLeaf` / `TraversalLeaf` / `Tap` / `Record` (`m7_reserved=false`); rejects stubs (**CGI-006**)
 - Compose+prism/traversal rejected at CGIR (**CGI-003** `prism_in_compose` / `traversal_in_compose`)
 - Acceptance: `examples/alive_filter.opt`, `examples/all_healths.opt` (tokens/ast/hir/cgir/rust/bench + `run` execution)
 
 ## M7+ deferred
 
-- traverse/update surface syntax (v0 uses get/put clauses for `GradedTraversal`; full deferred per book)
+- traverse/update surface syntax (Phase 1 basic skeleton support added per approved plan §Phase1 + reuse parse_grade_dim etc; v0 get/put still surface for trav, full enforce later; book ch13)
+- 2026-06 M7 Phase 1 skeleton (this delta): KwTraverse/KwUpdate + BranchBias + fields + 28 ast goldens + EBNF/PLAN/docs sync; 37 files +205/-28 (core 9f +129i); fmt/clippy/tests/opticc pass; see review.
 - Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only; hardened)
 - `unsafe optic` / `extern` host boundaries (**TYP-010**; HIR lowering prep)
 - profile/replay observability CLI — see `docs/observability-v0.md` (stubs; full M8)
@@ -126,7 +127,7 @@ cargo test --workspace --no-fail-fast
 cargo run -p optic-cli -- check examples/*.opt
 ```
 
-Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`. Runtime-focused complex set (12 total in bench_examples order: game_entity_sim.opt, mixed_prism_traversal.opt, reusable_and_taps.opt, rich_entity_update.opt, triple_product_fusion.opt, let_reuse_pipeline.opt, tapped_multi_system.opt, game_loop_pipeline.opt, multi_system_fusion.opt, multi_let_pipeline.opt, arith_fusion_pipeline.opt, tuple_fusion_pipeline.opt) uses CGIR+execution parity (see fixtures/README.md carve-out; no full token/ast/hir/rust/bench).
+Positive examples must transpile, compile, and match harness predicates in `optic-cli/tests/execution.rs`. Runtime-focused complex set (13 total in bench_examples order: game_entity_sim.opt, mixed_prism_traversal.opt, reusable_and_taps.opt, rich_entity_update.opt, triple_product_fusion.opt, let_reuse_pipeline.opt, tapped_multi_system.opt, game_loop_pipeline.opt, multi_system_fusion.opt, multi_let_pipeline.opt, arith_fusion_pipeline.opt, tuple_fusion_pipeline.opt, four_col_pipeline.opt) uses CGIR+execution parity (see fixtures/README.md carve-out; no full token/ast/hir/rust/bench). Harness expanded with richer N=0/arity asserts per PLAN.
 
 ## Robustness (2026-06-20 + continuation)
 - debug_assert! + guards for CGIR (incl unsafe boundary), simd, hir prep, parser (depth on decls+ all bodies listed in PLAN), emit.
@@ -184,4 +185,5 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - 2026-06-25 continuation (typeck full Extern carry + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 19 insertions(+), 1 deletion(-)`): see PLAN sub.
 - 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
 - 2026-06-25 continuation (CLI + dump/facade explicit Extern arms in tooling + dump helper comment + verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 26 insertions(+), 1 deletion(-)` (fix round)): see PLAN sub.
+- 2026-06-25 continuation (harness expand: richer boundary asserts + 4-col arity edge on real N=0 + parse_entities + verbatim doc sync; execution.rs + PLAN + fixtures + v0-exec + main; live `7 files changed, 230 insertions(+), 31 deletions(-) (5 core + 2 marker restores for pre-existing asserts)`; same-pass sync + verif; see PLAN): see PLAN sub.
 

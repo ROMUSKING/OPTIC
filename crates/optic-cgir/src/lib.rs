@@ -1941,6 +1941,8 @@ mod tests {
                 put: None,
                 preview: None,
                 review: None,
+                traverse: None,
+                update: None,
                 span: optic_syntax::Span::dummy(),
             },
             summary,

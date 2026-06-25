@@ -412,7 +412,8 @@ impl<'a> Parser<'a> {
         let ctor_tok = self.advance();
         if ctor_tok.kind != TokenKind::Ident {
             self.errors.push(ParseError {
-                message: "expected GradedOptic or GradedPrism type constructor".into(),
+                message: "expected GradedOptic or GradedPrism or GradedTraversal type constructor"
+                    .into(),
                 span: ctor_tok.span,
                 kind: None,
             });
@@ -445,6 +446,8 @@ impl<'a> Parser<'a> {
         let mut put = None;
         let mut preview = None;
         let mut review = None;
+        let mut traverse = None;
+        let mut update = None;
         while self.current() != TokenKind::RBrace && self.current() != TokenKind::Eof {
             match self.current() {
                 TokenKind::KwGet => get = Some(self.parse_get_clause(depth + 1)?),
@@ -453,9 +456,11 @@ impl<'a> Parser<'a> {
                     preview = Some(self.parse_preview_clause(depth + 1)?);
                 }
                 TokenKind::KwReview => review = Some(self.parse_review_clause(depth + 1)?),
+                TokenKind::KwTraverse => traverse = Some(self.parse_traverse_clause(depth + 1)?),
+                TokenKind::KwUpdate => update = Some(self.parse_update_clause(depth + 1)?),
                 _ => {
                     self.errors.push(ParseError {
-                        message: "expected get, put, preview, or review clause in optic body"
+                        message: "expected get, put, preview, review, traverse, or update clause in optic body"
                             .into(),
                         span: self.current_span(),
                         kind: None,
@@ -481,6 +486,8 @@ impl<'a> Parser<'a> {
             put,
             preview,
             review,
+            traverse,
+            update,
             span,
         })
     }
@@ -664,6 +671,13 @@ impl<'a> Parser<'a> {
                         name: txt,
                         span: sp,
                     })
+                } else if txt == "BranchBias" {
+                    // M7 Phase 1 skeleton per plan + book ch13: BranchBias<Likely|Unlikely|Unknown> (IDENT token, lax like other grades). New parse_grade_dim arm; unit coverage deferred (Phase 2 Track1).
+                    self.expect(TokenKind::Lt, "<")?;
+                    let b_tok = self.advance();
+                    let bias = self.text_of(&b_tok);
+                    self.expect(TokenKind::Gt, ">")?;
+                    Some(GradeDim::BranchBias { bias, span: sp })
                 } else if txt == "_" {
                     Some(GradeDim::Infer(sp))
                 } else {
@@ -706,6 +720,43 @@ impl<'a> Parser<'a> {
 
     fn parse_put_clause(&mut self, depth: usize) -> Option<PutClause> {
         let start = self.expect(TokenKind::KwPut, "put")?;
+        self.expect(TokenKind::LParen, "(")?;
+        let sp_tok = self.advance();
+        let state_param = Spanned::new(self.text_of(&sp_tok), sp_tok.span);
+        self.expect(TokenKind::Comma, ",")?;
+        let vp_tok = self.advance();
+        let value_param = Spanned::new(self.text_of(&vp_tok), vp_tok.span);
+        self.expect(TokenKind::RParen, ")")?;
+        self.expect(TokenKind::FatArrow, "=>")?;
+        let body = self.parse_expr_or_block(depth + 1)?;
+        let span = start.merge(body_span(&body));
+        Some(PutClause {
+            state_param,
+            value_param,
+            body,
+            span,
+        })
+    }
+
+    fn parse_traverse_clause(&mut self, depth: usize) -> Option<GetClause> {
+        // M7 Phase 1 skeleton: modeled exactly on parse_get_clause (reuse GetClause). New parse paths coverage deferred to Phase 2 (per plan); exercised via ast goldens + verif.
+        let start = self.expect(TokenKind::KwTraverse, "traverse")?;
+        let param_tok = self.advance();
+        let param = Spanned::new(self.text_of(&param_tok), param_tok.span);
+        self.expect(TokenKind::FatArrow, "=>")?;
+        let body = self.parse_expr(depth + 1)?;
+        let span = start.merge(body_span(&body));
+        Some(GetClause {
+            param,
+            body,
+            partial: false,
+            span,
+        })
+    }
+
+    fn parse_update_clause(&mut self, depth: usize) -> Option<PutClause> {
+        // M7 Phase 1 skeleton: modeled exactly on parse_put_clause (reuse PutClause)
+        let start = self.expect(TokenKind::KwUpdate, "update")?;
         self.expect(TokenKind::LParen, "(")?;
         let sp_tok = self.advance();
         let state_param = Spanned::new(self.text_of(&sp_tok), sp_tok.span);
@@ -1519,6 +1570,7 @@ fn grade_dim_span(d: &GradeDim) -> Span {
         GradeDim::Cache { span, .. }
         | GradeDim::Ownership { span, .. }
         | GradeDim::Named { span, .. }
+        | GradeDim::BranchBias { span, .. }
         | GradeDim::Infer(span) => *span,
     }
 }

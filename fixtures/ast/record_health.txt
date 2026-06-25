@@ -446,6 +446,8 @@ Program {
                 ),
                 preview: None,
                 review: None,
+                traverse: None,
+                update: None,
                 span: Span {
                     source: SourceId(
                         1,

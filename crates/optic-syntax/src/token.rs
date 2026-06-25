@@ -18,6 +18,8 @@ pub enum TokenKind {
     KwPreview,
     KwPartial,
     KwReview,
+    KwTraverse,
+    KwUpdate,
     KwLet,
     KwFn,
     KwQuery, // for the .query( form; not strictly needed

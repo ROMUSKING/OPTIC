@@ -14,7 +14,7 @@ field_list      ::= field_decl (',' field_decl)* ','?
 field_decl      ::= IDENT ':' type_expr
 
 optic_decl      ::= 'optic' IDENT ':' optic_type_ann '{' optic_body '}'
-optic_type_ann  ::= 'GradedOptic' '<' type_expr ',' type_expr ',' grade_ann '>'
+optic_type_ann  ::= ('GradedOptic' | 'GradedPrism' | 'GradedTraversal') '<' type_expr ',' type_expr ',' grade_ann '>'
 grade_ann       ::= grade_dim ('+' grade_dim)*
                   | '_'
 grade_dim       ::= 'CacheGrade' '<' INT_LIT '>'
@@ -23,9 +23,17 @@ grade_dim       ::= 'CacheGrade' '<' INT_LIT '>'
                   | 'AffineGrade'
                   | 'SharedGrade'
                   | 'CacheGrade' '<' '_' '>'
+                  | 'BranchBias' '<' IDENT '>'   -- M7: Likely|Unlikely|Unknown
 optic_body      ::= get_clause put_clause?
+                  | preview_clause review_clause?
+                  | traverse_clause update_clause?
+-- Phase 1 skeleton: parser permissive (mixed/legacy ok); ctor-specific strict in Track1 Phase 2. EBNF full set (BranchBias IDENT token, lax).
 get_clause      ::= 'get' IDENT '=>' expr
 put_clause      ::= 'put' '(' IDENT ',' IDENT ')' '=>' (expr | block_expr)
+preview_clause  ::= ['partial'] 'preview' IDENT '=>' expr
+review_clause   ::= 'review' '(' IDENT ',' IDENT ')' '=>' (expr | block_expr)
+traverse_clause ::= 'traverse' IDENT '=>' expr
+update_clause   ::= 'update' '(' IDENT ',' IDENT ')' '=>' (expr | block_expr)
 block_expr      ::= '{' stmt* expr? '}'
 stmt            ::= (IDENT '=')? expr ';'
 
