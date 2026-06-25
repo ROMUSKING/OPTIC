@@ -647,7 +647,7 @@ pub fn dump_hir(p: &HirProgram) -> String {
             HirItem::Extern(e) => {
                 out.push_str(&format!("  Extern {} abi={}\n", e.name.node, e.abi));
             }
-            _ => out.push_str("  other\n"),
+            _ => out.push_str("  other\n"), // Data/Fn carried (HirProgram dump; region_map in CGIR); explicit Extern arm (above) per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
         }
     }
     out

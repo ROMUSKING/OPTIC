@@ -711,6 +711,7 @@ pub fn explain_grade(typed: &TypedHir, node: &str) -> TypeckResult<GradeReport> 
                     summary,
                 ));
             }
+            hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }
@@ -729,6 +730,7 @@ fn file_level_span(typed: &TypedHir) -> Span {
         match item {
             hir::HirItem::Optic { decl, .. } => return decl.span,
             hir::HirItem::Let { span, .. } => return *span,
+            hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }
@@ -867,6 +869,7 @@ pub fn explain_focus(typed: &TypedHir, node: &str) -> TypeckResult<FocusReport> 
                     focus_fields: vec![],
                 });
             }
+            hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }

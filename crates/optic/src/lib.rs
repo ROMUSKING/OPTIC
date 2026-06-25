@@ -735,6 +735,9 @@ mod tests {
             has_extern_typed,
             "extern must reach TypedHir (prep for self-host boundary sources)"
         );
+        // direct call to explain_grade/explain_focus on TypedHir containing Extern (exercises new explicit Extern arms + file_level_span + candidate logic in explain paths; uses bypass + unknown node to hit match; terse style per self-host prep + addresses coverage for facade explain helpers)
+        let _e = crate::explain_grade(&typed, "NoSuch").unwrap_err();
+        let _f = crate::explain_focus(&typed, "NoSuch").unwrap_err();
         // gate still works for compile + emit (explicit TYP-010 path test; both use match for error-expecting facade calls per harness/doctor pattern; early surface gate in compile_through_check)
         let err = match compile_check(&src) {
             Err(e) => e,

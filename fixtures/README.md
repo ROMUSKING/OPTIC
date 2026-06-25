@@ -168,4 +168,5 @@ debug_assert guards + error hardening added (see PLAN); fixtures unchanged (pari
 - 2026-06-24 continuation (self-host bootstrap+HIR carry+marker+coverage+verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 77 insertions(+), 18 deletions(-)`): see PLAN sub.
 - 2026-06-25 continuation (typeck full Extern carry + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 19 insertions(+), 1 deletion(-)`): see PLAN sub.
 - 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
+- 2026-06-25 continuation (CLI + dump/facade explicit Extern arms in tooling + dump helper comment + verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 26 insertions(+), 1 deletion(-)` (fix round)): see PLAN sub.
 

@@ -751,6 +751,7 @@ fn hir_binding_candidates(hir: &optic_hir::HirProgram) -> Vec<String> {
         match item {
             optic_hir::HirItem::Optic { decl, .. } => candidates.push(decl.name.node.clone()),
             optic_hir::HirItem::Let { name, .. } => candidates.push(name.clone()),
+            optic_hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }
@@ -993,6 +994,7 @@ fn dump_summary(src: &str, node: Option<&str>) -> anyhow::Result<()> {
             optic_hir::HirItem::Let { name, summary, .. } => {
                 println!("{name}: {summary:#?}");
             }
+            optic_hir::HirItem::Extern(_) => {} // per ch22/appI/PLAN (passes as optics; S0 for S1; 3-ring)
             _ => {}
         }
     }
