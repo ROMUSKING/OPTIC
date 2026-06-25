@@ -1,0 +1,8 @@
+CGIR (6 nodes, roots [5])
+  [0] OpticLeaf(HealthView)  provenance=Build
+  [1] OpticLeaf(PositionView)  provenance=Build
+  [2] ProductFlat([0, 1],alias_safe=true)  provenance=ProductFlattening
+  [3] Tap(combo,combo_hook,m7_reserved=false)  provenance=Build
+  [4] Record(combo,combo_record,m7_reserved=false)  provenance=Build
+  [5] QueryMap(combo)  provenance=Build
+

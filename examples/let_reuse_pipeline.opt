@@ -1,0 +1,25 @@
+-- Reusable lets + product fusion for pipeline (decay on health, update on pos).
+-- Multiple lets including product alias; exercises reusable lets + binary product + tuple map.
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PosView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+let decay = HealthDecay;
+let posv = PosView;
+let pipeline = decay *** posv;
+
+fn main() {
+    entities.query(pipeline).map(|(h, p)| (h - 10.0, (p.0 + 0.5, p.1 + 0.5)));
+}

@@ -1,0 +1,30 @@
+-- Prism via let alias (AliveFilter total-preview map); GradedOptic+GradedTraversal decls+lets present for mixed-grade source demo.
+-- (v0 single query root; only prism path active at runtime). Reusable lets.
+-- GradedPrism/Traversal declarations are M7 scaffolding (see v0-executable-spec and alive_filter.opt); only GradedPrism path is active in this narrow-v0 single-query program.
+
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthLens: GradedOptic<Entities, f32, CacheGrade<2>> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2>> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+let lens = HealthLens;
+let prism = AliveFilter;
+let trav = AllHealths;
+
+fn main() {
+    entities.query(prism).map(|h| h - 10.0);
+}

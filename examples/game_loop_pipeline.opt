@@ -1,0 +1,32 @@
+-- Game-loop pipeline: fused product via reusable lets (decay *** posv); prefix tap.
+-- Exercises let reuse, binary product fusion, tuple map, multi-col data (vel untouched richer).
+-- Game sim style dataflow pipeline.
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+    velocities: SoA<Vec2>,
+}
+
+optic HDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+optic VView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.velocities[s.id]
+    put  (s, v) => { s.velocities[s.id] = v }
+}
+
+let decay = HDecay;
+let posv = PView;
+let pipeline = decay *** posv;
+
+fn main() {
+    entities.query(pipeline).tap("loop_tap").map(|(h, p)| (h - 5.0, (p.0 + 1.0, p.1 + 1.0)));
+}

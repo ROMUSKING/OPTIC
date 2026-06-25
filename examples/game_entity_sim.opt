@@ -1,0 +1,31 @@
+-- Game-loop style: fused product of HealthDecay *** PositionView (vel SoA column for richer multi-col data), tap prefix, reusable lets.
+-- Vel untouched (declared only); exercises product/tuple arith + prefix hook.
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+    velocities: SoA<Vec2>,
+}
+
+optic HealthDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PositionView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+optic VelocityView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.velocities[s.id]
+    put  (s, v) => { s.velocities[s.id] = v }
+}
+
+let decay = HealthDecay;
+let posv = PositionView;
+let sim = decay *** posv;
+
+fn main() {
+    entities.query(sim).tap("health_probe").map(|(h, p)| (h - 5.0, (p.0 + 1.0, p.1 + 1.0)));
+}

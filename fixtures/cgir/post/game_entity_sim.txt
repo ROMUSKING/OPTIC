@@ -1,0 +1,8 @@
+CGIR (6 nodes, roots [5])
+  [0] OpticLeaf(HealthDecay)  provenance=Build
+  [1] OpticLeaf(PositionView)  provenance=Build
+  [2] OpticLeaf(VelocityView)  provenance=Build
+  [3] ProductFlat([0, 1],alias_safe=true)  provenance=ProductFlattening
+  [4] Tap(sim,health_probe,m7_reserved=false)  provenance=Build
+  [5] QueryMap(sim)  provenance=Build
+

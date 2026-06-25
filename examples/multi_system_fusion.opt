@@ -1,0 +1,31 @@
+-- Multi-system fusion via chained let products (mover = P***V; sim = H *** mover) for 3-arity.
+-- Exercises 3-arity ProductFlat, let reuse, arity-3 tuple map, prefix .record hook, untouched cols.
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active syntax)
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+    velocities: SoA<Vec2>,
+}
+
+optic HDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+optic VView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.velocities[s.id]
+    put  (s, v) => { s.velocities[s.id] = v }
+}
+
+let mover = PView *** VView;
+let sim = HDecay *** mover;
+
+fn main() {
+    entities.query(sim).record("fusion_record").map(|(h, p, v)| (h - 5.0, (p.0 + 1.0, p.1 + 1.0), v));
+}

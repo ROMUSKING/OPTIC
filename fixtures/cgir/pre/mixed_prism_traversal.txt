@@ -1,0 +1,6 @@
+CGIR (4 nodes, roots [3])
+  [0] OpticLeaf(HealthLens)  provenance=Build
+  [1] PrismLeaf(AliveFilter,m7_reserved=false)  provenance=Build
+  [2] TraversalLeaf(AllHealths,m7_reserved=false)  provenance=Build
+  [3] QueryMap(prism)  provenance=Build
+

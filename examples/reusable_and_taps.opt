@@ -1,0 +1,25 @@
+-- Reusable optics via lets; prefix tap/record hooks on single product query with tuple focus.
+-- Demonstrates app-like update + hooks (single query per v0).
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PositionView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+let decay = HealthView;
+let pos = PositionView;
+let combo = HealthView *** PositionView;
+
+fn main() {
+    entities.query(combo).tap("combo_hook").record("combo_record").map(|(h, p)| (h - 5.0, (p.0 + 0.1, p.1)));
+}

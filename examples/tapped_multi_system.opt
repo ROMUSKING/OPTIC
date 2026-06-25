@@ -1,0 +1,32 @@
+-- Multi-system with let reuse, product, prefix tap+record hooks.
+-- Game sim style; richer columns (vel present untouched); hook lowering + fused product exercised.
+-- self-host prep marker (extern surface for future bootstrap per ch22/appI; not active here)
+
+data Entities {
+    healths: SoA<f32>,
+    positions: SoA<Vec2>,
+    velocities: SoA<Vec2>,
+}
+
+optic HDecay: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic PView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.positions[s.id]
+    put  (s, v) => { s.positions[s.id] = v }
+}
+
+optic VView: GradedOptic<Entities, Vec2, CacheGrade<2> + AffineGrade> {
+    get  s => s.velocities[s.id]
+    put  (s, v) => { s.velocities[s.id] = v }
+}
+
+let decay = HDecay;
+let posv = PView;
+let sim = decay *** posv;
+
+fn main() {
+    entities.query(sim).tap("game_probe").record("game_record").map(|(h, p)| (h - 5.0, (p.0 + 1.0, p.1 + 1.0)));
+}
