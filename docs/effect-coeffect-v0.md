@@ -44,7 +44,7 @@ CGIR rejects stub `TraversalLeaf` (`m7_reserved=true`) and stub `Tap`/`Record` (
 |------|------|
 | TYP-010 | `unsafe optic` / `extern` on surface (`collect_unsupported_surface`) |
 | TYP-003 | Clause mix (e.g. GradedTraversal + preview/review) |
-| CGI-003 | Compose+prism/traversal (`prism_in_compose`, `traversal_in_compose`) |
+| CGI-003 | Compose+prism/traversal illegal cases (`prism_in_compose`, `traversal_in_compose`; legal now fuse per Track4) |
 | CGI-006 | Stub M7/M8 reserved CGIR node (`m7_reserved=true`) |
 | OBS-701 | Unsupported observability query method (profile/replay) |
 | OBS-702 | Trailing `.tap`/`.record` after `.get`/`.set`/`.map` (prefix-only in v0) |

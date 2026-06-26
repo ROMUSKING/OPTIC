@@ -1,0 +1,13 @@
+-- M7 conformance: SIMD trav with update (GradedTraversal + .set on f32 SoA; chunked + bias + remainder/scalar fallback; bias hint+chunk strings+RUN VERIFIED via harness; goldens separate)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic BiasedAll: GradedTraversal<Entities, f32, CacheGrade<2> + BranchBias<Unlikely>> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BiasedAll).set(42.0);
+}

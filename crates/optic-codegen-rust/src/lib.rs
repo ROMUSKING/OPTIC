@@ -564,18 +564,24 @@ fn prism_preview_wrap_some(graph: &CgirGraph, prism_id: NodeId) -> Result<bool, 
     }
 }
 
+/// Extract bias from Prism/TraversalLeaf for hint emission (Track5; Unknown default keeps legacy paths identical).
+fn extract_leaf_bias(graph: &CgirGraph, id: NodeId) -> optic_hir::BranchBias {
+    match graph.nodes.get(id as usize) {
+        Some(CgirNode::PrismLeaf { bias, .. }) | Some(CgirNode::TraversalLeaf { bias, .. }) => {
+            *bias
+        }
+        _ => optic_hir::BranchBias::Unknown,
+    }
+}
+
 fn emit_prism_preview_rust(
     graph: &CgirGraph,
     prism_id: NodeId,
     cursor: &str,
     focus_bind: Option<&str>,
 ) -> Result<String, String> {
-    let raw = emit_leaf_preview(graph, prism_id, cursor, focus_bind)?;
-    if prism_preview_wrap_some(graph, prism_id)? {
-        Ok(format!("Some({raw})"))
-    } else {
-        Ok(raw)
-    }
+    // always raw (wrap decision moved to callers for clean coproduct iflet/let without double Some() wrapping; reuse prism_preview_* + wrap_some flag)
+    emit_leaf_preview(graph, prism_id, cursor, focus_bind)
 }
 
 fn emit_prism_query_get(
@@ -591,21 +597,33 @@ fn emit_prism_query_get(
         .ok_or_else(|| "prism get requires at least one preview read region".to_string())?;
     let field = lookup_region_field(&graph.region_map, reg)?;
     let bind = lookup_region_bind(&graph.region_map, reg)?;
-    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let preview_raw = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
     let partial = prism_preview_returns_option(graph, prism_id)?;
+    let wrap = prism_preview_wrap_some(graph, prism_id)?;
     out.push_str(&format!(
         "pub fn run_example(entities: &mut {struct_name}) {{\n"
     ));
     out.push_str(&format!("    let n = entities.{field}.len();\n"));
     out.push_str("    for id_0 in 0..n {\n");
     out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    let bias = extract_leaf_bias(graph, prism_id);
+    if bias != optic_hir::BranchBias::Unknown {
+        out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+    }
     if partial {
-        out.push_str(&format!(
-            "        if let Some({bind}) = {preview_expr} {{\n            println!(\"get: {{}}\", {bind});\n        }}\n"
-        ));
+        if wrap {
+            // clean coproduct: let = (unwrap safe per wrap_some; no double-Option in emitted)
+            out.push_str(&format!(
+                "        let {bind} = {preview_raw};\n        println!(\"get: {{}}\", {bind});\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "        if let Some({bind}) = {preview_raw} {{\n            println!(\"get: {{}}\", {bind});\n        }}\n"
+            ));
+        }
     } else {
         out.push_str(&format!(
-            "        let {bind} = {preview_expr};\n        println!(\"get: {{}}\", {bind});\n"
+            "        let {bind} = {preview_raw};\n        println!(\"get: {{}}\", {bind});\n"
         ));
     }
     out.push_str("    }\n}\n\n");
@@ -626,30 +644,42 @@ fn emit_prism_query_set(
         .ok_or_else(|| "prism set requires at least one preview read region".to_string())?;
     let field = lookup_region_field(&graph.region_map, reg)?;
     let bind = lookup_region_bind(&graph.region_map, reg)?;
-    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let preview_raw = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
     let partial = prism_preview_returns_option(graph, prism_id)?;
+    let wrap = prism_preview_wrap_some(graph, prism_id)?;
     out.push_str(&format!(
         "pub fn run_example(entities: &mut {struct_name}) {{\n"
     ));
     out.push_str(&format!("    let n = entities.{field}.len();\n"));
     out.push_str("    for id_0 in 0..n {\n");
     out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    let bias = extract_leaf_bias(graph, prism_id);
+    if bias != optic_hir::BranchBias::Unknown {
+        out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+    }
     if partial {
-        out.push_str(&format!(
-            "        if let Some({bind}) = {preview_expr} {{\n"
-        ));
-        out.push_str(&format!("            let _set_lit = {lit};\n"));
-        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
-        out.push_str(&format!("            let _review_out = {review_expr};\n"));
-        emit_leaf_review_stores(
-            graph,
-            prism_id,
-            "cursor_0",
-            "_review_out",
-            out,
-            "            ",
-        )?;
-        out.push_str("        }\n");
+        if wrap {
+            // clean coproduct: let = (unwrap safe per wrap_some; no double-Option wrapping or redundant)
+            out.push_str(&format!("        let {bind} = {preview_raw};\n"));
+            out.push_str(&format!("        let _set_lit = {lit};\n"));
+            let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
+            out.push_str(&format!("        let _review_out = {review_expr};\n"));
+            emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "        ")?;
+        } else {
+            out.push_str(&format!("        if let Some({bind}) = {preview_raw} {{\n"));
+            out.push_str(&format!("            let _set_lit = {lit};\n"));
+            let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
+            out.push_str(&format!("            let _review_out = {review_expr};\n"));
+            emit_leaf_review_stores(
+                graph,
+                prism_id,
+                "cursor_0",
+                "_review_out",
+                out,
+                "            ",
+            )?;
+            out.push_str("        }\n");
+        }
     } else {
         out.push_str(&format!("        let _set_lit = {lit};\n"));
         let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_set_lit")?;
@@ -685,19 +715,47 @@ fn emit_traversal_query_get(
         "sanitized traversal name contains only safe chars for source embed"
     );
     out.push_str(&format!("// optic(traversal): {safe_name}\n"));
-    if is_simd_eligible_region(graph, reg) {
+    let simd = is_simd_eligible_region(graph, reg);
+    let bias = extract_leaf_bias(graph, traversal_id);
+    if simd {
         out.push_str("// simd-eligible\n");
     }
     out.push_str(&format!(
         "pub fn run_example(entities: &mut {struct_name}) {{\n"
     ));
     out.push_str(&format!("    let n = entities.{field}.len();\n"));
-    out.push_str("    for id_0 in 0..n {\n");
-    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-    out.push_str(&format!(
-        "        let {bind} = {get_expr};\n        println!(\"get: {{}}\", {bind});\n"
-    ));
-    out.push_str("    }\n}\n\n");
+    if simd {
+        // chunked vs scalar: vector-packed portable chunk nest (4-wide, Cursor/SoA, for homogeneous SimdEligible trav; no arch intrinsics)
+        out.push_str(
+            "    // chunked vector-packed (portable SIMD-friendly nest width 4; remainder safe)\n",
+        );
+        out.push_str("    let mut id_base = 0;\n");
+        out.push_str("    while id_base < n {\n");
+        out.push_str("        let w = std::cmp::min(4usize, n - id_base);\n");
+        out.push_str("        for _l in 0..w {\n");
+        out.push_str("            let id_0 = id_base + _l;\n");
+        out.push_str("            let cursor_0 = Cursor::new(entities, id_0);\n");
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("            // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!(
+            "            let {bind} = {get_expr};\n            println!(\"get: {{}}\", {bind});\n"
+        ));
+        out.push_str("        }\n");
+        out.push_str("        id_base += w;\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    } else {
+        out.push_str("    for id_0 in 0..n {\n");
+        out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!(
+            "        let {bind} = {get_expr};\n        println!(\"get: {{}}\", {bind});\n"
+        ));
+        out.push_str("    }\n}\n\n");
+    }
     Ok(())
 }
 
@@ -725,20 +783,55 @@ fn emit_traversal_query_set(
         "sanitized traversal name contains only safe chars for source embed"
     );
     out.push_str(&format!("// optic(traversal): {safe_name}\n"));
-    if is_simd_eligible_region(graph, reg) {
+    let simd = is_simd_eligible_region(graph, reg);
+    let bias = extract_leaf_bias(graph, traversal_id);
+    if simd {
         out.push_str("// simd-eligible\n");
     }
     out.push_str(&format!(
         "pub fn run_example(entities: &mut {struct_name}) {{\n"
     ));
     out.push_str(&format!("    let n = entities.{field}.len();\n"));
-    out.push_str("    for id_0 in 0..n {\n");
-    out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
-    out.push_str(&format!("        let _set_lit = {lit};\n"));
-    let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_set_lit")?;
-    out.push_str(&format!("        let _set_out = {set_expr};\n"));
-    emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out)?;
-    out.push_str("    }\n}\n\n");
+    if simd {
+        out.push_str(
+            "    // chunked vector-packed (portable SIMD-friendly nest width 4; remainder safe)\n",
+        );
+        out.push_str("    let mut id_base = 0;\n");
+        out.push_str("    while id_base < n {\n");
+        out.push_str("        let w = std::cmp::min(4usize, n - id_base);\n");
+        out.push_str("        for _l in 0..w {\n");
+        out.push_str("            let id_0 = id_base + _l;\n");
+        out.push_str("            let cursor_0 = Cursor::new(entities, id_0);\n");
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("            // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!("            let _set_lit = {lit};\n"));
+        let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_set_lit")?;
+        out.push_str(&format!("            let _set_out = {set_expr};\n"));
+        emit_leaf_put_stores(
+            graph,
+            traversal_id,
+            "cursor_0",
+            "_set_out",
+            out,
+            "            ",
+        )?;
+        out.push_str("        }\n");
+        out.push_str("        id_base += w;\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    } else {
+        out.push_str("    for id_0 in 0..n {\n");
+        out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!("        let _set_lit = {lit};\n"));
+        let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_set_lit")?;
+        out.push_str(&format!("        let _set_out = {set_expr};\n"));
+        emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out, "        ")?;
+        out.push_str("    }\n}\n\n");
+    }
     Ok(())
 }
 
@@ -789,18 +882,59 @@ fn emit_traversal_map_decay(
     validate_user_ident(map_param, "map parameter")?;
     let safe_name = sanitize_obs_hook_comment(name);
     out.push_str(&format!("// optic(traversal): {safe_name}\n"));
-    if is_simd_eligible_region(graph, &reg) {
+    let simd = is_simd_eligible_region(graph, &reg);
+    let bias = extract_leaf_bias(graph, traversal_id);
+    if simd {
         out.push_str("// simd-eligible\n");
     }
     let get_expr = emit_leaf_get(graph, traversal_id, "cursor_0", None)?;
-    emit_entity_loop_prelude(out, struct_name, &field);
-    out.push_str(&format!("        let {bind} = {get_expr};\n"));
-    let body_rust = emit_map_body(map_body, map_param, &bind)?;
-    out.push_str(&format!("        let _new = {body_rust};\n"));
-    let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_new")?;
-    out.push_str(&format!("        let _set_out = {set_expr};\n"));
-    emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out)?;
-    emit_entity_loop_postlude(out);
+    if simd {
+        // chunked emission for SimdEligible (extend inside trav map path); vector array shape via nest+Cursor
+        out.push_str(&format!(
+            "pub fn run_example(entities: &mut {struct_name}) {{\n    let n = entities.{field}.len();\n"
+        ));
+        out.push_str(
+            "    // chunked vector-packed (portable SIMD-friendly nest width 4; remainder safe)\n",
+        );
+        out.push_str("    let mut id_base = 0;\n");
+        out.push_str("    while id_base < n {\n");
+        out.push_str("        let w = std::cmp::min(4usize, n - id_base);\n");
+        out.push_str("        for _l in 0..w {\n");
+        out.push_str("            let id_0 = id_base + _l;\n");
+        out.push_str("            let cursor_0 = Cursor::new(entities, id_0);\n");
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("            // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!("            let {bind} = {get_expr};\n"));
+        let body_rust = emit_map_body(map_body, map_param, &bind)?;
+        out.push_str(&format!("            let _new = {body_rust};\n"));
+        let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_new")?;
+        out.push_str(&format!("            let _set_out = {set_expr};\n"));
+        emit_leaf_put_stores(
+            graph,
+            traversal_id,
+            "cursor_0",
+            "_set_out",
+            out,
+            "            ",
+        )?;
+        out.push_str("        }\n");
+        out.push_str("        id_base += w;\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    } else {
+        emit_entity_loop_prelude(out, struct_name, &field);
+        if bias != optic_hir::BranchBias::Unknown {
+            out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+        }
+        out.push_str(&format!("        let {bind} = {get_expr};\n"));
+        let body_rust = emit_map_body(map_body, map_param, &bind)?;
+        out.push_str(&format!("        let _new = {body_rust};\n"));
+        let set_expr = emit_leaf_put_value(graph, traversal_id, "cursor_0", "_new")?;
+        out.push_str(&format!("        let _set_out = {set_expr};\n"));
+        emit_leaf_put_stores(graph, traversal_id, "cursor_0", "_set_out", out, "        ")?;
+        emit_entity_loop_postlude(out);
+    }
     Ok(())
 }
 
@@ -818,28 +952,41 @@ fn emit_prism_map_decay(
         "prism map requires at least one preview read region",
     )?;
     validate_user_ident(map_param, "map parameter")?;
-    let preview_expr = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
+    let preview_raw = emit_prism_preview_rust(graph, prism_id, "cursor_0", None)?;
     let partial = prism_preview_returns_option(graph, prism_id)?;
+    let wrap = prism_preview_wrap_some(graph, prism_id)?;
     emit_entity_loop_prelude(out, struct_name, &field);
+    let bias = extract_leaf_bias(graph, prism_id);
+    if bias != optic_hir::BranchBias::Unknown {
+        out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+    }
     if partial {
-        out.push_str(&format!(
-            "        if let Some({bind}) = {preview_expr} {{\n"
-        ));
-        let body_rust = emit_map_body(map_body, map_param, &bind)?;
-        out.push_str(&format!("            let _new = {body_rust};\n"));
-        let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
-        out.push_str(&format!("            let _review_out = {review_expr};\n"));
-        emit_leaf_review_stores(
-            graph,
-            prism_id,
-            "cursor_0",
-            "_review_out",
-            out,
-            "            ",
-        )?;
-        out.push_str("        }\n");
+        if wrap {
+            // clean coproduct: let = (unwrap safe per wrap_some flag; no extra Options)
+            out.push_str(&format!("        let {bind} = {preview_raw};\n"));
+            let body_rust = emit_map_body(map_body, map_param, &bind)?;
+            out.push_str(&format!("        let _new = {body_rust};\n"));
+            let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
+            out.push_str(&format!("        let _review_out = {review_expr};\n"));
+            emit_leaf_review_stores(graph, prism_id, "cursor_0", "_review_out", out, "        ")?;
+        } else {
+            out.push_str(&format!("        if let Some({bind}) = {preview_raw} {{\n"));
+            let body_rust = emit_map_body(map_body, map_param, &bind)?;
+            out.push_str(&format!("            let _new = {body_rust};\n"));
+            let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
+            out.push_str(&format!("            let _review_out = {review_expr};\n"));
+            emit_leaf_review_stores(
+                graph,
+                prism_id,
+                "cursor_0",
+                "_review_out",
+                out,
+                "            ",
+            )?;
+            out.push_str("        }\n");
+        }
     } else {
-        out.push_str(&format!("        let {bind} = {preview_expr};\n"));
+        out.push_str(&format!("        let {bind} = {preview_raw};\n"));
         let body_rust = emit_map_body(map_body, map_param, &bind)?;
         out.push_str(&format!("        let _new = {body_rust};\n"));
         let review_expr = emit_leaf_put_value(graph, prism_id, "cursor_0", "_new")?;
@@ -1284,17 +1431,7 @@ fn emit_compose_chain_loop(
     if chain.is_empty() {
         return Err("compose chain is empty".into());
     }
-    if chain.iter().any(|&leaf| {
-        matches!(
-            graph.nodes.get(leaf as usize),
-            Some(CgirNode::PrismLeaf { .. } | CgirNode::TraversalLeaf { .. })
-        )
-    }) {
-        return Err(
-            "compose chain with PrismLeaf or TraversalLeaf is not supported in narrow v0 codegen (use direct query)"
-                .into(),
-        );
-    }
+    // Guard lifted (Track4): prism/trav now supported in compose chains/fusion (FusedLoop + emit paths already dispatch to preview/review/get/set); conditional legality enforced upstream via bias+alias.
     let n_field = compose_primary_field(graph, chain[0])?;
     if let Some(names) = fused_names {
         out.push_str(&format!("// optic(fused): [{names}]\n"));
@@ -1305,6 +1442,14 @@ fn emit_compose_chain_loop(
     out.push_str(&format!("    let n = entities.{n_field}.len();\n"));
     out.push_str("    for id_0 in 0..n {\n");
     out.push_str("        let cursor_0 = Cursor::new(entities, id_0);\n");
+    // emit bias hint for a biased leaf (e.g. prism/trav rhs in fused; covers Track5)
+    if let Some(&bid) = chain
+        .iter()
+        .find(|&&l| extract_leaf_bias(graph, l) != optic_hir::BranchBias::Unknown)
+    {
+        let bias = extract_leaf_bias(graph, bid);
+        out.push_str(&format!("        // branch-bias hint: {bias:?}\n"));
+    }
     validate_user_ident(map_param, "map parameter")?;
 
     let needs_mut = chain
@@ -1346,11 +1491,11 @@ fn emit_compose_chain_loop(
             let out_bind = format!("_p{i}");
             let expr = emit_leaf_put_value(graph, chain[i], state_bind, &value_bind)?;
             out.push_str(&format!("        let {out_bind} = {expr};\n"));
-            emit_leaf_put_stores(graph, chain[i], "cursor_0", &out_bind, out)?;
+            emit_leaf_put_stores(graph, chain[i], "cursor_0", &out_bind, out, "        ")?;
             value_bind = out_bind;
         }
     }
-    emit_leaf_put_stores(graph, chain[0], "cursor_0", &value_bind, out)?;
+    emit_leaf_put_stores(graph, chain[0], "cursor_0", &value_bind, out, "        ")?;
     out.push_str("    }\n}\n\n");
     Ok(())
 }
@@ -1549,8 +1694,9 @@ fn emit_leaf_put_stores(
     cursor: &str,
     value_bind: &str,
     out: &mut String,
+    indent: &str,
 ) -> Result<(), String> {
-    emit_leaf_review_stores(graph, id, cursor, value_bind, out, "        ")
+    emit_leaf_review_stores(graph, id, cursor, value_bind, out, indent)
 }
 
 fn emit_leaf_review_stores(
@@ -1915,6 +2061,22 @@ mod tests {
         assert_rust_golden("traversal_set.opt");
     }
 
+    // M7 Track6 conformance: reuse assert_rust_golden for new examples (simd/bias/compose-prism features); will populate via OPTIC_UPDATE
+    #[test]
+    fn golden_rust_compose_prism_bias() {
+        assert_rust_golden("compose_prism_bias.opt");
+    }
+
+    #[test]
+    fn golden_rust_simd_traversal_update() {
+        assert_rust_golden("simd_traversal_update.opt");
+    }
+
+    #[test]
+    fn golden_rust_mixed_bias_simd() {
+        assert_rust_golden("mixed_bias_simd.opt");
+    }
+
     #[test]
     fn emit_traversal_map_decay_includes_provenance_comments() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1933,6 +2095,32 @@ mod tests {
         assert!(
             emitted.contains("// simd-eligible"),
             "homogeneous f32 SoA must emit simd-eligible comment"
+        );
+        // Issue3 coverage: non-f32 hits scalar decision in trav emit; remainder/min always in chunk shape (n=3 example); bias direct via other units
+        {
+            let mut r = graph.region_map.clone();
+            if let Some(c) = r.columns.get_mut("healths") {
+                c.element_ty = Some("i32".to_string());
+            }
+            let g_non = CgirGraph {
+                nodes: vec![],
+                roots: vec![],
+                provenance_index: std::collections::BTreeMap::new(),
+                resolved_optics: std::collections::HashMap::new(),
+                region_map: r,
+            };
+            assert!(
+                !is_simd_eligible_region(&g_non, "healths"),
+                "non-f32 region forces scalar fallback"
+            );
+        }
+        assert!(
+            emitted.contains("for id_0 in 0..n") || emitted.contains("while id_base < n"),
+            "scalar or chunked loop shape baseline"
+        );
+        assert!(
+            emitted.contains("min(4usize") || !emitted.contains("chunked"),
+            "remainder logic or scalar"
         );
     }
 
@@ -3125,7 +3313,7 @@ mod tests {
     }
 
     #[test]
-    fn emit_compose_chain_rejects_prism_leaf() {
+    fn emit_compose_chain_supports_prism_leaf_with_bias() {
         let summary = Arc::new(OpticSummary {
             name: Some("AliveFilter".into()),
             costate: "Entities".into(),
@@ -3190,6 +3378,7 @@ mod tests {
             summary,
             provenance: Span::dummy(),
             m7_reserved: false,
+            bias: optic_hir::BranchBias::Likely,
         };
         let g = CgirGraph {
             nodes: vec![
@@ -3217,9 +3406,14 @@ mod tests {
         };
         let mut out = String::new();
         let body = HirExpr::Var("h".into(), Span::dummy());
-        let err = emit_compose_chain_loop(&mut out, &g, 2, &body, "h", None, "Entities")
-            .expect_err("compose+prism must fail codegen");
-        assert!(err.contains("PrismLeaf"));
+        // Phase4 lift: prism in compose chain now emits (dispatch works; legality upstream)
+        let res = emit_compose_chain_loop(&mut out, &g, 2, &body, "h", None, "Entities");
+        assert!(res.is_ok(), "compose+prism now supported in emit");
+        // Track5 bias hint coverage (Likely set on prism leaf; emitted inside fused per-el loop)
+        assert!(
+            out.contains("branch-bias hint: Likely"),
+            "bias hint emitted for Likely in loop"
+        );
     }
 
     #[test]

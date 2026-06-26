@@ -1,0 +1,18 @@
+-- M7 conformance: prism with bias (biased prism decl exercising PrismLeaf + BranchBias<Likely>; bias hint+values+RUN VERIFIED via harness)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + AffineGrade> {
+    get  s      => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+optic BiasedAlive: GradedPrism<Entities, f32, CacheGrade<2> + BranchBias<Likely>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+fn main() {
+    entities.query(BiasedAlive).map(|h| h - 10.0);
+}

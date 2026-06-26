@@ -26,6 +26,17 @@ pub struct OwnershipDim {
     pub must_use: bool,
 }
 
+/// BranchBias (M7 per book ch13 + PLAN §9 Track 3): carried on prism/traversal leaves in CGIR
+/// for coproduct eliminations (conditional branch edges). Validated in typeck; extracted from decl grade.
+/// Unknown default for narrow paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BranchBias {
+    #[default]
+    Unknown,
+    Likely,
+    Unlikely,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rational {
     pub num: i64,
@@ -1456,6 +1467,22 @@ pub fn cache_grade_elided(g: &syn::GradeExpr) -> bool {
         .any(|d| matches!(d, syn::GradeDim::Cache { n: None, .. }))
 }
 
+/// Extract BranchBias dimension from surface grade (M7 Track3; defaults Unknown).
+/// Reuses GradeDim match pattern from extract_grade_from_ann / validate; called from CGIR builder.
+/// (bias carried on leaves for control-flow/branch-pred edges; not folded into ConcreteGrade in this phase)
+pub fn extract_branch_bias(g: &syn::GradeExpr) -> BranchBias {
+    for dim in &g.dims {
+        if let syn::GradeDim::BranchBias { bias, .. } = dim {
+            return match bias.as_str() {
+                "Likely" => BranchBias::Likely,
+                "Unlikely" => BranchBias::Unlikely,
+                _ => BranchBias::Unknown,
+            };
+        }
+    }
+    BranchBias::Unknown
+}
+
 /// Named ownership alias from surface grade, if any.
 pub fn ownership_grade_alias(g: &syn::GradeExpr) -> Option<String> {
     for dim in &g.dims {
@@ -1466,6 +1493,38 @@ pub fn ownership_grade_alias(g: &syn::GradeExpr) -> Option<String> {
         }
     }
     None
+}
+
+/// is_simd_eligible per PLAN §9 Track 2 + book ch13.3.1 SimdEligible checklist (5 points).
+/// Reused in summaries; called from typeck/codegen paths (pure-Rust, reuses region_map + summary fields + alias grade).
+/// Smallest Phase2 impl; direct unit tests added (see mod tests). (Some .unwrap_or/contains defensive per pre-existing style.)
+pub fn is_simd_eligible(summary: &OpticSummary, region_map: &RegionMap) -> bool {
+    // 1. No cross-element dependencies (i does not read/write j): v0 regions per-col; distinct roots indicate cross risk. (v0 terse style: split/unwrap_or + contains)
+    let read_roots: std::collections::HashSet<_> = summary
+        .get_reads
+        .iter()
+        .map(|r| r.split('.').next().unwrap_or(r).to_string())
+        .collect();
+    let write_roots: std::collections::HashSet<_> = summary
+        .put_writes
+        .iter()
+        .map(|r| r.split('.').next().unwrap_or(r).to_string())
+        .collect();
+    let no_cross = read_roots.len() <= 1 && write_roots.len() <= 1;
+    // 2. Regular stride and layout (SoA uniform).
+    let uniform_stride = region_map.columns.values().any(|c| c.element_ty.is_some())
+        || region_map.columns.is_empty(); // SoA implies for v0
+                                          // 3. homogeneous element types with supported lanes (f32/Vec2 per examples + primitives).
+    let homogeneous = matches!(
+        summary.focus.as_str(),
+        "f32" | "i32" | "u32" | "Vec2" | "(f32, f32)"
+    );
+    // 4. No divergent control-flow/prisms in loop body. (defensive exact for Option; heuristic name ok at v0 scale)
+    let no_divergence =
+        !summary.focus.starts_with("Option") && !summary.focus.to_lowercase().contains("prism");
+    // 5. Alias safety to reorder/coalesce stores (reuse ownership dim).
+    let alias_safe = !summary.get_grade.ownership.read_only || summary.put_writes.is_empty();
+    no_cross && uniform_stride && homogeneous && no_divergence && alias_safe
 }
 
 fn make_summary_from_ann(

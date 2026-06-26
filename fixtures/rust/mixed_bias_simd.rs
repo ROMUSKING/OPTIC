@@ -6,7 +6,7 @@ pub struct Entities {
     pub healths: Vec<f32>,
 }
 
-// optic(traversal): AllHealths
+// optic(traversal): BiasedTrav
 // simd-eligible
 pub fn run_example(entities: &mut Entities) {
     let n = entities.healths.len();
@@ -17,6 +17,7 @@ pub fn run_example(entities: &mut Entities) {
         for _l in 0..w {
             let id_0 = id_base + _l;
             let cursor_0 = Cursor::new(entities, id_0);
+            // branch-bias hint: Unlikely
             let _healths = cursor_0.arena.healths[cursor_0.id];
             let _new = _healths - 10.0;
             let _set_out = _new;

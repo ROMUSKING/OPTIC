@@ -561,8 +561,8 @@ phase: cgir
 rule: narrow v0 rejects unsupported optic bodies and M7 leaf placement in compose
 
 compose chain (evidence.reason):
-  - prism_in_compose — PrismLeaf in >>> chain (examples/compose_prism.opt)
-  - traversal_in_compose — TraversalLeaf in >>> chain (examples/compose_traversal.opt)
+  - prism_in_compose — PrismLeaf in >>> chain (illegal alias/bias cases; compose_prism.opt retained as negative/type case)
+  - traversal_in_compose — TraversalLeaf in >>> chain (illegal; compose_traversal.opt retained as negative/type case)
 
 map/set body:
   - unsupported surface forms in query map bodies
@@ -571,8 +571,7 @@ map/set body:
 fusion note: compose+prism/traversal may also surface as FUS-502 with same reason keys.
 
 examples:
-  - examples/compose_prism.opt (prism_in_compose)
-  - examples/compose_traversal.opt (traversal_in_compose)
+  - examples/cgi003_incompatible_map.opt etc for CGI-003 (prism/trav compose fused when legal per Phase4; old compose_prism/trav are type/negative cases)
 
 next: opticc check file.opt --json"#
 }
@@ -1248,11 +1247,17 @@ fn verify_example_stdout(filename: &str, stdout: &str) -> bool {
         "compose_decay.opt" => {
             stdout.contains("95.0") && stdout.contains("75.0") && stdout.contains("45.0")
         }
-        "health_decay.opt" | "alive_filter.opt" | "partial_prism.opt" | "all_healths.opt"
-        | "tap_health.opt" | "record_health.opt" => {
-            stdout.contains("90.0") && stdout.contains("70.0")
+        "health_decay.opt"
+        | "alive_filter.opt"
+        | "partial_prism.opt"
+        | "all_healths.opt"
+        | "tap_health.opt"
+        | "record_health.opt"
+        | "compose_prism_bias.opt"
+        | "mixed_bias_simd.opt" => stdout.contains("90.0") && stdout.contains("70.0"),
+        "health_set.opt" | "prism_set.opt" | "traversal_set.opt" | "simd_traversal_update.opt" => {
+            stdout.contains("42.0")
         }
-        "health_set.opt" | "prism_set.opt" | "traversal_set.opt" => stdout.contains("42.0"),
         "health_get.opt" | "prism_get.opt" | "traversal_get.opt" => stdout.contains("get:"),
         "nested_position.opt" => {
             stdout.contains("(0.1, 0.1)")

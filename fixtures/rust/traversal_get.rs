@@ -10,10 +10,17 @@ pub struct Entities {
 // simd-eligible
 pub fn run_example(entities: &mut Entities) {
     let n = entities.healths.len();
-    for id_0 in 0..n {
-        let cursor_0 = Cursor::new(entities, id_0);
-        let _healths = cursor_0.arena.healths[cursor_0.id];
-        println!("get: {}", _healths);
+    // chunked vector-packed (portable SIMD-friendly nest width 4; remainder safe)
+    let mut id_base = 0;
+    while id_base < n {
+        let w = std::cmp::min(4usize, n - id_base);
+        for _l in 0..w {
+            let id_0 = id_base + _l;
+            let cursor_0 = Cursor::new(entities, id_0);
+            let _healths = cursor_0.arena.healths[cursor_0.id];
+            println!("get: {}", _healths);
+        }
+        id_base += w;
     }
 }
 

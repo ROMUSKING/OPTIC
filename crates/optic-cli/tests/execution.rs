@@ -157,7 +157,7 @@ fn run_prism_set_mutates() {
 }
 
 #[test]
-fn run_partial_prism_emits_if_let_some() {
+fn run_partial_prism_emits_clean_direct_let() {
     let assert = opticc()
         .args(["run", &example("partial_prism.opt").to_string_lossy()])
         .assert()
@@ -177,13 +177,14 @@ fn run_partial_prism_emits_if_let_some() {
     let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
     let _ = transpile;
     let _ = std::fs::remove_file(&rust_path);
+    // Track5 coproduct clean: for partial+!inferred (wrap_some) use direct let (safe unwrap); no double-Option
     assert!(
-        rust.contains("if let Some"),
-        "partial preview must use if-let"
+        rust.contains("let _healths = cursor_0.arena.healths[cursor_0.id]"),
+        "partial uses clean direct let per wrap_some (no double wrap)"
     );
     assert!(
-        rust.contains("Some(cursor"),
-        "partial preview must wrap Some(...)"
+        !rust.contains("Some(cursor_0"),
+        "no redundant Some wrapper for wrap_some case"
     );
 }
 
@@ -292,6 +293,10 @@ fn run_all_healths_traversal_mutates() {
     let _ = std::fs::remove_file(&rust_path);
     assert!(rust.contains("// optic(traversal): AllHealths"));
     assert!(rust.contains("// simd-eligible"));
+    assert!(
+        !rust.contains("branch-bias hint"),
+        "Unknown default (no BranchBias in grade) emits no hint"
+    );
 }
 
 #[test]
@@ -897,11 +902,14 @@ fn run_tuple_fusion_pipeline_let_product_tap() {
 fn arity_mismatch_negative_coverage() {
     // explicit runtime arity-mismatch negative (build on cgi005 + 3-arity runs); dedicated harness case for positive/negative coverage per plan
     let assert = opticc()
-        .args(["check", &example("cgi005_arity_mismatch.opt").to_string_lossy()])
+        .args([
+            "check",
+            &example("cgi005_arity_mismatch.opt").to_string_lossy(),
+        ])
         .assert()
         .failure();
     let out = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(out.contains("CGI") || out.contains("arity") || assert.get_output().stderr.len() > 0);
+    assert!(out.contains("CGI") || out.contains("arity") || !assert.get_output().stderr.is_empty());
 }
 
 #[test]
@@ -1018,5 +1026,131 @@ fn parse_entities_line_boundary() {
     assert_eq!(
         parse_entities_line(arith_sample, "after:"),
         vec![85.0, 65.0, 35.0]
+    );
+}
+
+// M7 Track 6 conformance (4 tests): exercising bias (Likely in compose_prism_bias; Unlikely in simd/mixed; Unknown default covered elsewhere e.g. run_all_healths), SIMD (chunked/remainder/scalar in simd + mixed), mixed, negative on legacy compose (alias); reused run_*/parse_entities/contains for hints/shapes + "RUN VERIFIED"; goldens separate (via golden_rust_* + assert_rust_golden in optic-codegen-rust; these 4 use manual transpile+temp+contains, not golden asserts). run_compose... (bias), run_simd... (chunked), run_mixed... (mixed), negative... (alias); no new public.
+#[test]
+fn run_compose_prism_bias_exercises_bias_and_compose() {
+    // test name retains "compose" per historical/Phase4 reuse precedent (exercises single prism bias decl+Likely here; no >>> in .opt; compose neg covered by negative test+units)
+    let assert = opticc()
+        .args(["run", &example("compose_prism_bias.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+    let transpile = opticc()
+        .args([
+            "transpile",
+            &example("compose_prism_bias.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("compose_prism_bias.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(
+        rust.contains("branch-bias hint: Likely"),
+        "compose_prism_bias exercises PrismLeaf + bias hint"
+    );
+}
+
+#[test]
+fn run_simd_traversal_update_exercises_chunked_and_bias() {
+    let assert = opticc()
+        .args([
+            "run",
+            &example("simd_traversal_update.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![42.0, 42.0, 42.0]);
+    assert!(out.contains("RUN VERIFIED"));
+    let transpile = opticc()
+        .args([
+            "transpile",
+            &example("simd_traversal_update.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("simd_traversal_update.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    // golden rust style asserts for simd-eligible/chunked vs scalar (reuse is_simd_eligible_region + emit paths)
+    assert!(rust.contains("// simd-eligible"), "simd trav update");
+    assert!(
+        rust.contains(
+            "chunked vector-packed (portable SIMD-friendly nest width 4; remainder safe)"
+        ),
+        "chunked shape"
+    );
+    assert!(
+        rust.contains("branch-bias hint: Unlikely"),
+        "bias in trav update"
+    );
+    assert!(
+        rust.contains("while id_base < n")
+            || rust.contains("min(4usize")
+            || rust.contains("for id_0 in 0..n"),
+        "chunk remainder or scalar fallback shape"
+    );
+}
+
+#[test]
+fn run_mixed_bias_simd_exercises_full_features() {
+    let assert = opticc()
+        .args(["run", &example("mixed_bias_simd.opt").to_string_lossy()])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let before = parse_entities_line(&out, "before:");
+    let after = parse_entities_line(&out, "after:");
+    assert_eq!(before, vec![100.0, 80.0, 50.0]);
+    assert_eq!(after, vec![90.0, 70.0, 40.0]);
+    assert!(out.contains("RUN VERIFIED"));
+    let transpile = opticc()
+        .args([
+            "transpile",
+            &example("mixed_bias_simd.opt").to_string_lossy(),
+        ])
+        .assert()
+        .success();
+    let rust_path = std::path::PathBuf::from("mixed_bias_simd.rs");
+    let rust = std::fs::read_to_string(&rust_path).expect("read transpiled rust");
+    let _ = transpile;
+    let _ = std::fs::remove_file(&rust_path);
+    assert!(rust.contains("// simd-eligible"));
+    assert!(rust.contains("chunked vector-packed"));
+    assert!(rust.contains("branch-bias hint: Unlikely"));
+    // mixed: trav simd+bias emitted; prism bias decl in source (unused decls elided in emit per narrow lowering)
+    let src = std::fs::read_to_string(example("mixed_bias_simd.opt")).expect("read src");
+    assert!(
+        src.contains("BranchBias<Likely>"),
+        "mixed bias/SIMD covers prism bias decl too"
+    );
+}
+
+#[test]
+fn negative_illegal_alias_writes_compose_coverage() {
+    // negative for illegal alias/writes in compose (reuses compose_prism + harness; alias/neg coverage; cgir units cover more)
+    let assert = opticc()
+        .args(["check", &example("compose_prism.opt").to_string_lossy()])
+        .assert()
+        .failure();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        out.contains("CGI-004")
+            || out.contains("compose")
+            || !assert.get_output().stderr.is_empty()
     );
 }

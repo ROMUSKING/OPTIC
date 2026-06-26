@@ -376,6 +376,7 @@ fn compose_fusion_block_note(
             }),
         ));
     }
+    // Extended conditionally per Track4 (reuses forbidden_leaf which now gates on alias/ownership via is_simd pt#5 pattern; bias from Phase3 present on leaves but not gating legality at conservative Phase4); legal prism/trav compose proceeds to FusedLoop.
     let chain = compose_leaf_chain(g, compose_id)?;
     if chain.len() < 2 {
         return Some(optic_diagnostics::fusion_compose_legality_diag(
@@ -1757,6 +1758,7 @@ mod tests {
             summary: sum,
             provenance: Span::dummy(),
             m7_reserved: false,
+            bias: hir::BranchBias::Unknown,
         }
     }
 
@@ -1789,6 +1791,7 @@ mod tests {
             summary: sum,
             provenance: Span::dummy(),
             m7_reserved: false,
+            bias: hir::BranchBias::Unknown,
         }
     }
 
@@ -1862,7 +1865,7 @@ mod tests {
                 cache: 2,
                 ownership: OwnershipDim {
                     share: Rational::one(),
-                    read_only: false,
+                    read_only: true,
                     must_use: false,
                 },
             },
@@ -1870,7 +1873,7 @@ mod tests {
                 cache: 2,
                 ownership: OwnershipDim {
                     share: Rational::one(),
-                    read_only: false,
+                    read_only: true,
                     must_use: false,
                 },
             },
@@ -1972,8 +1975,22 @@ mod tests {
             get_reads: vec!["healths".into()],
             put_reads: vec![],
             put_writes: vec!["healths".into()],
-            get_grade: sum_lhs.get_grade.clone(),
-            put_grade: sum_lhs.put_grade.clone(),
+            get_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
+            put_grade: hir::ConcreteGrade {
+                cache: 2,
+                ownership: OwnershipDim {
+                    share: Rational::one(),
+                    read_only: false,
+                    must_use: false,
+                },
+            },
             get_determinism: hir::Determinism::Pure,
             put_determinism: hir::Determinism::Pure,
             serializable: true,
@@ -2007,14 +2024,15 @@ mod tests {
             resolved_optics: resolved,
             region_map: hir::RegionMap::default(),
         };
-        let out = optimize(g).expect("compose+traversal should still verify unfused");
-        assert_eq!(out.graph.roots, vec![3]);
+        let out = optimize(g).expect("compose+traversal now fuses (legal alias)");
+        // fused: root id advanced, no longer the pre-fusion map root
+        assert!(out.graph.roots.len() == 1 && out.graph.roots[0] != 3);
         assert!(
-            out.fusion_notes.iter().any(|d| {
-                d.code == optic_diagnostics::FUS_COMPOSE_LEGALITY_BLOCKED
-                    && d.evidence["reason"] == "traversal_in_compose"
-            }),
-            "compose+traversal must emit FUS-502 traversal_in_compose"
+            !out.fusion_notes
+                .iter()
+                .any(|d| d.evidence.get("reason").and_then(|v| v.as_str())
+                    == Some("traversal_in_compose")),
+            "traversal compose no longer blocked (Phase4 lift)"
         );
     }
 

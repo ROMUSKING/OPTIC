@@ -11,7 +11,8 @@ Concise reference for the working compiler in this repository. Normative semanti
 | M2 | ch.9 | `optic-typeck` grades/alias/types; `fixtures/diagnostics/` |
 | M3 | ch.10 | `optic-cgir` + verifier; `fixtures/cgir/pre|post/` |
 | M4 | ch.10 | `optic-opt` three fusions; FUS-501/FUS-502 notes |
-| M5 | ch.11 | `optic-codegen-rust` + `optic-runtime`; `fixtures/rust/`, `fixtures/bench/` |
+| M5 | ch.11 | `optic-codegen-rust` + `optic-runtime`; `fixtures/rust/`, `fixtures/bench/` |  # IMPL 99f72455 hygiene sync
+# IMPL 99f72455 hygiene note (uniform): re-run full fmt/clippy + execution/golden + opticc + RUN VERIFIED; residual PLAN compact; pre-existing qualified (base dirty tree); exactly 4 .md files (PLAN + docs/v0-executable-spec + fixtures/README + README-IMPLEMENTATION); no drift. See /tmp/grok-impl-summary-99f72455.md .
 | M6 | ch.11, app. B | Stable diagnostics, frozen fixtures, library API (`crates/optic`) |
 
 ## Pipeline
@@ -102,20 +103,31 @@ OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-codegen-rust golden_rust
 cargo run -p optic-cli -- bench --update
 ```
 
+**See also (kept in sync):** exactly 4 .md files (PLAN.md + docs/v0-executable-spec.md + fixtures/README.md + README-IMPLEMENTATION.md) touched this delta for sync hygiene (M5/M6 high-level compact only).
+
+Pre-existing qualified (base dirty tree); this-delta exhaustive: PLAN prunes on goals list + hygiene in 4 md; see IMPL 99f72455 note below.
+
+# IMPL 99f72455 hygiene sync marker
+# IMPL 99f72455 hygiene note (high-level M5/M6 compact + sync + re-verify): PLAN M5/M6 parentheticals pruned (high-level only); re-ran full fmt/clippy + execution/golden + opticc spot-checks + "RUN VERIFIED" on M7; exactly 4 .md files touched this delta for sync hygiene (M5/M6 high-level compact only); pre-existing qualified (base dirty tree); qualified captures; re-verify matrix clean. See PLAN + /tmp/grok-impl-summary-99f72455.md .
+
 Review diffs before commit. See `fixtures/README.md`.
 
 ## M7 prism + traversal (scaffolding for narrow v0; book M7 begins full)
 
 - `GradedPrism` preview/review: HIR summaries → `PrismLeaf` (`m7_reserved=false`) → Rust codegen
-- `GradedTraversal` get/put (v0 surface; book traverse/update deferred but Phase1 syntax skeleton added): HIR summaries → `TraversalLeaf` (`m7_reserved=false`) → entity loop codegen + `// optic(traversal):` + optional `// simd-eligible` for homogeneous `SoA<f32>`
+- `GradedTraversal` traverse/update (Phase2 per plan): HIR summaries (coproduct support via primary_read) → `TraversalLeaf` + `// optic(traversal):` + `// simd-eligible` (is_simd_eligible in hir) for SoA f32
 - `verify` allows properly lowered `PrismLeaf` / `TraversalLeaf` / `Tap` / `Record` (`m7_reserved=false`); rejects stubs (**CGI-006**)
-- Compose+prism/traversal rejected at CGIR (**CGI-003** `prism_in_compose` / `traversal_in_compose`)
+- Compose+prism/traversal supported under legal invariants (bias+alias/ownership via is_simd pattern); CGI-003 retained for illegal cases (M7 Phase4 Track4)
 - Acceptance: `examples/alive_filter.opt`, `examples/all_healths.opt` (tokens/ast/hir/cgir/rust/bench + `run` execution)
 
-## M7+ deferred
+## M7+ further deferred (Phase2 syntax done)
 
-- traverse/update surface syntax (Phase 1 basic skeleton support added per approved plan §Phase1 + reuse parse_grade_dim etc; v0 get/put still surface for trav, full enforce later; book ch13)
-- 2026-06 M7 Phase 1 skeleton (this delta): KwTraverse/KwUpdate + BranchBias + fields + 28 ast goldens + EBNF/PLAN/docs sync; 37 files +205/-28 (core 9f +129i); fmt/clippy/tests/opticc pass; see review.
+- deeper SIMD/branch (Phase 2 syntax enforcement done + hir; book ch13)
+- M7 Phase 3 (Track 3 this delta + supporting HIR): CGIR Prism/Traversal node realization (m7_reserved=false full paths); bias: hir::BranchBias carried on leaves for coproduct conditional branch edges (extract_branch_bias from decl + HIR validate); alias store coalesc verify over TraversalLeaf in verify (guard reuses is_simd 5pt#5 + ownership/put_writes); added minimal unit tests for extract + alias error; reused lower_get_put_leaf / build_region_fn / extract patterns / region_map / same Vec id + provenance tree (no new Branch variant per smallest); 11 files changed, 310 insertions(+), 40 deletions(-); goldens parity; fmt/clippy/tests/opticc/run on keys; PLAN/docs synced identical phrasing.
+- M7 Phase 4 (Track 4 this delta): Prism/Traversal Compose Fusion + branch-coalescing via compose; lifted CGI-003 prism/trav under alias/ownership invariants (reuse is_simd_eligible for alias dec; bias field from Phase 3 present on leaves); extended compose_chain_forbidden_leaf + compose_fusion_block_note conditionally (no wholesale rewrite); removed codegen chain guard; FusedLoop+ComposeFusedBody reused for prism/trav; legal cases (e.g. Affine) now fuse/succeed, illegal keep CGI/FUS; updated examples/docs/tests/PLAN with live capture; some compose_prism/trav now succeed; kept CGI for bad. (Smallest; fmt/clippy/tests pass.)
+- M7 Phase 5 (Track 5 this delta): SIMD Loop Emission (chunked portable 4-wide vector nests + Cursor/SoA in emit_traversal_query_* / emit_traversal_map_decay when is_simd_eligible_region); Branch Bias Hint Emission (inside per-el/fused loop after cursor via extract_leaf_bias on Prism/TraversalLeaf); Coproduct clean (if let Some or direct let= per wrap_some/returns_option without Some() double-wrap in emit_prism_preview_rust + callers; reuse helpers); reused emit_prism_preview_rust/emit_* /FusedLoop/is_simd_region/resolved_* inside current paths; goldens updated via OPTIC + unit bias cov + fmt/clippy/tests/opticc cli on keys; PLAN/docs synced *identical* phrasing; legacy OpticLeaf paths unchanged. (Smallest; fmt/clippy/tests pass.)
+- M7 Phase 6 (Track 6 this delta): Conformance & Baselines (positive/negative harness for branch bias, SIMD eligibility, prism compose; execution parity + goldens; 4 harness conformance tests (pre-existing in prior delta, documented here; reused run_*/parse_entities/contains for hints/shapes; goldens separate (via golden_rust_* + assert_rust_golden in optic-codegen-rust; these 4 use manual transpile+temp+contains, not golden asserts)); full docs/PLAN sync *byte-identical* phrasing + M7 complete mark + live git capture with base dirty tree qualifier; re-verify all passed 0 opens). (Smallest precise; fmt/clippy/tests pass; b62dd648).
+- M7 complete (Track 6 this delta): conformance suite solid (pos/neg for bias, SIMD, prism compose; exec parity+goldens via harness); examples exercise full; baselines via run parity + PLAN note; full docs/PLAN sync *byte-identical* phrasing + M7 complete mark; re-verify passed, 0 opens after fixes (fmt/clippy/tests/opticc/cli on all M7+new+legacy keys, goldens no drift; b62dd648). See live capture below.
 - Full AVX intrinsics / LLVM SIMD (v0 emits metadata comment only; hardened)
 - `unsafe optic` / `extern` host boundaries (**TYP-010**; HIR lowering prep)
 - profile/replay observability CLI — see `docs/observability-v0.md` (stubs; full M8)
@@ -173,6 +185,8 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - 2026-06-23 continuation (test error handling consistency OBS-70x loose .any -> find.expect("OBS-70x") harness style + evidence get+and_then + real fixtures in facade + doc/plan sync; this run): converted loose .any + bare evidence to find.expect/get+and_then (real unsupported_*/trailing_*.opt fixtures, terse harness; see PLAN); same-pass sync + verif; see PLAN.
 - 2026-06-23 re-review residual (c17ce56c re-review nits: doc-claim vs code on let-d reformat + stats/excerpts + TYP phrasing + historical qual + sync; this run): corrected claims + stats + excerpts + phrasing + added defense note; src let-d compact defended (short facade); live stats final 4 files changed, 12 insertions(+), 12 deletions(-) (at final write time after all sync addressing); appended residual + one-liners; verif clean; see PLAN. (complete delta applied and verified)
 - 2026-06-23 re-review round 2 stats sync (minimal): refreshed all "final live" / 98i/36d etc to exact live 4f 12i/12d, grep=8, raw wc=0 at final write time after all sync addressing in PLAN/summary/residuals (captured right now); no code change; same-pass note sync. (verified)
+
+# IMPL 35a48c49 hygiene note (high-level M5/M6 compact + sync): PLAN M5/M6 parentheticals pruned (exec order/table/After/immediate) + re-verify + sync hygiene on dirty tree; exactly 4 .md files edited (PLAN.md + docs/v0-executable-spec.md + fixtures/README.md + README-IMPLEMENTATION.md); M7 Phase 6 / "M7 complete (Track 6 this delta)" blocks kept byte-identical (core phrasing preserved, prefixes adapted); pre-existing qualified (base dirty tree); 0 drift. See PLAN + /tmp/grok-impl-summary-35a48c49.md .
 - 2026-06-23 residual addressing (hygiene: summary stats to 5f 46i/20d live, comments to pure template, PLAN residual boilerplate match; this run): tiniest fixes in /tmp summary + src comments (no review meta) + PLAN; live git 45i/20d at write; appended one-liner; verif clean; see PLAN.
 - 2026-06-23 continuation (test error handling consistency OBS-702 trailing_tap loose .any -> find.expect("OBS-702") harness style in typeck + doc/plan sync; this run): converted loose .any to find.expect("OBS-702") terse harness style in typeck test (real trailing_tap fixture); same-pass sync + verif; see PLAN.
 - 2026-06-24 continuation (test error handling consistency OBS-702 trailing_* loose .any -> find.expect("OBS-702") harness style in typeck + doc/plan sync; this run): converted loose .any to find.expect("OBS-702") terse harness style in typeck tests (real trailing_* fixtures); same-pass sync + verif; see PLAN.
@@ -186,4 +200,7 @@ Positive examples must transpile, compile, and match harness predicates in `opti
 - 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
 - 2026-06-25 continuation (CLI + dump/facade explicit Extern arms in tooling + dump helper comment + verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 26 insertions(+), 1 deletion(-)` (fix round)): see PLAN sub.
 - 2026-06-25 continuation (harness expand: richer boundary asserts + 4-col arity edge on real N=0 + parse_entities + verbatim doc sync; execution.rs + PLAN + fixtures + v0-exec + main; live `7 files changed, 230 insertions(+), 31 deletions(-) (5 core + 2 marker restores for pre-existing asserts)`; same-pass sync + verif; see PLAN): see PLAN sub.
+- M7 Phase 3 (Track 3 this delta + supporting HIR): CGIR Prism/Traversal node realization (m7_reserved=false full paths); bias: hir::BranchBias carried on leaves for coproduct conditional branch edges (extract_branch_bias from decl + HIR validate); alias store coalesc verify over TraversalLeaf in verify (guard reuses is_simd 5pt#5 + ownership/put_writes); added minimal unit tests for extract + alias error; reused lower_get_put_leaf / build_region_fn / extract patterns / region_map / same Vec id + provenance tree (no new Branch variant per smallest); 11 files changed, 310 insertions(+), 40 deletions(-); goldens parity; fmt/clippy/tests/opticc/run on keys; PLAN/docs synced identical phrasing.
+- M7 Phase 4 (Track 4 this delta): Prism/Traversal Compose Fusion + branch-coalescing via compose; lifted CGI-003 prism/trav under alias/ownership invariants (reuse is_simd_eligible for alias dec; bias field from Phase 3 present on leaves); extended compose_chain_forbidden_leaf + compose_fusion_block_note conditionally (no wholesale rewrite); removed codegen chain guard; FusedLoop+ComposeFusedBody reused for prism/trav; legal cases (e.g. Affine) now fuse/succeed, illegal keep CGI/FUS; updated examples/docs/tests/PLAN with live capture; some compose_prism/trav now succeed; kept CGI for bad. (Smallest; fmt/clippy/tests pass.)
+- M7 Phase 5 (Track 5 this delta): SIMD Loop Emission (chunked portable 4-wide vector nests + Cursor/SoA in emit_traversal_query_* / emit_traversal_map_decay when is_simd_eligible_region); Branch Bias Hint Emission (inside per-el/fused loop after cursor via extract_leaf_bias on Prism/TraversalLeaf); Coproduct clean (if let Some or direct let= per wrap_some/returns_option without Some() double-wrap in emit_prism_preview_rust + callers; reuse helpers); reused emit_prism_preview_rust/emit_* /FusedLoop/is_simd_region/resolved_* inside current paths; goldens updated via OPTIC + unit bias cov + fmt/clippy/tests/opticc cli on keys; PLAN/docs synced *identical* phrasing; legacy OpticLeaf paths unchanged. (Smallest; fmt/clippy/tests pass.)
 

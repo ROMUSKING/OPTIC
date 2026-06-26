@@ -1041,6 +1041,7 @@ mod tests {
                 summary,
                 provenance: Span::dummy(),
                 m7_reserved: true,
+                bias: optic_hir::BranchBias::Unknown,
             }],
             roots: vec![0],
             provenance_index: Default::default(),

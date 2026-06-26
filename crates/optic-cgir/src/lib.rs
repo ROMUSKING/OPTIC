@@ -143,6 +143,8 @@ pub enum CgirNode {
         provenance: Span,
         /// Stub nodes use `true` (CGI-006); lowered prisms use `false`.
         m7_reserved: bool,
+        /// BranchBias carried from decl grade (M7 Track3); represents coproduct elim as conditional branch edge w/ prediction fact.
+        bias: hir::BranchBias,
     },
     /// M7 traversal leaf — get/put lowered when `m7_reserved=false`.
     TraversalLeaf {
@@ -161,6 +163,8 @@ pub enum CgirNode {
         summary: Arc<hir::OpticSummary>,
         provenance: Span,
         m7_reserved: bool,
+        /// BranchBias carried from decl grade (M7 Track3); for coproduct/branch facts on traversal (future simd/ bias use).
+        bias: hir::BranchBias,
     },
     /// M8+ observability tap placeholder (book ch14.5); CGI-006 if materialized in v0.
     Tap {
@@ -291,20 +295,27 @@ fn lower_get_put_leaf(
     region_map: &hir::RegionMap,
     missing_get_rule: &str,
 ) -> Result<LoweredGetPut, Vec<optic_diagnostics::Diagnostic>> {
-    let get = decl.get.as_ref().ok_or_else(|| {
-        vec![optic_diagnostics::cgir_diag(
-            "CGI-001",
-            decl.span,
-            missing_get_rule,
-            serde_json::json!({ "optic": decl.name.node }),
-        )]
-    })?;
+    // Phase 2 reuse+extend lower_get_put_leaf (per plan Existing list) to support traverse/update for GradedTraversal (coproduct lowering path via HIR primary).
+    let get = decl
+        .get
+        .as_ref()
+        .or(decl.traverse.as_ref())
+        .ok_or_else(|| {
+            vec![optic_diagnostics::cgir_diag(
+                "CGI-001",
+                decl.span,
+                missing_get_rule,
+                serde_json::json!({ "optic": decl.name.node }),
+            )]
+        })?;
     let get_param = get.param.node.clone();
     let get_body = std::sync::Arc::new(validate_optic_body_expr(
         lower_optic_get_body(&get_param, &get.body),
         region_map,
     ));
-    let (set_state_param, set_value_param, set_value_body) = if let Some(put) = &decl.put {
+    let (set_state_param, set_value_param, set_value_body) = if let Some(put) =
+        decl.put.as_ref().or(decl.update.as_ref())
+    {
         (
             Some(put.state_param.node.clone()),
             Some(put.value_param.node.clone()),
@@ -351,6 +362,9 @@ fn hir_expr_unsupported(e: &hir::HirExpr) -> Option<(&Span, String)> {
 }
 
 /// Compose spine leaf forbidden in narrow v0 codegen (prism or traversal).
+/// Extended conditionally (Track 4, conservative): alias/ownership decision (reusing is_simd_eligible pt#5 + ownership pattern);
+/// bias field present (from Phase3) but not part of legality filter at this phase (always-compatible; for future coalescing).
+/// read paths always, writes only if alias_safe; keeps CGI-003 only for illegal cases.
 pub fn compose_chain_forbidden_leaf(
     g: &CgirGraph,
     compose_id: NodeId,
@@ -358,8 +372,24 @@ pub fn compose_chain_forbidden_leaf(
     let chain = compose_leaf_chain(g, compose_id)?;
     for &lid in &chain {
         match g.nodes.get(lid as usize) {
-            Some(CgirNode::PrismLeaf { .. }) => return Some(("prism_in_compose", lid)),
-            Some(CgirNode::TraversalLeaf { .. }) => return Some(("traversal_in_compose", lid)),
+            Some(CgirNode::PrismLeaf { summary, .. }) => {
+                // alias_ok reuses ownership + pt#5 from is_simd_eligible (exact precedent from verify TraversalLeaf + hir);
+                // dupe arms kept for smallest delta (no new helper in guard path).
+                let alias_ok = !summary.get_grade.ownership.read_only
+                    || summary.put_writes.is_empty()
+                    || hir::is_simd_eligible(summary, &g.region_map);
+                if !alias_ok {
+                    return Some(("prism_in_compose", lid));
+                }
+            }
+            Some(CgirNode::TraversalLeaf { summary, .. }) => {
+                let alias_ok = !summary.get_grade.ownership.read_only
+                    || summary.put_writes.is_empty()
+                    || hir::is_simd_eligible(summary, &g.region_map);
+                if !alias_ok {
+                    return Some(("traversal_in_compose", lid));
+                }
+            }
             _ => {}
         }
     }
@@ -806,6 +836,7 @@ pub fn build(
                     let preview_fn =
                         build_region_fn(&summary.get_reads, RegionFnStyle::PreviewOption);
                     let review_fn = build_region_fn(&summary.put_writes, RegionFnStyle::Write);
+                    let bias = hir::extract_branch_bias(&decl.grade);
                     nodes.push(CgirNode::PrismLeaf {
                         id: nid,
                         name: decl.name.node.clone(),
@@ -824,14 +855,16 @@ pub fn build(
                         summary: Arc::clone(summary),
                         provenance: decl.span,
                         m7_reserved: false,
+                        bias,
                     });
                 } else if decl.is_traversal() {
                     let lowered = lower_get_put_leaf(
                         decl,
                         summary,
                         &region_map,
-                        "traversal optic requires get clause",
+                        "traversal optic requires traverse clause",
                     )?;
+                    let bias = hir::extract_branch_bias(&decl.grade);
                     nodes.push(CgirNode::TraversalLeaf {
                         id: nid,
                         name: decl.name.node.clone(),
@@ -848,6 +881,7 @@ pub fn build(
                         summary: Arc::clone(summary),
                         provenance: decl.span,
                         m7_reserved: false,
+                        bias,
                     });
                 } else {
                     // real from summary per ch10.9 (OpticLeaf from named optic + summary)
@@ -1516,6 +1550,21 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                 debug_assert!(children.len() >= 2, "ProductFlat validity: >=2 children");
                 debug_assert!(alias_safe, "ProductFlat alias_safe must hold post verify");
             }
+            CgirNode::TraversalLeaf { summary, .. }
+                if summary.get_grade.ownership.read_only && !summary.put_writes.is_empty() =>
+            {
+                // Track 3: Alias Safety Verification — invariant checker verifies store coalescing legality over TraversalLeaf nodes.
+                // Reuses put_writes + ownership (exact pattern from is_simd_eligible 5pt#5 + typeck::alias_safe).
+                // Coalescing (bulk write) legal iff not read_only when writes present; upstream typeck ensures, verify enforces.
+                return Err(format!(
+                    "node {idx}: TraversalLeaf store coalescing illegal (read_only + put_writes)"
+                ));
+            }
+            CgirNode::PrismLeaf { .. } => {
+                // Track 3: Control-flow & Branch-Prediction Graph Construction — CGIR carries bias on PrismLeaf (coproduct eliminator).
+                // PrismLeaf represents conditional branch edges (if-let on preview); bias (Likely/Unlikely/Unknown) from HIR/decl grade.
+                // Reuses existing leaf + id + provenance (no new Branch variant; smallest, reuse Product/Compose tree).
+            }
             CgirNode::FusedLoop {
                 id,
                 original_ids,
@@ -1582,8 +1631,16 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                     }
                     for w in chain.windows(2) {
                         if let (
-                            Some(CgirNode::OpticLeaf { summary: lf, .. }),
-                            Some(CgirNode::OpticLeaf { summary: rc, .. }),
+                            Some(
+                                CgirNode::OpticLeaf { summary: lf, .. }
+                                | CgirNode::PrismLeaf { summary: lf, .. }
+                                | CgirNode::TraversalLeaf { summary: lf, .. },
+                            ),
+                            Some(
+                                CgirNode::OpticLeaf { summary: rc, .. }
+                                | CgirNode::PrismLeaf { summary: rc, .. }
+                                | CgirNode::TraversalLeaf { summary: rc, .. },
+                            ),
                         ) = (g.nodes.get(w[0] as usize), g.nodes.get(w[1] as usize))
                         {
                             if !lf.focus.eq_ignore_ascii_case(&rc.costate) {
@@ -1594,7 +1651,7 @@ pub fn verify(g: &CgirGraph) -> Result<(), String> {
                             }
                         } else {
                             return Err(format!(
-                                "node {idx}: compose fused chain must be OpticLeaf nodes"
+                                "node {idx}: compose fused chain must be leaf nodes"
                             ));
                         }
                     }
@@ -2591,6 +2648,7 @@ mod tests {
             summary: Arc::clone(&summary),
             provenance: Span::dummy(),
             m7_reserved: true,
+            bias: hir::BranchBias::Unknown,
         };
         assert!(is_m7_reserved(&prism));
         assert_eq!(m7_reserved_kind(&prism), Some("PrismLeaf"));
@@ -2691,6 +2749,7 @@ mod tests {
                     summary: Arc::clone(&summary),
                     provenance: Span::dummy(),
                     m7_reserved: true,
+                    bias: hir::BranchBias::Unknown,
                 },
             ),
             (
@@ -2711,6 +2770,7 @@ mod tests {
                     summary: Arc::clone(&summary),
                     provenance: Span::dummy(),
                     m7_reserved: true,
+                    bias: hir::BranchBias::Unknown,
                 },
             ),
             (
@@ -2844,6 +2904,7 @@ mod tests {
                 summary,
                 provenance: Span::dummy(),
                 m7_reserved: true,
+                bias: hir::BranchBias::Unknown,
             }],
             roots: vec![0],
             provenance_index: Default::default(),
@@ -2879,6 +2940,7 @@ mod tests {
                 summary,
                 provenance: Span::dummy(),
                 m7_reserved: false,
+                bias: hir::BranchBias::Unknown,
             }],
             roots: vec![0],
             provenance_index: Default::default(),
@@ -2909,6 +2971,7 @@ mod tests {
                 summary,
                 provenance: Span::dummy(),
                 m7_reserved: false,
+                bias: hir::BranchBias::Unknown,
             }],
             roots: vec![0],
             provenance_index: Default::default(),
@@ -2917,6 +2980,42 @@ mod tests {
         };
         verify(&g).expect("lowered TraversalLeaf must pass verify");
         verify_to_diagnostic(&g).expect("lowered TraversalLeaf must not emit CGI-006");
+    }
+
+    #[test]
+    fn test_verify_rejects_traversalleaf_store_coalescing_illegal() {
+        // Minimal coverage for alias guard on TraversalLeaf (reuses minimal_summary + construct style; hits read_only + writes Err path).
+        let base = minimal_summary("T");
+        let mut s = (*base).clone();
+        s.get_grade.ownership.read_only = true;
+        s.put_writes = vec!["col".into()];
+        let g = CgirGraph {
+            nodes: vec![CgirNode::TraversalLeaf {
+                id: 0,
+                name: "T".into(),
+                costate: "E".into(),
+                focus: "f32".into(),
+                grade: s.get_grade.clone(),
+                get_fn: String::new(),
+                set_fn: String::new(),
+                get_param: "s".into(),
+                get_body: Arc::new(hir::HirExpr::LitInt(0, Span::dummy())),
+                set_state_param: None,
+                set_value_param: None,
+                set_value_body: None,
+                summary: Arc::new(s),
+                provenance: Span::dummy(),
+                m7_reserved: false,
+                bias: hir::BranchBias::Unknown,
+            }],
+            roots: vec![0],
+            provenance_index: Default::default(),
+            resolved_optics: Default::default(),
+            region_map: Default::default(),
+        };
+        let err =
+            verify(&g).expect_err("TraversalLeaf read_only+writes must be illegal for coalescing");
+        assert!(err.contains("TraversalLeaf store coalescing illegal"));
     }
 
     #[test]
@@ -2941,6 +3040,7 @@ mod tests {
                 summary,
                 provenance: Span::dummy(),
                 m7_reserved: true,
+                bias: hir::BranchBias::Unknown,
             }],
             roots: vec![0],
             provenance_index: Default::default(),
@@ -2981,14 +3081,14 @@ mod tests {
     }
 
     #[test]
-    fn test_build_rejects_compose_with_prism_leaf() {
+    fn test_build_allows_compose_with_prism_leaf() {
         let src = r#"
 data Entities { healths: SoA<f32> }
-optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + SharedGrade> {
     get s => s.healths[s.id]
     put (s, v) => { s.healths[s.id] = v }
 }
-optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2>> {
+optic AliveFilter: GradedPrism<Entities, f32, CacheGrade<2> + SharedGrade> {
     preview s => s.healths[s.id]
     review (s, a) => { s.healths[s.id] = a }
 }
@@ -2998,25 +3098,25 @@ fn main() { entities.query(chain).map(|h| h); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, _) = optic_typeck::typeck_pass(hirp);
-        let err = build(&typed).expect_err("compose+prism must fail CGIR build");
-        let diag = err
+        // Phase4: builds for alias-ok cases (SharedGrade + inference yields non-illegal); illegal (read_only+puts) hits forbid/CGI.
+        let g = build(&typed).expect("compose+prism now allowed under invariants");
+        assert!(g
+            .nodes
             .iter()
-            .find(|d| d.code == optic_diagnostics::CGIR_UNSUPPORTED_EXPR)
-            .expect("CGI-003");
-        assert_eq!(diag.evidence["reason"], "prism_in_compose");
+            .any(|n| matches!(n, CgirNode::PrismLeaf { .. })));
     }
 
     #[test]
-    fn test_build_rejects_compose_with_traversal_leaf() {
+    fn test_build_allows_compose_with_traversal_leaf() {
         let src = r#"
 data Entities { healths: SoA<f32> }
-optic HealthView: GradedOptic<Entities, f32, CacheGrade<2>> {
+optic HealthView: GradedOptic<Entities, f32, CacheGrade<2> + SharedGrade> {
     get s => s.healths[s.id]
     put (s, v) => { s.healths[s.id] = v }
 }
-optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2>> {
-    get s => s.healths[s.id]
-    put (s, v) => { s.healths[s.id] = v }
+optic AllHealths: GradedTraversal<Entities, f32, CacheGrade<2> + SharedGrade> {
+    traverse s => s.healths[s.id]
+    update (s, v) => { s.healths[s.id] = v }
 }
 let chain = HealthView >>> AllHealths;
 fn main() { entities.query(chain).map(|h| h); }
@@ -3024,12 +3124,89 @@ fn main() { entities.query(chain).map(|h| h); }
         let prog = optic_syntax::parse(src, optic_syntax::SourceId(1)).expect("parse");
         let hirp = optic_hir::lower(prog).expect("lower");
         let (typed, _) = optic_typeck::typeck_pass(hirp);
-        let err = build(&typed).expect_err("compose+traversal must fail CGIR build");
-        let diag = err
+        // Phase4: builds for alias-ok cases; illegal (read_only+puts) hits forbid/CGI.
+        let g = build(&typed).expect("compose+traversal now allowed under invariants");
+        assert!(g
+            .nodes
             .iter()
-            .find(|d| d.code == optic_diagnostics::CGIR_UNSUPPORTED_EXPR)
-            .expect("CGI-003");
-        assert_eq!(diag.evidence["reason"], "traversal_in_compose");
+            .any(|n| matches!(n, CgirNode::TraversalLeaf { .. })));
+    }
+
+    #[test]
+    fn test_build_rejects_compose_with_illegal_prism_trav_alias() {
+        // Explicit illegal path coverage (read_only + nonempty put_writes) per review.
+        // Uses direct mock (bypasses typeck inference which forces read_only=false on has_put).
+        // Uses TraversalLeaf to also hit Trav arm (symmetry, smallest extension).
+        let sum = std::sync::Arc::new(optic_hir::OpticSummary {
+            name: Some("T".into()),
+            costate: "E".into(),
+            focus: "f32".into(),
+            lift: optic_hir::PathLift::default(),
+            get_reads: vec!["h".into()],
+            put_reads: vec![],
+            put_writes: vec!["h".into()],
+            get_grade: optic_hir::ConcreteGrade {
+                cache: 1,
+                ownership: optic_hir::OwnershipDim {
+                    share: optic_hir::Rational::one(),
+                    read_only: true,
+                    must_use: false,
+                },
+            },
+            put_grade: optic_hir::ConcreteGrade {
+                cache: 1,
+                ownership: optic_hir::OwnershipDim {
+                    share: optic_hir::Rational::one(),
+                    read_only: true,
+                    must_use: false,
+                },
+            },
+            get_determinism: optic_hir::Determinism::Pure,
+            put_determinism: optic_hir::Determinism::Pure,
+            serializable: true,
+            provenance: optic_syntax::Span::dummy(),
+        });
+        let g = CgirGraph {
+            nodes: vec![
+                CgirNode::TraversalLeaf {
+                    id: 0,
+                    name: "T".into(),
+                    costate: "E".into(),
+                    focus: "f32".into(),
+                    grade: sum.get_grade.clone(),
+                    get_fn: "".into(),
+                    set_fn: "".into(),
+                    get_param: "s".into(),
+                    get_body: std::sync::Arc::new(optic_hir::HirExpr::LitInt(
+                        0,
+                        optic_syntax::Span::dummy(),
+                    )),
+                    set_state_param: None,
+                    set_value_param: None,
+                    set_value_body: None,
+                    summary: sum.clone(),
+                    provenance: optic_syntax::Span::dummy(),
+                    m7_reserved: false,
+                    bias: optic_hir::BranchBias::Unknown,
+                },
+                CgirNode::Compose {
+                    id: 1,
+                    lhs: 0,
+                    rhs: 0,
+                    grade: sum.get_grade.clone(),
+                    provenance: optic_syntax::Span::dummy(),
+                },
+            ],
+            roots: vec![1],
+            provenance_index: Default::default(),
+            resolved_optics: std::collections::HashMap::new(),
+            region_map: optic_hir::RegionMap::default(),
+        };
+        // direct (forbidden needs only nodes + leaf chain)
+        assert!(
+            compose_chain_forbidden_leaf(&g, 1).is_some(),
+            "illegal read_only+writes must forbid (CGI-003 path)"
+        );
     }
 
     #[test]

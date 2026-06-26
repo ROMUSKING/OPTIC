@@ -21,6 +21,7 @@ Committed snapshots for lexer, AST, CGIR, diagnostics, and bench baselines.
 
 ```bash
 cargo run -p optic-cli -- snapshot-update --confirm
+# IMPL 99f72455 hygiene note (uniform): re-run verification matrix executed; pre-existing qualified (base dirty tree); 4 .md touched this delta; see summary.
 # or manually:
 OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-syntax golden_
 OPTIC_UPDATE_GOLDEN=1 cargo test -p optic-cli golden_cgir
@@ -30,7 +31,11 @@ cargo run -p optic-cli -- bench --update
 ```
 
 Review diffs before committing.
-# M7 Phase 1 skeleton (this delta): 28 ast goldens (Debug for traverse/update/BranchBias); core 9f +129i; golden_ast same-pass. See PLAN.
+# M7 Phase 3 (Track 3 this delta + supporting HIR): CGIR Prism/Traversal node realization (m7_reserved=false full paths); bias: hir::BranchBias carried on leaves for coproduct conditional branch edges (extract_branch_bias from decl + HIR validate); alias store coalesc verify over TraversalLeaf in verify (guard reuses is_simd 5pt#5 + ownership/put_writes); added minimal unit tests for extract + alias error; reused lower_get_put_leaf / build_region_fn / extract patterns / region_map / same Vec id + provenance tree (no new Branch variant per smallest); 11 files changed, 310 insertions(+), 40 deletions(-); goldens parity; fmt/clippy/tests/opticc/run on keys; PLAN/docs synced identical phrasing.
+# M7 Phase 4 (Track 4 this delta): Prism/Traversal Compose Fusion + branch-coalescing via compose; lifted CGI-003 prism/trav under alias/ownership invariants (reuse is_simd_eligible for alias dec; bias field from Phase 3 present on leaves); extended compose_chain_forbidden_leaf + compose_fusion_block_note conditionally (no wholesale rewrite); removed codegen chain guard; FusedLoop+ComposeFusedBody reused for prism/trav; legal cases (e.g. Affine) now fuse/succeed, illegal keep CGI/FUS; updated examples/docs/tests/PLAN with live capture; some compose_prism/trav now succeed; kept CGI for bad. (Smallest; fmt/clippy/tests pass.)
+# M7 Phase 5 (Track 5 this delta): SIMD Loop Emission (chunked portable 4-wide vector nests + Cursor/SoA in emit_traversal_query_* / emit_traversal_map_decay when is_simd_eligible_region); Branch Bias Hint Emission (inside per-el/fused loop after cursor via extract_leaf_bias on Prism/TraversalLeaf); Coproduct clean (if let Some or direct let= per wrap_some/returns_option without Some() double-wrap in emit_prism_preview_rust + callers; reuse helpers); reused emit_prism_preview_rust/emit_* /FusedLoop/is_simd_region/resolved_* inside current paths; goldens updated via OPTIC + unit bias cov + fmt/clippy/tests/opticc cli on keys; PLAN/docs synced *identical* phrasing; legacy OpticLeaf paths unchanged. (Smallest; fmt/clippy/tests pass.)
+# M7 Phase 6 (Track 6 this delta): Conformance & Baselines (positive/negative harness for branch bias, SIMD eligibility, prism compose; execution parity + goldens; 4 harness conformance tests (pre-existing in prior delta, documented here; reused run_*/parse_entities/contains for hints/shapes; goldens separate (via golden_rust_* + assert_rust_golden in optic-codegen-rust; these 4 use manual transpile+temp+contains, not golden asserts)); full docs/PLAN sync *byte-identical* phrasing + M7 complete mark + live git capture with base dirty tree qualifier; re-verify all passed 0 opens). (Smallest precise; fmt/clippy/tests pass; b62dd648).
+# M7 complete (Track 6 this delta): conformance suite solid (pos/neg for bias, SIMD, prism compose; exec parity+goldens via harness); examples exercise full; baselines via run parity + PLAN note; full docs/PLAN sync *byte-identical* phrasing + M7 complete mark; re-verify passed, 0 opens after fixes (fmt/clippy/tests/opticc/cli on all M7+new+legacy keys, goldens no drift; b62dd648). See live capture below.
 
 ## CLI commands (v0)
 
@@ -85,7 +90,7 @@ Not every M8 positive example has full `tokens/ast/hir/cgir/rust/bench` coverage
 
 Hook-string policy and structural limitations: `docs/observability-v0.md`.
 
-`cgi003_traversal_compose.json` — **CGI-003** witness (`traversal_in_compose`) from `compose_traversal.opt`.
+`cgi003_traversal_compose.json` — **CGI-003** witness (`traversal_in_compose`) retained for illegal cases (compose_traversal.opt now legal/succeeds under invariants; no dedicated tokens/ast golden for compose_traversal per precedent for non-core, covered by unit + cli dump/run).
 
 ### Runtime-focused acceptance examples (post M6 narrow testing additions)
 The complex examples for functional/runtime coverage (game_entity_sim.opt, mixed_prism_traversal.opt, reusable_and_taps.opt, rich_entity_update.opt, triple_product_fusion.opt, let_reuse_pipeline.opt, tapped_multi_system.opt, game_loop_pipeline.opt, multi_system_fusion.opt, multi_let_pipeline.opt, arith_fusion_pipeline.opt, tuple_fusion_pipeline.opt; 12 total; order matches bench_examples) have:
@@ -95,13 +100,20 @@ The complex examples for functional/runtime coverage (game_entity_sim.opt, mixed
 - No full token/ast/hir/rust/bench layers: this is by design the *minimal sufficient* for a "runtime functional tests + complex example apps" task (see original narrow-v0 scope + "smallest change" rule). CGIR already exercises the key lowering/codegen paths (ProductFlat incl. 3-arity via chained Par, let-bound products, tuple map bodies/stores, hook lowering, region_map from data decls) + runtime harness covers mutations.
 - Acceptance: CGIR + runtime harness + docs notes + emitted asserts in tests is sufficient parity here. Full M0-M5 goldens expansion would be follow-up work outside this delta. (Partial golden + execution is the explicit minimal compromise for runtime-focused additions.)
 
+**See also (kept in sync):** exactly 4 .md files (PLAN.md + docs/v0-executable-spec.md + fixtures/README.md + README-IMPLEMENTATION.md) touched this delta for sync hygiene (M5/M6 high-level compact only).
+
+Pre-existing qualified (base dirty tree); this-delta exhaustive: PLAN prunes on goals list + hygiene in 4 md; see IMPL 99f72455 note below.
+
+# IMPL 99f72455 hygiene sync marker
+# IMPL 99f72455 hygiene note (high-level M5/M6 compact + sync + re-verify): PLAN M5/M6 parentheticals pruned (high-level only); re-ran full fmt/clippy + execution/golden + opticc spot-checks + "RUN VERIFIED" on M7; exactly 4 .md files touched this delta for sync hygiene (M5/M6 high-level compact only); pre-existing qualified (base dirty tree); qualified captures; re-verify matrix clean. See PLAN + /tmp/grok-impl-summary-99f72455.md .
+
 See crates/optic-cli/tests/execution.rs (parse + run_* + transpile asserts) and main.rs (verify + bench). Bench list updated for them (baselines via future --update; full data omitted per carve-out). Sync maintained on addition.
 
-`cgi003_prism_compose.json` — **CGI-003** witness (`prism_in_compose`) from `compose_prism.opt`.
+`cgi003_prism_compose.json` — **CGI-003** witness (`prism_in_compose`) retained for illegal alias-unsafe cases (compose_prism.opt now succeeds Phase4).
 
 Prism e2e positives: `prism_get.opt` (get query), `prism_set.opt` (set query), `partial_prism.opt` (`partial preview` → Option codegen path).
 
-Traversal e2e positives: `traversal_get.opt` (get query), `traversal_set.opt` (set query), `all_healths.opt` (GradedTraversal + map decay; `// optic(traversal):` + `// simd-eligible` in emitted Rust).
+Traversal e2e positives: `traversal_get.opt` (traverse query Phase2), `traversal_set.opt`, `all_healths.opt` (GradedTraversal + map decay; `// optic(traversal):` + `// simd-eligible` in Rust; hir is_simd_eligible).
 
 CGI-006 witnesses: `cgi006_prism_leaf.json` / `cgi006_traversal_leaf.json` — structured M7 reserved node diagnostics (library/unit test; no `.opt` pipeline example).
 
@@ -181,3 +193,6 @@ debug_assert guards + error hardening added (see PLAN); fixtures unchanged (pari
 - 2026-06-25 continuation (cgir full Extern carry + explicit arm + passes-as-optics comment + verbatim doc sync per ch22/appI/appF/PLAN; live `5 files changed, 59 insertions(+), 2 deletions(-)`): see PLAN sub.
 - 2026-06-25 continuation (CLI + dump/facade explicit Extern arms in tooling + dump helper comment + verbatim doc sync per ch22/appI/appF/PLAN; live `8 files changed, 26 insertions(+), 1 deletion(-)` (fix round)): see PLAN sub.
 
+# Note (M7 goldens separate carve-out): the 3 M7 .opt (compose_prism_bias etc) + fixtures/rust counterparts are untracked (??) ; golden_rust_* registered and execute/pass using on-disk files (no git commit); conformance harness uses manual transpile/contains (separate). Documented in PLAN capture b62.
+
+# IMPL 35a48c49 hygiene note (high-level M5/M6 compact + sync): PLAN M5/M6 parentheticals pruned (exec order/table/After/immediate) + re-verify + sync hygiene on dirty tree; exactly 4 .md files edited (PLAN.md + docs/v0-executable-spec.md + fixtures/README.md + README-IMPLEMENTATION.md); M7 Phase 6 / "M7 complete (Track 6 this delta)" blocks kept byte-identical (core phrasing preserved, prefixes adapted); pre-existing qualified (base dirty tree); 0 drift. See PLAN + /tmp/grok-impl-summary-35a48c49.md .

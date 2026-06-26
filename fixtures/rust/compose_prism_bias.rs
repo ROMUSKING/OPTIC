@@ -10,6 +10,7 @@ pub fn run_example(entities: &mut Entities) {
     let n = entities.healths.len();
     for id_0 in 0..n {
         let cursor_0 = Cursor::new(entities, id_0);
+        // branch-bias hint: Likely
         let _healths = cursor_0.arena.healths[cursor_0.id];
         let _new = _healths - 10.0;
         let _review_out = _new;

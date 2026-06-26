@@ -1,0 +1,18 @@
+-- M7 conformance: mixed bias/SIMD (simd-eligible trav map + bias hint + remainder/scalar; prism bias decl in source for full coverage; bias hint+chunk+src decl+RUN VERIFIED via harness; goldens separate)
+data Entities {
+    healths: SoA<f32>,
+}
+
+optic BiasedPrism: GradedPrism<Entities, f32, CacheGrade<2> + BranchBias<Likely>> {
+    preview s => s.healths[s.id]
+    review (s, a) => { s.healths[s.id] = a }
+}
+
+optic BiasedTrav: GradedTraversal<Entities, f32, CacheGrade<2> + BranchBias<Unlikely>> {
+    get  s => s.healths[s.id]
+    put  (s, v) => { s.healths[s.id] = v }
+}
+
+fn main() {
+    entities.query(BiasedTrav).map(|h| h - 10.0);
+}
