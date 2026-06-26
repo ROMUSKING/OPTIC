@@ -1,4 +1,4 @@
--- Negative: compose chain with PrismLeaf rejected at CGIR (CGI-003 prism_in_compose)
+-- Negative: compose chain with PrismLeaf rejected at CGIR (CGI-004 compose type wiring; alias/Prism cases in cgir units; legacy header retained for some cgi003)
 data Entities {
     healths: SoA<f32>,
 }

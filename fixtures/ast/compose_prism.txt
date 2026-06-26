@@ -8,8 +8,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 91,
-                        end: 99,
+                        start: 167,
+                        end: 175,
                     },
                 },
                 fields: [
@@ -20,8 +20,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 106,
-                                end: 113,
+                                start: 182,
+                                end: 189,
                             },
                         },
                         ty: Soa(
@@ -32,24 +32,24 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 119,
-                                    end: 122,
+                                    start: 195,
+                                    end: 198,
                                 },
                             },
                             Span {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 115,
-                                end: 123,
+                                start: 191,
+                                end: 199,
                             },
                         ),
                         span: Span {
                             source: SourceId(
                                 1,
                             ),
-                            start: 106,
-                            end: 123,
+                            start: 182,
+                            end: 199,
                         },
                     },
                 ],
@@ -57,8 +57,8 @@ Program {
                     source: SourceId(
                         1,
                     ),
-                    start: 86,
-                    end: 126,
+                    start: 162,
+                    end: 202,
                 },
             },
         ),
@@ -70,8 +70,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 134,
-                        end: 144,
+                        start: 210,
+                        end: 220,
                     },
                 },
                 type_ctor: GradedOptic,
@@ -83,8 +83,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 158,
-                        end: 166,
+                        start: 234,
+                        end: 242,
                     },
                 },
                 focus: Named {
@@ -94,8 +94,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 168,
-                        end: 171,
+                        start: 244,
+                        end: 247,
                     },
                 },
                 grade: GradeExpr {
@@ -108,8 +108,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 173,
-                                end: 183,
+                                start: 249,
+                                end: 259,
                             },
                         },
                         Named {
@@ -118,8 +118,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 189,
-                                end: 200,
+                                start: 265,
+                                end: 276,
                             },
                         },
                     ],
@@ -127,8 +127,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 173,
-                        end: 200,
+                        start: 249,
+                        end: 276,
                     },
                 },
                 get: Some(
@@ -139,8 +139,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 213,
-                                end: 214,
+                                start: 289,
+                                end: 290,
                             },
                         },
                         body: Field(
@@ -154,8 +154,8 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 223,
-                                                    end: 224,
+                                                    start: 299,
+                                                    end: 300,
                                                 },
                                             },
                                         ),
@@ -163,8 +163,8 @@ Program {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 223,
-                                            end: 224,
+                                            start: 299,
+                                            end: 300,
                                         },
                                     ),
                                     field: Spanned {
@@ -173,16 +173,16 @@ Program {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 225,
-                                            end: 232,
+                                            start: 301,
+                                            end: 308,
                                         },
                                     },
                                     span: Span {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 223,
-                                        end: 232,
+                                        start: 299,
+                                        end: 308,
                                     },
                                 },
                                 index: Field(
@@ -195,8 +195,8 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 233,
-                                                        end: 234,
+                                                        start: 309,
+                                                        end: 310,
                                                     },
                                                 },
                                             ),
@@ -204,8 +204,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 233,
-                                                end: 234,
+                                                start: 309,
+                                                end: 310,
                                             },
                                         ),
                                         field: Spanned {
@@ -214,16 +214,16 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 235,
-                                                end: 237,
+                                                start: 311,
+                                                end: 313,
                                             },
                                         },
                                         span: Span {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 233,
-                                            end: 237,
+                                            start: 309,
+                                            end: 313,
                                         },
                                     },
                                 ),
@@ -231,8 +231,8 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 223,
-                                    end: 238,
+                                    start: 299,
+                                    end: 314,
                                 },
                             },
                         ),
@@ -241,8 +241,8 @@ Program {
                             source: SourceId(
                                 1,
                             ),
-                            start: 208,
-                            end: 211,
+                            start: 284,
+                            end: 287,
                         },
                     },
                 ),
@@ -254,8 +254,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 249,
-                                end: 250,
+                                start: 325,
+                                end: 326,
                             },
                         },
                         value_param: Spanned {
@@ -264,8 +264,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 252,
-                                end: 253,
+                                start: 328,
+                                end: 329,
                             },
                         },
                         body: Block {
@@ -283,8 +283,8 @@ Program {
                                                                 source: SourceId(
                                                                     1,
                                                                 ),
-                                                                start: 260,
-                                                                end: 261,
+                                                                start: 336,
+                                                                end: 337,
                                                             },
                                                         },
                                                     ),
@@ -292,8 +292,8 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 260,
-                                                        end: 261,
+                                                        start: 336,
+                                                        end: 337,
                                                     },
                                                 ),
                                                 field: Spanned {
@@ -302,16 +302,16 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 262,
-                                                        end: 269,
+                                                        start: 338,
+                                                        end: 345,
                                                     },
                                                 },
                                                 span: Span {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 260,
-                                                    end: 269,
+                                                    start: 336,
+                                                    end: 345,
                                                 },
                                             },
                                             index: Field(
@@ -324,8 +324,8 @@ Program {
                                                                     source: SourceId(
                                                                         1,
                                                                     ),
-                                                                    start: 270,
-                                                                    end: 271,
+                                                                    start: 346,
+                                                                    end: 347,
                                                                 },
                                                             },
                                                         ),
@@ -333,8 +333,8 @@ Program {
                                                             source: SourceId(
                                                                 1,
                                                             ),
-                                                            start: 270,
-                                                            end: 271,
+                                                            start: 346,
+                                                            end: 347,
                                                         },
                                                     ),
                                                     field: Spanned {
@@ -343,16 +343,16 @@ Program {
                                                             source: SourceId(
                                                                 1,
                                                             ),
-                                                            start: 272,
-                                                            end: 274,
+                                                            start: 348,
+                                                            end: 350,
                                                         },
                                                     },
                                                     span: Span {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 270,
-                                                        end: 274,
+                                                        start: 346,
+                                                        end: 350,
                                                     },
                                                 },
                                             ),
@@ -360,8 +360,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 260,
-                                                end: 275,
+                                                start: 336,
+                                                end: 351,
                                             },
                                         },
                                     ),
@@ -373,8 +373,8 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 278,
-                                                    end: 279,
+                                                    start: 354,
+                                                    end: 355,
                                                 },
                                             },
                                         ),
@@ -383,8 +383,8 @@ Program {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 260,
-                                        end: 279,
+                                        start: 336,
+                                        end: 355,
                                     },
                                 },
                             ),
@@ -392,16 +392,16 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 258,
-                                end: 281,
+                                start: 334,
+                                end: 357,
                             },
                         },
                         span: Span {
                             source: SourceId(
                                 1,
                             ),
-                            start: 243,
-                            end: 246,
+                            start: 319,
+                            end: 322,
                         },
                     },
                 ),
@@ -413,8 +413,8 @@ Program {
                     source: SourceId(
                         1,
                     ),
-                    start: 128,
-                    end: 283,
+                    start: 204,
+                    end: 359,
                 },
             },
         ),
@@ -426,8 +426,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 291,
-                        end: 302,
+                        start: 367,
+                        end: 378,
                     },
                 },
                 type_ctor: GradedPrism,
@@ -439,8 +439,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 316,
-                        end: 324,
+                        start: 392,
+                        end: 400,
                     },
                 },
                 focus: Named {
@@ -450,8 +450,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 326,
-                        end: 329,
+                        start: 402,
+                        end: 405,
                     },
                 },
                 grade: GradeExpr {
@@ -464,8 +464,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 331,
-                                end: 341,
+                                start: 407,
+                                end: 417,
                             },
                         },
                     ],
@@ -473,8 +473,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 331,
-                        end: 341,
+                        start: 407,
+                        end: 417,
                     },
                 },
                 get: None,
@@ -487,8 +487,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 360,
-                                end: 361,
+                                start: 436,
+                                end: 437,
                             },
                         },
                         body: Field(
@@ -502,8 +502,8 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 365,
-                                                    end: 366,
+                                                    start: 441,
+                                                    end: 442,
                                                 },
                                             },
                                         ),
@@ -511,8 +511,8 @@ Program {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 365,
-                                            end: 366,
+                                            start: 441,
+                                            end: 442,
                                         },
                                     ),
                                     field: Spanned {
@@ -521,16 +521,16 @@ Program {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 367,
-                                            end: 374,
+                                            start: 443,
+                                            end: 450,
                                         },
                                     },
                                     span: Span {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 365,
-                                        end: 374,
+                                        start: 441,
+                                        end: 450,
                                     },
                                 },
                                 index: Field(
@@ -543,8 +543,8 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 375,
-                                                        end: 376,
+                                                        start: 451,
+                                                        end: 452,
                                                     },
                                                 },
                                             ),
@@ -552,8 +552,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 375,
-                                                end: 376,
+                                                start: 451,
+                                                end: 452,
                                             },
                                         ),
                                         field: Spanned {
@@ -562,16 +562,16 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 377,
-                                                end: 379,
+                                                start: 453,
+                                                end: 455,
                                             },
                                         },
                                         span: Span {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 375,
-                                            end: 379,
+                                            start: 451,
+                                            end: 455,
                                         },
                                     },
                                 ),
@@ -579,8 +579,8 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 365,
-                                    end: 380,
+                                    start: 441,
+                                    end: 456,
                                 },
                             },
                         ),
@@ -589,8 +589,8 @@ Program {
                             source: SourceId(
                                 1,
                             ),
-                            start: 352,
-                            end: 359,
+                            start: 428,
+                            end: 435,
                         },
                     },
                 ),
@@ -602,8 +602,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 393,
-                                end: 394,
+                                start: 469,
+                                end: 470,
                             },
                         },
                         value_param: Spanned {
@@ -612,8 +612,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 396,
-                                end: 397,
+                                start: 472,
+                                end: 473,
                             },
                         },
                         body: Block {
@@ -631,8 +631,8 @@ Program {
                                                                 source: SourceId(
                                                                     1,
                                                                 ),
-                                                                start: 404,
-                                                                end: 405,
+                                                                start: 480,
+                                                                end: 481,
                                                             },
                                                         },
                                                     ),
@@ -640,8 +640,8 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 404,
-                                                        end: 405,
+                                                        start: 480,
+                                                        end: 481,
                                                     },
                                                 ),
                                                 field: Spanned {
@@ -650,16 +650,16 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 406,
-                                                        end: 413,
+                                                        start: 482,
+                                                        end: 489,
                                                     },
                                                 },
                                                 span: Span {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 404,
-                                                    end: 413,
+                                                    start: 480,
+                                                    end: 489,
                                                 },
                                             },
                                             index: Field(
@@ -672,8 +672,8 @@ Program {
                                                                     source: SourceId(
                                                                         1,
                                                                     ),
-                                                                    start: 414,
-                                                                    end: 415,
+                                                                    start: 490,
+                                                                    end: 491,
                                                                 },
                                                             },
                                                         ),
@@ -681,8 +681,8 @@ Program {
                                                             source: SourceId(
                                                                 1,
                                                             ),
-                                                            start: 414,
-                                                            end: 415,
+                                                            start: 490,
+                                                            end: 491,
                                                         },
                                                     ),
                                                     field: Spanned {
@@ -691,16 +691,16 @@ Program {
                                                             source: SourceId(
                                                                 1,
                                                             ),
-                                                            start: 416,
-                                                            end: 418,
+                                                            start: 492,
+                                                            end: 494,
                                                         },
                                                     },
                                                     span: Span {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 414,
-                                                        end: 418,
+                                                        start: 490,
+                                                        end: 494,
                                                     },
                                                 },
                                             ),
@@ -708,8 +708,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 404,
-                                                end: 419,
+                                                start: 480,
+                                                end: 495,
                                             },
                                         },
                                     ),
@@ -721,8 +721,8 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 422,
-                                                    end: 423,
+                                                    start: 498,
+                                                    end: 499,
                                                 },
                                             },
                                         ),
@@ -731,8 +731,8 @@ Program {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 404,
-                                        end: 423,
+                                        start: 480,
+                                        end: 499,
                                     },
                                 },
                             ),
@@ -740,16 +740,16 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 402,
-                                end: 425,
+                                start: 478,
+                                end: 501,
                             },
                         },
                         span: Span {
                             source: SourceId(
                                 1,
                             ),
-                            start: 385,
-                            end: 391,
+                            start: 461,
+                            end: 467,
                         },
                     },
                 ),
@@ -759,8 +759,8 @@ Program {
                     source: SourceId(
                         1,
                     ),
-                    start: 285,
-                    end: 427,
+                    start: 361,
+                    end: 503,
                 },
             },
         ),
@@ -772,8 +772,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 433,
-                        end: 445,
+                        start: 509,
+                        end: 521,
                     },
                 },
                 ty: Some(
@@ -785,8 +785,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 459,
-                                end: 467,
+                                start: 535,
+                                end: 543,
                             },
                         },
                         focus: Named {
@@ -796,8 +796,8 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 469,
-                                end: 472,
+                                start: 545,
+                                end: 548,
                             },
                         },
                         grade: GradeExpr {
@@ -810,8 +810,8 @@ Program {
                                         source: SourceId(
                                             1,
                                         ),
-                                        start: 474,
-                                        end: 484,
+                                        start: 550,
+                                        end: 560,
                                     },
                                 },
                             ],
@@ -819,16 +819,16 @@ Program {
                                 source: SourceId(
                                     1,
                                 ),
-                                start: 474,
-                                end: 484,
+                                start: 550,
+                                end: 560,
                             },
                         },
                         span: Span {
                             source: SourceId(
                                 1,
                             ),
-                            start: 429,
-                            end: 432,
+                            start: 505,
+                            end: 508,
                         },
                     },
                 ),
@@ -841,8 +841,8 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 491,
-                                    end: 501,
+                                    start: 567,
+                                    end: 577,
                                 },
                             },
                         ),
@@ -855,8 +855,8 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 506,
-                                    end: 517,
+                                    start: 582,
+                                    end: 593,
                                 },
                             },
                         ),
@@ -865,16 +865,16 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 502,
-                        end: 505,
+                        start: 578,
+                        end: 581,
                     },
                 },
                 span: Span {
                     source: SourceId(
                         1,
                     ),
-                    start: 429,
-                    end: 505,
+                    start: 505,
+                    end: 581,
                 },
             },
         ),
@@ -886,8 +886,8 @@ Program {
                         source: SourceId(
                             1,
                         ),
-                        start: 523,
-                        end: 527,
+                        start: 599,
+                        end: 603,
                     },
                 },
                 params: [],
@@ -905,8 +905,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 536,
-                                                end: 544,
+                                                start: 612,
+                                                end: 620,
                                             },
                                         },
                                     ),
@@ -919,8 +919,8 @@ Program {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 551,
-                                                end: 563,
+                                                start: 627,
+                                                end: 639,
                                             },
                                         },
                                     ),
@@ -935,8 +935,8 @@ Program {
                                                         source: SourceId(
                                                             1,
                                                         ),
-                                                        start: 570,
-                                                        end: 571,
+                                                        start: 646,
+                                                        end: 647,
                                                     },
                                                 },
                                             ],
@@ -949,8 +949,8 @@ Program {
                                                                 source: SourceId(
                                                                     1,
                                                                 ),
-                                                                start: 573,
-                                                                end: 574,
+                                                                start: 649,
+                                                                end: 650,
                                                             },
                                                         },
                                                     ),
@@ -963,8 +963,8 @@ Program {
                                                             source: SourceId(
                                                                 1,
                                                             ),
-                                                            start: 577,
-                                                            end: 581,
+                                                            start: 653,
+                                                            end: 657,
                                                         },
                                                     ),
                                                 ),
@@ -972,24 +972,24 @@ Program {
                                                     source: SourceId(
                                                         1,
                                                     ),
-                                                    start: 573,
-                                                    end: 581,
+                                                    start: 649,
+                                                    end: 657,
                                                 },
                                             },
                                             span: Span {
                                                 source: SourceId(
                                                     1,
                                                 ),
-                                                start: 565,
-                                                end: 568,
+                                                start: 641,
+                                                end: 644,
                                             },
                                         },
                                         Span {
                                             source: SourceId(
                                                 1,
                                             ),
-                                            start: 565,
-                                            end: 568,
+                                            start: 641,
+                                            end: 644,
                                         },
                                     ),
                                 ],
@@ -997,8 +997,8 @@ Program {
                                     source: SourceId(
                                         1,
                                     ),
-                                    start: 536,
-                                    end: 544,
+                                    start: 612,
+                                    end: 620,
                                 },
                             },
                         ),
@@ -1006,8 +1006,8 @@ Program {
                             source: SourceId(
                                 1,
                             ),
-                            start: 536,
-                            end: 544,
+                            start: 612,
+                            end: 620,
                         },
                     },
                 ],
@@ -1015,8 +1015,8 @@ Program {
                     source: SourceId(
                         1,
                     ),
-                    start: 520,
-                    end: 522,
+                    start: 596,
+                    end: 598,
                 },
             },
         ),
@@ -1025,7 +1025,7 @@ Program {
         source: SourceId(
             1,
         ),
-        start: 86,
-        end: 522,
+        start: 162,
+        end: 598,
     },
 }

@@ -1497,7 +1497,7 @@ pub fn ownership_grade_alias(g: &syn::GradeExpr) -> Option<String> {
 
 /// is_simd_eligible per PLAN §9 Track 2 + book ch13.3.1 SimdEligible checklist (5 points).
 /// Reused in summaries; called from typeck/codegen paths (pure-Rust, reuses region_map + summary fields + alias grade).
-/// Smallest Phase2 impl; direct unit tests added (see mod tests). (Some .unwrap_or/contains defensive per pre-existing style.)
+/// Smallest Phase2 impl; exercised via cgir/codegen/examples (mod tests cover lowering). (Some .unwrap_or/contains defensive per pre-existing style.)
 pub fn is_simd_eligible(summary: &OpticSummary, region_map: &RegionMap) -> bool {
     // 1. No cross-element dependencies (i does not read/write j): v0 regions per-col; distinct roots indicate cross risk. (v0 terse style: split/unwrap_or + contains)
     let read_roots: std::collections::HashSet<_> = summary

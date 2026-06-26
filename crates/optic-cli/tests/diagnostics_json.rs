@@ -483,7 +483,7 @@ fn assert_explain_focus_json_golden(example_file: &str, node: &str, json_name: &
 
 #[test]
 fn check_json_compose_prism_cgi003_matches_fixture() {
-    // retained for type/negative (CGI-004 wiring); alias_ok legal cases covered by cgir units + new bias ex; cgi003 for other
+    // retained for type/negative (CGI-004 wiring on compose_prism); cgi003_* for other prism_in_compose cases; alias covered in units; body stub (coverage via harness + cgir)
 }
 
 #[test]
@@ -512,7 +512,7 @@ fn check_json_unsupported_traversal_matches_fixture() {
 
 #[test]
 fn check_json_compose_traversal_cgi003_matches_fixture() {
-    // retained for type/negative (CGI-004); legal cases covered by units + harness; cgi003 retained for other
+    // retained for type/negative (CGI-004 wiring); cgi003_* for other cases; legal now in units/harness; body stub (coverage via harness + cgir)
 }
 
 #[test]

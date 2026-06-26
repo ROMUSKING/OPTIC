@@ -1029,7 +1029,7 @@ fn parse_entities_line_boundary() {
     );
 }
 
-// M7 Track 6 conformance (4 tests): exercising bias (Likely in compose_prism_bias; Unlikely in simd/mixed; Unknown default covered elsewhere e.g. run_all_healths), SIMD (chunked/remainder/scalar in simd + mixed), mixed, negative on legacy compose (alias); reused run_*/parse_entities/contains for hints/shapes + "RUN VERIFIED"; goldens separate (via golden_rust_* + assert_rust_golden in optic-codegen-rust; these 4 use manual transpile+temp+contains, not golden asserts). run_compose... (bias), run_simd... (chunked), run_mixed... (mixed), negative... (alias); no new public.
+// M7 Track 6 conformance (4 tests): exercising bias (Likely in compose_prism_bias.opt + Likely prism decl in mixed; Unlikely in simd_traversal_update.opt + mixed; Unknown via absence (!contains("branch-bias hint") in legacy run_all_healths_traversal_mutates retained)), SIMD (chunked/remainder/scalar in simd + mixed), mixed full, negative type wiring (CGI-004) on compose_prism.opt (alias/Prism compose cases covered in cgir units + bias examples; legacy harness retained); reused run_*/parse_entities/contains for hints/shapes + "RUN VERIFIED"; goldens separate (via golden_rust_* + assert_rust_golden in optic-codegen-rust; these 4 use manual transpile+temp+contains, not golden asserts). Exact fns: run_compose_prism_bias_exercises_bias_and_compose (bias), run_simd_traversal_update_exercises_chunked_and_bias (chunked), run_mixed_bias_simd_exercises_full_features (mixed), negative_illegal_alias_writes_compose_coverage (CGI-004; legacy name retained for filter compat, exercises compose type wiring); N/0/empty via parse_entities_line_boundary + boundary units (not these 4 M7 fns which use N>0); bias variants / full is_simd_eligible 5pt covered indirectly via positive examples + prior cgir/hir units. parse via lines.find().unwrap_or_else(|| panic(...)) / expect on fs reads (transpiled .rs); legacy retained.
 #[test]
 fn run_compose_prism_bias_exercises_bias_and_compose() {
     // test name retains "compose" per historical/Phase4 reuse precedent (exercises single prism bias decl+Likely here; no >>> in .opt; compose neg covered by negative test+units)
@@ -1142,15 +1142,11 @@ fn run_mixed_bias_simd_exercises_full_features() {
 
 #[test]
 fn negative_illegal_alias_writes_compose_coverage() {
-    // negative for illegal alias/writes in compose (reuses compose_prism + harness; alias/neg coverage; cgir units cover more)
+    // fn name historical; exercises negative type wiring (CGI-004) on compose_prism.opt (reuses for harness; alias/Prism cases covered in cgir units + bias ex; legacy retained). Captures stderr explicitly (diags to stderr for `check`); asserts exact strings.
     let assert = opticc()
         .args(["check", &example("compose_prism.opt").to_string_lossy()])
         .assert()
         .failure();
-    let out = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        out.contains("CGI-004")
-            || out.contains("compose")
-            || !assert.get_output().stderr.is_empty()
-    );
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("CGI-004") && stderr.contains("compose type wiring"));
 }
